@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#142c3f" />
+    <title>CPS Academy Hub</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">CPS</div>
+          <div><strong>Academy</strong><span>Operating Hub</span></div>
+        </div>
+        <nav id="desktop-nav" class="nav-list"></nav>
+        <button class="sync-card" data-route="integration">
+          <span class="sync-icon" aria-hidden="true">↻</span>
+          <span><strong>Sample workspace</strong><small>Sheets not connected</small></span>
+          <span aria-hidden="true">›</span>
+        </button>
+        <div class="profile">
+          <div class="avatar avatar-z">ZG</div>
+          <div><strong>Zakariyya</strong><span>VMR Leadership</span></div>
+          <button class="icon-button" aria-label="Account options">•••</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="mobile-brand"><span class="brand-mark">CPS</span><strong>Academy Hub</strong></div>
+          <div class="search-wrap">
+            <span aria-hidden="true">⌕</span>
+            <input id="global-search" type="search" placeholder="Search this view…" autocomplete="off" />
+            <kbd>⌘ K</kbd>
+          </div>
+          <div class="top-actions">
+            <button class="icon-button notification-button" aria-label="Notifications">◌<span></span></button>
+            <button class="button primary" id="new-item-button"><span aria-hidden="true">＋</span> New item</button>
+          </div>
+        </header>
+
+        <div id="page" class="page" tabindex="-1"></div>
+      </main>
+
+      <nav id="mobile-nav" class="mobile-nav" aria-label="Mobile navigation"></nav>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <dialog id="detail-dialog" class="dialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-head">
+          <div><p class="eyebrow" id="dialog-eyebrow"></p><h2 id="dialog-title"></h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <div id="dialog-content"></div>
+        <div class="dialog-actions">
+          <button class="button secondary" value="cancel">Close</button>
+          <button class="button primary" value="default" id="dialog-primary">Mark ready</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="new-dialog" class="dialog">
+      <form method="dialog" class="dialog-card" id="new-item-form">
+        <div class="dialog-head">
+          <div><p class="eyebrow">Prototype draft</p><h2>Add an item</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <label>Area<select id="new-area"><option>Morning Report / VMR</option><option>Podcast</option><option>Conference</option><option>Research</option><option>Schema review</option><option>Important link</option></select></label>
+        <label>Title<input id="new-title" required placeholder="What needs to happen?" /></label>
+        <label>Owner<input id="new-owner" placeholder="Name or team" /></label>
+        <p class="form-note">Saved only in this browser. No Academy system will be changed.</p>
+        <div class="dialog-actions">
+          <button class="button secondary" value="cancel">Cancel</button>
+          <button class="button primary" id="save-draft" value="default">Save draft</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
