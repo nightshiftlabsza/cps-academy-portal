@@ -21,3 +21,10 @@ Chromium at 1440px and 390px: dashboard, edit persistence across reload, restore
 
 ## Next shared-use milestone
 Shared persistent storage, authorization per role, concurrent edit handling and audit history; only then an approved read-only Sheets integration. Original workbook is unchanged.
+
+## Latest refinements
+- Quick staffing helper appends assignments without overwriting existing names and checks duplicate entries.
+- Archive ordering recognises ISO and full English month/day/year dates, validates calendar dates and retains source text.
+- Date ranges exclude unresolved dates explicitly; research skills have a dedicated filter.
+- Saving from global search preserves the search view; Clear filters resets date/skill selections.
+- Additional Chromium checks at desktop/mobile widths cover each new interaction and invalid/ambiguous date handling.
