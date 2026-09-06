@@ -271,3 +271,4 @@ kbd { position: absolute; right: 10px; padding: 3px 7px; border: 1px solid #d7de
 }
 
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+.record-field{margin:14px 0}.record-field textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font:inherit;resize:vertical}.source-ref{display:block;margin-top:5px}.pagination{margin-top:16px}.record-links{overflow-wrap:anywhere}.data-table td{overflow-wrap:anywhere;max-width:270px}.dialog{max-height:90vh;overflow:auto}.sidebar{overflow-y:auto}.source-banner{flex-wrap:wrap}.segmented{flex-wrap:wrap}.source-banner .button{margin-left:auto}@media(max-width:760px){.segmented{width:100%;flex-wrap:wrap!important}.segmented button{white-space:normal!important;flex:auto!important}.data-table td{max-width:none}.mobile-nav .nav-button{font-size:11px;align-content:center;min-height:44px}.dialog-card{padding:16px}.source-banner .button{margin-left:0}}
