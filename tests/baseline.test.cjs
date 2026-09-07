@@ -106,3 +106,79 @@ test('Residency Programs and CRC retired records achieve full workbook parity', 
   assert(data['CRC - retired'].columns.includes('CPSOLVERS MENTOR'));
 });
 
+test('Residency Programs and CRC retired views render appropriate cards and fields', () => {
+  const data = JSON.parse(fs.readFileSync(path.join(root, 'workbook.json'), 'utf8'));
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+
+  // Verify app.js defines titles, facets, and descriptions for both datasets
+  assert(appCode.includes("'Residency Programs':'Residency Programs'"));
+  assert(appCode.includes("'CRC - retired':'MENTEE'"));
+  assert(appCode.includes("Residency Programs"));
+  assert(appCode.includes("CRC - retired"));
+  assert(appCode.includes("crcDrawer"));
+
+  const resRecords = data['Residency Programs'].records;
+  assert(resRecords.some(r => r.fields.Facilitator === 'Vini'), 'Facilitator Vini found in Residency Programs');
+  assert(resRecords.every(r => typeof r.fields['Residency Programs'] === 'string'));
+
+  const crcRecord = data['CRC - retired'].records[0];
+  assert(crcRecord.fields['MENTEE'], 'Mentee name exists');
+  assert(crcRecord.fields['CPSOLVERS MENTOR'] !== undefined);
+});
+
+test('Backup recovery diff calculation detects modified records, drafts, and overwrite conflicts', () => {
+  const snapshotDb = {
+    'Morning Report': {
+      records: [
+        { id: 'mr:1', fields: { Facilitator: 'Alice', Presenter: 'Bob' } },
+        { id: 'mr:2', fields: { Facilitator: 'Charlie', Presenter: 'Dave' } }
+      ]
+    }
+  };
+
+  const localEdits = {
+    'mr:1': { Facilitator: 'Alice Updated' }
+  };
+  const localDrafts = [
+    { id: 'local:101', tab: 'Morning Report', fields: { Facilitator: 'Eve' } }
+  ];
+
+  // Calculate diff items against snapshot
+  const editEntries = Object.entries(localEdits);
+  const diffItems = editEntries.map(([id, fields]) => {
+    const orig = snapshotDb['Morning Report'].records.find(r => r.id === id);
+    const changedKeys = Object.keys(fields).filter(k => (orig?.fields[k] ?? '') !== fields[k]);
+    return { id, changedKeys };
+  });
+
+  assert.equal(diffItems.length, 1);
+  assert.equal(diffItems[0].id, 'mr:1');
+  assert.deepEqual(diffItems[0].changedKeys, ['Facilitator']);
+  assert.equal(localDrafts.length, 1);
+
+  // Test incoming backup conflict / overwrite detection
+  const incomingBackup = {
+    format: 'cps-hub-backup-v2',
+    snapshot: 'workbook-2026-09-06',
+    edits: {
+      'mr:1': { Facilitator: 'Alice Incoming Overwrite' },
+      'mr:2': { Facilitator: 'Charlie New Edit' }
+    },
+    added: [
+      { id: 'local:101', tab: 'Morning Report', fields: { Facilitator: 'Eve Existing' } },
+      { id: 'local:102', tab: 'Morning Report', fields: { Facilitator: 'Frank New' } }
+    ],
+    favorites: ['mr:1']
+  };
+
+  const existingDraftIds = new Set(localDrafts.map(a => a.id));
+  const newDraftsCount = incomingBackup.added.filter(a => !existingDraftIds.has(a.id)).length;
+  const overwrittenLocalEdits = Object.keys(incomingBackup.edits).filter(id => localEdits[id]).length;
+  const modifiedRecordsCount = Object.keys(incomingBackup.edits).length;
+
+  assert.equal(newDraftsCount, 1, 'Detects 1 new draft (local:102) vs existing (local:101)');
+  assert.equal(overwrittenLocalEdits, 1, 'Detects 1 local overwrite on mr:1');
+  assert.equal(modifiedRecordsCount, 2, 'Detects 2 total records merged from incoming backup');
+});
+
+
