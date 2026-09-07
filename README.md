@@ -19,7 +19,7 @@ Open http://127.0.0.1:4173 in your browser. Stop with Ctrl+C. No application dep
 npm run build
 ```
 
-Copies the four site assets into `dist/`. It does not deploy anything. The development server binds only to this computer and intentionally does not expose Git files, secrets or original uploads.
+Copies the five site assets into `dist/`. It does not deploy anything. The development server binds only to this computer and intentionally does not expose Git files, secrets, original uploads or the historical contributions ledger.
 
 ## Optional real browser checks
 
@@ -34,6 +34,7 @@ The normal tests require only Node.js. Browser tests need Chromium. `CHROMIUM_PA
 ## Stack and structure
 - `index.html`: page shell and dialogs.
 - `app.js`: views, navigation, filtering, editing, backups and date handling.
+- `session-core.js`: shared, zero-dependency session splitting, timezone resolution, calendar generation and compound filtering.
 - `styles.css`: shared desktop/mobile design.
 - `workbook.json`: real private workbook snapshot, including private links; intentionally versioned in this private repository.
 - `scripts/`: local server, static build and targeted import refinement.
@@ -73,4 +74,18 @@ Do not add colleagues until you deliberately choose who may access the private r
 https://cps-academy-ops-hub.m-zakariyya-g.chatgpt.site
 
 ## Migration status
-Prepared and validated in the remote build workspace. Actual extraction, execution on Windows, Local project selection and private GitHub creation still require access to the user's PC/account. No Windows path has been selected or verified by this chat.
+The Windows Local checkout is canonical. The existing private GitHub remote is `nightshiftlabsza/cps-academy-portal`. The earlier repository creation instructions are migration reference, not steps to repeat.
+
+## Operational features and historical ledger
+
+See [Operational implementation and handoff](docs/operational-completion.md) for session identity, timezone policy, calendar behavior, recovery compatibility and remaining production requirements.
+
+The Morning Report snapshot is preserved byte-for-byte. Sessions separated inside a source row are projected into independent records, retaining their parent row and source text. Ambiguous source times remain visible but cannot be exported as a misleading calendar event. Calendar exports use a clearly labelled 60-minute duration when the source specifies no end time.
+
+Compile the private historical assignment ledger locally:
+
+```powershell
+node scripts/compile-logbooks.cjs --as-of 2026-09-07
+```
+
+Read `node scripts/compile-logbooks.cjs --help` and [the compiler guide](docs/logbook-compilation.md) before replacing a compiled ledger. The ledger records workbook assignments, not verified attendance. Identity collisions and uncertain aliases require review. It is intentionally excluded from both the static build and local HTTP allowlist.

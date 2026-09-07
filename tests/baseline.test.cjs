@@ -8,7 +8,7 @@ test('source parses and workbook references remain unique',()=>{
 });
 test('local server serves assets but hides repository and original workbook',async()=>{
  const {createServer}=require('../scripts/serve.cjs');const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));
- try{const base=`http://127.0.0.1:${server.address().port}`;for(const url of ['/','/app.js','/styles.css','/workbook.json'])assert.equal((await fetch(base+url)).status,200);for(const url of ['/.git/config','/.env','/README.md','/upload/file.xlsx','/%2e%2e/package.json'])assert.equal((await fetch(base+url)).status,404)}finally{await new Promise(r=>server.close(r))}
+ try{const base=`http://127.0.0.1:${server.address().port}`;for(const url of ['/','/app.js','/session-core.js','/styles.css','/workbook.json'])assert.equal((await fetch(base+url)).status,200);for(const url of ['/.git/config','/.env','/README.md','/upload/file.xlsx','/%2e%2e/package.json','/historical-contributions.json','/data/logbook-identities.json'])assert.equal((await fetch(base+url)).status,404)}finally{await new Promise(r=>server.close(r))}
 });
 test('Leader of the Week source dates establish current leader or null when out of range',()=>{
  const data=JSON.parse(fs.readFileSync(path.join(root,'workbook.json'),'utf8'));
@@ -413,6 +413,7 @@ test('matrixView renders 2D tabular rows with date badges and assigned/gap role 
     esc: v => String(v ?? ''),
     today: () => '2026-09-07',
     iso: v => /^\d{4}-\d{2}-\d{2}$/.test(v),
+    SessionCore: require('../session-core.js'),
     workspace: { favorites: ['mr:1'], edits: {}, added: [] },
     db: {
       'Morning Report': {
@@ -421,7 +422,7 @@ test('matrixView renders 2D tabular rows with date badges and assigned/gap role 
     }
   };
 
-  const helperCode = `
+  const helperCode = `${appCode.slice(appCode.indexOf('function calendarButton'), appCode.indexOf('function downloadCalendar'))}
     ${appCode.slice(appCode.indexOf('function dateValue'), appCode.indexOf('const iso='))}
     ${appCode.slice(appCode.indexOf('function recordDate'), appCode.indexOf('function extraFilters'))}
     ${appCode.slice(appCode.indexOf('function mrGaps'), appCode.indexOf('function workflowCard'))}
@@ -482,4 +483,3 @@ test('styles.css contains high-contrast gap tokens and matrix layout definitions
   assert(css.includes('.matrix-slot-gap'), '.matrix-slot-gap defined');
   assert(css.includes('max-width: 2560px'), 'Ultrawide container expansion up to 2560px');
 });
-

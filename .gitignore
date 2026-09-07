@@ -29,6 +29,7 @@ screenshots/
 __pycache__/
 .vscode/
 .idea/
+.worktrees/
 .DS_Store
 Thumbs.db
 # workbook.json is intentional private application data, not a public sample.

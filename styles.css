@@ -683,3 +683,23 @@ a.button{text-decoration:none}a.button.secondary{color:var(--teal)}.staffing-too
 @media (max-width: 480px) {
   .issue-stat-grid { grid-template-columns: 1fr; }
 }
+
+/* Session operations keep source caveats readable on narrow screens. */
+.calendar-control { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; }
+.calendar-control small, .calendar-status { font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; max-width: 260px; }
+.calendar-status { display: block; }
+.session-time, .session-review { white-space: normal; overflow-wrap: anywhere; }
+.session-review { font-size: 12px; margin: 8px 0; max-width: 420px; }
+.session-review summary { cursor: pointer; color: var(--accent, #247a66); }
+.session-review p { margin: 6px 0; white-space: pre-wrap; }
+.compound-checkbox { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.compound-checkbox input { width: 18px; height: 18px; }
+.matrix-actions { flex-wrap: wrap; min-width: 150px; }
+.matrix-time-sub { white-space: normal; min-width: 130px; max-width: 230px; line-height: 1.5; }
+.op-card-foot { flex-wrap: wrap; }
+@media (max-width: 600px) {
+ .filter-bar > label { min-width: 0; max-width: 100%; }
+ .filter-bar .select { max-width: 100%; min-width: 0; }
+ .calendar-status, .session-review { max-width: 100%; }
+ .agenda-card-actions { flex-wrap: wrap; }
+}
