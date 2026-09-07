@@ -14,7 +14,9 @@ const tabAliases={
   'Important links':'important links resources bookmarks recurring',
   'Leader of the Week':'leader of the week member',
   'Special VMRs':'special vmrs vmr details',
-  'Student Forum':'student forum topic expert vmr'
+  'Student Forum':'student forum topic expert vmr',
+  'Residency Programs':'residency programs partner hospital discussants junior member facilitator allegheny',
+  'CRC - retired':'crc retired mentorship archive legacy mentee mentor case presentation'
 };
 
 function buildSearchIndex(r,t){return `${t} ${r.source||''} ${tabAliases[t]||''} ${Object.values(r.fields).join(' ')}`.toLowerCase()}

@@ -92,3 +92,17 @@ test('Podcast Episodes stage derivation accurately classifies editor readiness a
   assert(stages.includes('Released'));
   assert(stages.includes('Recording in progress'), 'Custom podcast status must be visible');
 });
+
+test('Residency Programs and CRC retired records achieve full workbook parity', () => {
+  const data = JSON.parse(fs.readFileSync(path.join(root, 'workbook.json'), 'utf8'));
+  assert(data['Residency Programs'], 'Residency Programs dataset must exist');
+  assert.equal(data['Residency Programs'].records.length, 6, 'Residency Programs must contain 6 records');
+  assert(data['Residency Programs'].columns.includes('Residency Programs'));
+  assert(data['Residency Programs'].columns.includes('Facilitator'));
+
+  assert(data['CRC - retired'], 'CRC - retired dataset must exist');
+  assert.equal(data['CRC - retired'].records.length, 417, 'CRC - retired must contain 417 records');
+  assert(data['CRC - retired'].columns.includes('MENTEE'));
+  assert(data['CRC - retired'].columns.includes('CPSOLVERS MENTOR'));
+});
+
