@@ -79,7 +79,15 @@ function filtered(){let rr=records().filter(r=>Object.values(r.fields).join(' ')
 function listing(){let rr=filtered();page=Math.min(page,Math.max(0,Math.ceil(rr.length/12)-1));const current=rr.slice(page*12,page*12+12),field=facets[tab],options=field?[...new Set(records().map(r=>r.fields[field]).filter(Boolean))].sort():[];const filters=['All',...(tab==='Morning Report'?['Upcoming','Missing facilitator']:[]),...(db[tab].columns.includes('Recording')?['Has recording']:[]),'Pinned','Needs review','Local edits'];const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Agenda</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:['Podcast Episodes','Schema review'].includes(tab)?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;$('#page').innerHTML=header(tab,descriptions[tab]||'Programme records, assignments and source details.')+banner()+`<div class="toolbar area-tabs">${groups[Object.keys(groups).find(g=>groups[g].includes(tab))].map(t=>`<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(t)}</button>`).join('')}</div><div class="filter-bar"><label>Show<select class="select" id="filter">${filters.map(f=>`<option ${f===filter?'selected':''}>${f}</option>`).join('')}</select></label>${field?`<label>${esc(field)}<select class="select" id="facet"><option value="">All</option>${options.map(v=>`<option value="${esc(v)}" ${v===facet?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`:''}<label>Order<select class="select" id="sort"><option value="source">Workbook order</option><option value="az" ${sort==='az'?'selected':''}>Title A–Z</option><option value="date" ${sort==='date'?'selected':''}>Newest recognised dates</option></select></label>${extraFilters()}<button class="button secondary" id="clear">Clear filters</button>${viewSwitcher}</div><p class="muted results-count">${rr.length} matches · ${records().length} records${sort==='date'?' · Unresolved dates follow recognised dates':''}${dateFrom||dateTo?' · Records with unresolved dates are excluded from this range':''}</p>${rr.length?(mode==='agenda'&&tab==='Morning Report'?agendaView(rr):(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)?workflowBoard(rr,tab):(mode==='cards'?`<section class="hub-grid">${current.map(r=>card(r)).join('')}</section>`:table(current)))): '<section class="empty-state panel"><h2>No matching records</h2><p>Clear the filters or try a broader search.</p></section>'}${(mode==='agenda'&&tab==='Morning Report')||(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab))?'':`<div class="toolbar pagination"><button class="button secondary" id="prev" ${page===0?'disabled':''}>Previous</button><span>Page ${page+1} of ${Math.max(1,Math.ceil(rr.length/12))}</span><button class="button secondary" id="next" ${(page+1)*12>=rr.length?'disabled':''}>Next</button></div>`}${tab==='CRC'&&db['CRC - retired']?crcDrawer():''}`;bindExtraFilters();$('#filter').onchange=e=>{filter=e.target.value;page=0;render()};if($('#facet'))$('#facet').onchange=e=>{facet=e.target.value;page=0;render()};$('#sort').onchange=e=>{sort=e.target.value;render()};$('#clear').onclick=()=>{query='';filter='All';facet='';owner='';skill='';dateFrom='';dateTo='';sort='source';page=0;$('#global-search').value='';render()};if($('#view'))$('#view').onclick=()=>{mode=mode==='cards'?'table':'cards';render()};document.querySelectorAll('[data-set-view]').forEach(b=>b.onclick=()=>{mode=b.dataset.setView;render()});if($('#prev'))$('#prev').onclick=()=>{page--;render();window.scrollTo(0,0)};if($('#next'))$('#next').onclick=()=>{page++;render();window.scrollTo(0,0)};if(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab))bindBoardEvents(tab);}
 function crcDrawer(){const retired=records('CRC - retired');return `<details class="panel legacy-drawer" style="margin-top:24px"><summary style="cursor:pointer;padding:16px 20px;font-weight:700;display:flex;align-items:center;justify-content:space-between;user-select:none"><span>📁 Archived / Legacy Mentorship (${retired.length} records)</span><span class="muted" style="font-size:12px;font-weight:normal">Expand archive records ↓</span></summary><div style="padding:16px 20px;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><p class="muted" style="margin:0">Historical mentorship rounds preserved from original workbook. Active cases remain front-and-center above.</p><button class="button secondary small" data-go="CRC - retired">Full Archive View →</button></div><div class="hub-grid">${retired.slice(0,9).map(r=>card(r,'CRC - retired')).join('')}</div><div style="margin-top:16px;text-align:center"><button class="button secondary small" data-go="CRC - retired">Browse all ${retired.length} archived records →</button></div></div></details>`}
 function table(rr){const cols=[titles[tab],...db[tab].columns.filter(c=>c!==titles[tab])].slice(0,4);return `<section class="panel table-panel"><table class="data-table"><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}<th>Action</th></tr></thead><tbody>${rr.map(r=>`<tr>${cols.map(c=>`<td data-label="${esc(c)}">${esc(r.fields[c]||'—')}</td>`).join('')}<td>${actionButtons(r,tab)}</td></tr>`).join('')}</tbody></table></section>`}
-function workspaceView(){$('#page').innerHTML=header('Workspace','Keep a portable backup and review your local activity.')+banner()+`<section class="integration-grid"><article class="panel integration-card"><h2>Your changes, safely portable</h2><p>Changes are stored in this browser. Export a backup before switching devices or clearing browser data. Import merges a backup, with incoming values taking priority for the same record.</p><div class="toolbar"><button class="button primary" id="export">Download backup</button><label class="button secondary">Import backup<input type="file" id="import" accept="application/json" hidden></label></div><p class="muted">${Object.keys(workspace.edits).length} edited records · ${workspace.added.length} new records · ${workspace.favorites.length} pins</p></article><article class="panel integration-card"><h2>Connection status</h2><p>This is a copy of the uploaded workbook. No live Google Sheets connection or shared saving is enabled.</p><p>Next integration phase: stable record IDs, shared storage, then permissioned read-only Sheets sync. Source row references are retained for review.</p></article></section><div class="dashboard-heading"><h2>Recent local activity</h2></div><section class="panel activity-list">${workspace.history.slice(0,30).map(h=>`<div><strong>${esc(h.action)} · ${esc(h.title)}</strong><small>${esc(h.tab)} · ${esc(new Date(h.at).toLocaleString())}</small></div>`).join('')||'<div class="empty-state">Your saved changes will appear here.</div>'}</section>`;$('#export').onclick=exportBackup;$('#import').onchange=importBackup;}
+function workspaceView(){
+  const hasRollback = !!sessionStorage.getItem('cps-rollback-snapshot');
+  $('#page').innerHTML=header('Workspace','Keep a portable backup and review your local activity.')+banner()+`<section class="integration-grid"><article class="panel integration-card"><h2>Your changes, safely portable</h2><p>Changes are stored in this browser. Export a backup before switching devices or clearing browser data. Import merges a backup, with incoming values taking priority for the same record.</p><div class="toolbar"><button class="button primary" id="export">Download backup</button><label class="button secondary">Import backup<input type="file" id="import" accept="application/json" hidden></label><button class="button secondary" id="export-patch-top">Export Spreadsheet Patch JSON</button>${hasRollback?'<button class="button secondary" id="undo-rollback-btn">↺ Undo Last Import (Rollback)</button>':''}</div><p class="muted">${Object.keys(workspace.edits).length} edited records · ${workspace.added.length} new records · ${workspace.favorites.length} pins</p></article><article class="panel integration-card"><h2>Connection status</h2><p>This is a copy of the uploaded workbook. No live Google Sheets connection or shared saving is enabled.</p><p>Next integration phase: stable record IDs, shared storage, then permissioned read-only Sheets sync. Source row references are retained for review.</p></article></section>${workbookDiffHtml()}<div class="dashboard-heading"><h2>Recent local activity</h2></div><section class="panel activity-list">${workspace.history.slice(0,30).map(h=>`<div><strong>${esc(h.action)} · ${esc(h.title)}</strong><small>${esc(h.tab)} · ${esc(new Date(h.at).toLocaleString())}</small></div>`).join('')||'<div class="empty-state">Your saved changes will appear here.</div>'}</section>`;
+  $('#export').onclick=exportBackup;
+  $('#import').onchange=importBackup;
+  if($('#export-patch-top'))$('#export-patch-top').onclick=exportPatchJson;
+  if($('#export-patch-btn'))$('#export-patch-btn').onclick=exportPatchJson;
+  if($('#undo-rollback-btn'))$('#undo-rollback-btn').onclick=rollbackImport;
+}
 function render(){nav();if(query.trim())globalResults();else if(tab==='Home')home();else if(tab==='Workspace')workspaceView();else listing();document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>navigate(b.dataset.go));document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openRecord(b.dataset.open,b.dataset.area,b.dataset.role));document.querySelectorAll('[data-star]').forEach(b=>b.onclick=()=>{if(mutate(w=>{const id=b.dataset.star;w.favorites=w.favorites.includes(id)?w.favorites.filter(x=>x!==id):[...w.favorites,id]}))render()});$('#global-search').placeholder='Search all Academy records…';}
 function openRecord(id,t,role){editingTab=t;selected=records(t).find(r=>r.id===id);mutate(w=>{w.recent=[{id,tab:t,at:new Date().toISOString()},...(w.recent||[]).filter(x=>x.id!==id)].slice(0,10);});editDialog(false,role)}
 function createRecord(){editingTab=db[tab]?tab:'Morning Report';selected={id:'local:'+crypto.randomUUID(),tab:editingTab,source:'Local draft',row:null,fields:Object.fromEntries(db[editingTab].columns.map(k=>[k,''])),links:{},flags:[]};editDialog(true)}
@@ -124,7 +132,192 @@ $('#dialog-primary').onclick=e=>{e.preventDefault();const form=$('#detail-dialog
 $('#detail-dialog').addEventListener('cancel',e=>{if(!confirmDiscard(e))e.preventDefault()});
 $('#detail-dialog').querySelectorAll('[value="cancel"]').forEach(b=>{b.onclick=e=>{if(!confirmDiscard(e)){e.preventDefault();e.stopPropagation()}}});
 function exportBackup(){mutate(w=>{w.lastBackup=new Date().toISOString()});const blob=new Blob([JSON.stringify({format:'cps-hub-backup-v2',snapshot:'workbook-2026-09-06',exported:new Date().toISOString(),...workspace},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cps-hub-backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Backup downloaded')}
-async function importBackup(e){try{const file=e.target.files[0];if(!file)return;if(file.size>10000000)throw Error('Backup exceeds 10 MB');const b=JSON.parse(await file.text());if(b.format!=='cps-hub-backup-v2'||b.snapshot!=='workbook-2026-09-06'||!Array.isArray(b.added)||!Array.isArray(b.favorites)||!b.edits||typeof b.edits!=='object')throw Error('Unsupported backup format');const known=new Map(Object.entries(db).flatMap(([t,v])=>v.records.map(r=>[r.id,t])));workspace.added.forEach(r=>known.set(r.id,r.tab));const added=b.added.map(r=>{if(!r.id?.startsWith('local:')||!db[r.tab]||!r.fields)throw Error('Invalid draft');known.set(r.id,r.tab);return {...r,source:'Local draft',row:null,flags:[],links:{}}});for(const r of added)validateFields(r.fields,r.tab);for(const [id,fields] of Object.entries(b.edits)){if(!known.has(id))throw Error('Record is not in this snapshot');validateFields(fields,known.get(id))}if(!b.favorites.every(id=>typeof id==='string'&&known.has(id)))throw Error('Invalid pin');if(mutate(w=>{w.edits={...w.edits,...b.edits};const map=new Map(w.added.map(r=>[r.id,r]));added.forEach(r=>map.set(r.id,r));w.added=[...map.values()];w.favorites=[...new Set([...w.favorites,...b.favorites])];w.history.unshift({action:'Imported backup',title:file.name,tab:'Workspace',at:new Date().toISOString()});w.history=w.history.slice(0,100)})){render();toast('Backup imported')}}catch(error){toast('Import failed: '+error.message)}}
+function workbookDiffHtml(){
+  const editEntries = Object.entries(workspace.edits);
+  const addedList = workspace.added;
+  const totalDiffs = editEntries.length + addedList.length;
+
+  if (totalDiffs === 0) {
+    return `<section class="panel diff-summary-panel">
+      <div class="panel-head">
+        <div>
+          <h2>Workbook Diff Summary</h2>
+          <p>Local modifications compared against master workbook snapshot</p>
+        </div>
+        <span class="tag ready-chip">✓ Clean (0 modifications)</span>
+      </div>
+      <div class="empty-state" style="padding:24px 16px;">
+        <p>No local modifications. Current workspace matches master workbook snapshot 100%.</p>
+      </div>
+    </section>`;
+  }
+
+  const diffItems = editEntries.map(([id, fields]) => {
+    let orig = null;
+    let tabName = '';
+    for (const [t, grp] of Object.entries(db)) {
+      const found = grp.records.find(r => r.id === id);
+      if (found) { orig = found; tabName = t; break; }
+    }
+    const changedKeys = Object.keys(fields).filter(k => (orig?.fields[k] ?? '') !== fields[k]);
+    const recTitle = orig ? title(orig, tabName) : id;
+    return `<div class="diff-entry">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+        <strong>${esc(recTitle)}</strong>
+        <span class="tag">${esc(tabName)} · ${esc(id)}</span>
+      </div>
+      <div class="diff-keys">
+        ${changedKeys.map(k => `<span class="diff-key">${esc(k)}</span>`).join('') || '<span class="muted">No changed keys</span>'}
+      </div>
+    </div>`;
+  }).join('');
+
+  const addedItems = addedList.map(r => `
+    <div class="diff-entry">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+        <strong>${esc(title(r, r.tab))} (New Draft)</strong>
+        <span class="tag ready-chip">${esc(r.tab)}</span>
+      </div>
+    </div>
+  `).join('');
+
+  return `<section class="panel diff-summary-panel">
+    <div class="panel-head">
+      <div>
+        <h2>Workbook Diff Summary</h2>
+        <p>Active local modifications compared against master workbook snapshot</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="button secondary small" id="export-patch-btn">Export Spreadsheet Patch JSON</button>
+        <span class="tag gap-chip">${totalDiffs} modification${totalDiffs===1?'':'s'}</span>
+      </div>
+    </div>
+    <div class="diff-stat-grid">
+      <div class="diff-stat-box"><span>Modified Records</span><strong>${editEntries.length}</strong></div>
+      <div class="diff-stat-box"><span>New Records (Drafts)</span><strong>${addedList.length}</strong></div>
+      <div class="diff-stat-box"><span>Total Modifications</span><strong>${totalDiffs}</strong></div>
+    </div>
+    <div class="diff-list" style="margin-top:12px;">
+      ${diffItems}
+      ${addedItems}
+    </div>
+  </section>`;
+}
+
+let pendingImportData = null;
+async function importBackup(e){
+  try{
+    const file = e.target.files[0];
+    if(!file) return;
+    if(file.size > 10000000) throw Error('Backup exceeds 10 MB');
+    const b = JSON.parse(await file.text());
+    if(b.format !== 'cps-hub-backup-v2' || b.snapshot !== 'workbook-2026-09-06' || !Array.isArray(b.added) || !Array.isArray(b.favorites) || !b.edits || typeof b.edits !== 'object') throw Error('Unsupported backup format');
+    const known = new Map(Object.entries(db).flatMap(([t, v]) => v.records.map(r => [r.id, t])));
+    workspace.added.forEach(r => known.set(r.id, r.tab));
+    const added = b.added.map(r => {
+      if(!r.id?.startsWith('local:') || !db[r.tab] || !r.fields) throw Error('Invalid draft');
+      known.set(r.id, r.tab);
+      return {...r, source:'Local draft', row:null, flags:[], links:{}};
+    });
+    for(const r of added) validateFields(r.fields, r.tab);
+    for(const [id, fields] of Object.entries(b.edits)){
+      if(!known.has(id)) throw Error('Record is not in this snapshot');
+      validateFields(fields, known.get(id));
+    }
+    if(!b.favorites.every(id => typeof id === 'string' && known.has(id))) throw Error('Invalid pin');
+
+    const existingDraftIds = new Set(workspace.added.map(a => a.id));
+    const newDraftsCount = added.filter(a => !existingDraftIds.has(a.id)).length;
+    const modifiedRecordsCount = Object.keys(b.edits).length;
+    const overwrittenLocalEdits = Object.keys(b.edits).filter(id => workspace.edits[id]).length;
+    const newPinsCount = b.favorites.filter(id => !workspace.favorites.includes(id)).length;
+
+    pendingImportData = { b, added, fileName: file.name };
+
+    $('#import-preview-body').innerHTML = `
+      <p>Review incoming changes before applying them to your workspace.</p>
+      <div class="preview-stat-grid">
+        <div class="preview-stat-box"><span>New Drafts</span><strong>${newDraftsCount}</strong></div>
+        <div class="preview-stat-box"><span>Records Merged</span><strong>${modifiedRecordsCount}</strong></div>
+        <div class="preview-stat-box"><span>Local Overwrites</span><strong class="${overwrittenLocalEdits ? 'gap-text' : ''}">${overwrittenLocalEdits}</strong></div>
+      </div>
+      <p class="muted" style="font-size:11px;">Snapshot: <code>${esc(b.snapshot)}</code> · ${newPinsCount} new pin(s)</p>
+      <div class="preview-list">
+        <strong>Sample affected records:</strong>
+        ${Object.keys(b.edits).slice(0, 5).map(id => `<div>• Record <code>${esc(id)}</code> (${esc(known.get(id))})</div>`).join('') || '<div>No modified records</div>'}
+        ${added.slice(0, 5).map(r => `<div>• Draft: <code>${esc(title(r, r.tab))}</code> (${esc(r.tab)})</div>`).join('')}
+      </div>
+      <p class="form-note">An automatic rollback snapshot will be saved to sessionStorage before applying.</p>
+    `;
+
+    $('#modal-download-backup').onclick = () => exportBackup();
+    $('#confirm-import-btn').onclick = () => confirmImport();
+    $('#import-preview-dialog').showModal();
+    e.target.value = '';
+  }catch(error){
+    toast('Import failed: ' + error.message);
+    e.target.value = '';
+  }
+}
+
+function confirmImport(){
+  if(!pendingImportData) return;
+  const { b, added, fileName } = pendingImportData;
+  try {
+    sessionStorage.setItem('cps-rollback-snapshot', JSON.stringify(workspace));
+  } catch {}
+
+  if(mutate(w=>{
+    w.edits = {...w.edits, ...b.edits};
+    const map = new Map(w.added.map(r => [r.id, r]));
+    added.forEach(r => map.set(r.id, r));
+    w.added = [...map.values()];
+    w.favorites = [...new Set([...w.favorites, ...b.favorites])];
+    w.history.unshift({action:'Imported backup', title:fileName, tab:'Workspace', at:new Date().toISOString()});
+    w.history = w.history.slice(0, 100);
+  })){
+    $('#import-preview-dialog').close();
+    pendingImportData = null;
+    render();
+    toast('Backup imported successfully. Rollback snapshot saved to session.');
+  }
+}
+
+function rollbackImport(){
+  try{
+    const raw = sessionStorage.getItem('cps-rollback-snapshot');
+    if(!raw) return toast('No rollback snapshot available.');
+    const previous = JSON.parse(raw);
+    if(save(previous)){
+      sessionStorage.removeItem('cps-rollback-snapshot');
+      render();
+      toast('Rolled back to previous workspace snapshot.');
+    }
+  }catch(e){
+    toast('Rollback failed: ' + e.message);
+  }
+}
+
+function exportPatchJson(){
+  const patch = {
+    format: 'cps-hub-patch-v1',
+    snapshot: 'workbook-2026-09-06',
+    generated: new Date().toISOString(),
+    edits: workspace.edits,
+    added: workspace.added,
+    diffSummary: {
+      totalEditedRecords: Object.keys(workspace.edits).length,
+      totalNewRecords: workspace.added.length
+    }
+  };
+  const blob = new Blob([JSON.stringify(patch, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'cps-workbook-patch.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('Spreadsheet patch exported');
+}
 function validateFields(fields,t){if(!fields||Array.isArray(fields)||typeof fields!=='object')throw Error('Invalid fields');for(const [k,v] of Object.entries(fields))if(!db[t].columns.includes(k)||typeof v!=='string'||v.length>50000)throw Error('Invalid record field')}
 function globalResults(){const terms=query.toLowerCase().trim().split(/\s+/).filter(Boolean);const found=Object.keys(db).flatMap(t=>records(t).filter(r=>searchMatches(r,t,terms)).map(r=>({r,t})));const PAGE_SIZE=24,totalPages=Math.max(1,Math.ceil(found.length/PAGE_SIZE));searchPage=Math.min(searchPage,totalPages-1);const current=found.slice(searchPage*PAGE_SIZE,searchPage*PAGE_SIZE+PAGE_SIZE),start=found.length===0?0:searchPage*PAGE_SIZE+1,end=Math.min((searchPage+1)*PAGE_SIZE,found.length);const subtitle=found.length>PAGE_SIZE?`${found.length} matches across all workbook areas. Showing ${start}–${end} (page ${searchPage+1} of ${totalPages}).`:`${found.length} matches across all workbook areas.`;$('#page').innerHTML=header('Search the Academy',subtitle)+`<div class="toolbar"><button class="button secondary small" id="clear-search">← Return to ${esc(tab)}</button></div><section class="hub-grid">${current.map(({r,t})=>card(r,t,true)).join('')||'<div class="empty-state panel"><h2>No matching records</h2><p>Try searching for a name, topic, date, or workbook tab (e.g. Morning Report, OrgStructure, Podcasts).</p><button class="button secondary" id="empty-clear-search">Clear search</button></div>'}</section>${totalPages>1?`<div class="toolbar pagination"><button class="button secondary" id="search-prev" ${searchPage===0?'disabled':''}>Previous</button><span>Page ${searchPage+1} of ${totalPages}</span><button class="button secondary" id="search-next" ${(searchPage+1)*PAGE_SIZE>=found.length?'disabled':''}>Next</button></div>`:''}`;document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openRecord(b.dataset.open,b.dataset.area));document.querySelectorAll('[data-star]').forEach(b=>b.onclick=()=>{if(mutate(w=>{w.favorites=w.favorites.includes(b.dataset.star)?w.favorites.filter(id=>id!==b.dataset.star):[...w.favorites,b.dataset.star]}))globalResults()});const clearHandler=()=>{query='';searchPage=0;$('#global-search').value='';render()};if($('#clear-search'))$('#clear-search').onclick=clearHandler;if($('#empty-clear-search'))$('#empty-clear-search').onclick=clearHandler;if($('#search-prev'))$('#search-prev').onclick=()=>{searchPage--;globalResults();window.scrollTo(0,0)};if($('#search-next'))$('#search-next').onclick=()=>{searchPage++;globalResults();window.scrollTo(0,0)};}
 $('#global-search').oninput=e=>{query=e.target.value;searchPage=0;render()};$('#new-item-button').onclick=()=>{if(!db['Morning Report'])return toast('Please wait for the workbook to load');createRecord()};

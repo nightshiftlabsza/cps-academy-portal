@@ -80,6 +80,21 @@
       </form>
     </dialog>
 
+    <dialog id="import-preview-dialog" class="dialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-head">
+          <div><p class="eyebrow">Pre-Import Safety Review</p><h2>Backup Diff Preview</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <div id="import-preview-body"></div>
+        <div class="dialog-actions">
+          <button type="button" class="button secondary" id="modal-download-backup">Download Current Backup First</button>
+          <button class="button secondary" value="cancel">Cancel</button>
+          <button type="button" class="button primary" id="confirm-import-btn">Apply Import</button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="app.js"></script>
   </body>
 </html>
