@@ -24,7 +24,71 @@ test('Leader of the Week source dates establish current leader or null when out 
   }
   return null;
  }
- assert.equal(getLeaderForDate('2026-09-07')?.fields.Member,'Ravi');
- assert.equal(getLeaderForDate('2026-10-15'),null);
+  assert.equal(getLeaderForDate('2026-09-07')?.fields.Member,'Ravi');
+  assert.equal(getLeaderForDate('2026-10-15'),null);
 });
 
+test('app.js parses cleanly and contains workflow board functions', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  assert.doesNotThrow(() => new vm.Script(appCode));
+  assert(appCode.includes('function recordStage'));
+  assert(appCode.includes('function boardStages'));
+  assert(appCode.includes('function workflowBoard'));
+  assert(appCode.includes('function applyStageChange'));
+});
+
+test('Schema review stage derivation maps empty to Draft and keeps unfamiliar statuses visible', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {
+    iso: v => /^\d{4}-\d{2}-\d{2}$/.test(v),
+    today: () => '2026-09-07'
+  };
+  vm.runInNewContext(
+    appCode.slice(appCode.indexOf('function recordStage'), appCode.indexOf('function workflowCard')),
+    sandbox
+  );
+
+  const emptyRec = { fields: { Status: '' } };
+  assert.equal(sandbox.recordStage(emptyRec, 'Schema review'), 'Draft / Needs review');
+
+  const uploadedRec = { fields: { Status: 'uploaded' } };
+  assert.equal(sandbox.recordStage(uploadedRec, 'Schema review'), 'Uploaded');
+
+  const unfamiliarRec = { fields: { Status: 'Clinical review requested' } };
+  assert.equal(sandbox.recordStage(unfamiliarRec, 'Schema review'), 'Clinical review requested');
+
+  const stages = sandbox.boardStages([emptyRec, uploadedRec, unfamiliarRec], 'Schema review');
+  assert(stages.includes('Draft / Needs review'));
+  assert(stages.includes('Uploaded'));
+  assert(stages.includes('Clinical review requested'), 'Unfamiliar status must be visible in board stages');
+});
+
+test('Podcast Episodes stage derivation accurately classifies editor readiness and release dates', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {
+    iso: v => /^\d{4}-\d{2}-\d{2}$/.test(v),
+    today: () => '2026-09-07'
+  };
+  vm.runInNewContext(
+    appCode.slice(appCode.indexOf('function recordStage'), appCode.indexOf('function workflowCard')),
+    sandbox
+  );
+
+  const needsEditor = { fields: { 'Audio editor': '', 'Point person': 'Sharmin', 'Release date': '2026-09-20' } };
+  assert.equal(sandbox.recordStage(needsEditor, 'Podcast Episodes'), 'Needs Audio Editor');
+
+  const inEditing = { fields: { 'Audio editor': 'Nic', 'Point person': 'Sharmin', 'Release date': '2026-09-20' } };
+  assert.equal(sandbox.recordStage(inEditing, 'Podcast Episodes'), 'In Editing');
+
+  const released = { fields: { 'Audio editor': 'Sumeet', 'Point person': '', 'Release date': '2020-11-19' } };
+  assert.equal(sandbox.recordStage(released, 'Podcast Episodes'), 'Released');
+
+  const customStatus = { fields: { Status: 'Recording in progress', 'Audio editor': '', 'Point person': '' } };
+  assert.equal(sandbox.recordStage(customStatus, 'Podcast Episodes'), 'Recording in progress');
+
+  const stages = sandbox.boardStages([needsEditor, inEditing, released, customStatus], 'Podcast Episodes');
+  assert(stages.includes('Needs Audio Editor'));
+  assert(stages.includes('In Editing'));
+  assert(stages.includes('Released'));
+  assert(stages.includes('Recording in progress'), 'Custom podcast status must be visible');
+});

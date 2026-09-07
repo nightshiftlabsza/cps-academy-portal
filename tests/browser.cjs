@@ -9,7 +9,7 @@ const {createServer}=require('../scripts/serve.cjs');
   for(const width of [1440,390]){
    const context=await browser.newContext({viewport:{width,height:900}});const p=await context.newPage();const errors=[];p.on('pageerror',e=>errors.push(e.message));
    const base=`http://127.0.0.1:${server.address().port}`;
-   await p.goto(base);await p.getByRole('heading',{name:'Your Academy, at a glance'}).waitFor();
+   await p.goto(base);await p.getByRole('heading',{name:'Home Dashboard'}).waitFor();
    await p.getByRole('button',{name:'Open staffing schedule'}).click();
    await p.locator('#filter').selectOption('All');await p.locator('[data-open]').first().click();
    await p.locator('[data-field="Presenter"]').fill('Local QA assignment');await p.locator('#dialog-primary').click();await p.reload();
