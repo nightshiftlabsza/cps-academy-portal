@@ -1,0 +1,1 @@
+Read AGENTS.md and README.md in this directory before changing code. They contain the shared project context and verification commands. The Windows Local checkout and private GitHub repository are the canonical project after migration.

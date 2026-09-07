@@ -1,3 +1,32 @@
+# Credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.local
+*.local.*
+.npmrc
+# Original uploads, browser backups, developer output
 upload/
-dist/
+backups/
+cps-hub-backup*.json
 node_modules/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+*.log
+*.zip
+*.tgz
+*.bundle
+.venv/
+__pycache__/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+# workbook.json is intentional private application data, not a public sample.
