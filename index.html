@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#142c3f" />
     <title>CPS Academy Hub</title>
     <link rel="stylesheet" href="styles.css" />
@@ -22,8 +22,8 @@
         </button>
         <div class="profile">
           <div class="avatar avatar-z">ZG</div>
-          <div><strong>Zakariyya</strong><span>VMR Leadership</span></div>
-          <button class="icon-button" aria-label="Account options">•••</button>
+          <div><strong id="profile-name">Zakariyya</strong><span id="profile-role">VMR Leadership</span></div>
+          <button class="icon-button" id="profile-options-btn" aria-label="Account and developer preferences">⚙</button>
         </div>
       </aside>
 
@@ -46,6 +46,11 @@
 
       <nav id="mobile-nav" class="mobile-nav" aria-label="Mobile navigation"></nav>
     </div>
+
+    <button id="feedback-trigger-btn" class="feedback-pill" aria-label="Report an issue">
+      <span class="feedback-pill-icon" aria-hidden="true">💬</span>
+      <span class="feedback-pill-label">Report an issue</span>
+    </button>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
@@ -91,6 +96,73 @@
           <button type="button" class="button secondary" id="modal-download-backup">Download Current Backup First</button>
           <button class="button secondary" value="cancel">Cancel</button>
           <button type="button" class="button primary" id="confirm-import-btn">Apply Import</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="quick-claim-dialog" class="dialog">
+      <form method="dialog" class="dialog-card" id="quick-claim-form">
+        <div class="dialog-head">
+          <div><p class="eyebrow" id="qc-eyebrow">Quick Staffing</p><h2 id="qc-title">Claim Role</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <p id="qc-session-desc" class="muted" style="margin:0;font-size:13px;"></p>
+        <label>Your Name
+          <input id="qc-name" class="input" required placeholder="Enter your name" autocomplete="name" />
+        </label>
+        <p class="form-note">Saved on this device. (Shared persistence deferred to Milestone 5).</p>
+        <div class="dialog-actions">
+          <button class="button secondary" value="cancel">Cancel</button>
+          <button type="submit" class="button primary" id="qc-submit-btn" value="default">Confirm &amp; Claim</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="issue-dialog" class="dialog">
+      <form method="dialog" class="dialog-card" id="issue-report-form">
+        <div class="dialog-head">
+          <div><p class="eyebrow">Feedback &amp; Bug Report</p><h2>Report an Issue</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <label>
+          What went wrong?
+          <textarea id="issue-description" required rows="3" placeholder="e.g., The date on Morning Report didn't save when I tapped it"></textarea>
+        </label>
+        <label>
+          Which section were you on?
+          <select id="issue-section" class="select"></select>
+        </label>
+        <label>
+          Your Name or Email <small class="muted">(Optional)</small>
+          <input id="issue-reporter" class="input" placeholder="e.g., Alex or alex@example.com" />
+        </label>
+        <p class="form-note">Saved in your workspace. We automatically include device details to help diagnose the issue.</p>
+        <div class="dialog-actions">
+          <button class="button secondary" value="cancel">Cancel</button>
+          <button type="submit" class="button primary" id="submit-issue-btn" value="default">Send report</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="admin-prefs-dialog" class="dialog">
+      <form method="dialog" class="dialog-card" id="admin-prefs-form">
+        <div class="dialog-head">
+          <div><p class="eyebrow">Local Preferences</p><h2>Developer &amp; Admin Mode</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <div class="pref-item">
+          <div class="pref-meta">
+            <strong>Admin Profile (@admin)</strong>
+            <p class="muted">Enable Super admin permissions and access to the Issue Triage dashboard.</p>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="admin-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <p class="form-note">Controls local testing permissions for this browser instance.</p>
+        <div class="dialog-actions">
+          <button class="button primary" value="cancel">Done</button>
         </div>
       </form>
     </dialog>

@@ -18,7 +18,7 @@ for r in data['Members']['records']:
  r['fields']={label:val(w['OrgStructure'][f'{col}{r["row"]}']) for col,label in cols.items()}
  r['links']={label:w['OrgStructure'][f'{col}{r["row"]}'].hyperlink.target for col,label in cols.items() if w['OrgStructure'][f'{col}{r["row"]}'].hyperlink and w['OrgStructure'][f'{col}{r["row"]}'].hyperlink.target}
 for tab,group in data.items():
- group['records']=[r for r in group['records'] if not(tab=='CPS Academy VMRs' and r['fields'].get('Facilitator')=='Facilitator')]
+ group['records']=[r for r in group['records'] if not(tab=='CPS Academy VMRs' and r['fields'].get('Facilitator')=='Facilitator') and not(tab=='CRC - retired' and __import__('re').match(r'^ROUND\s*\d+', r['fields'].get('MENTEE', ''), __import__('re').I))]
  for r in group['records']:
   for field,value in r['fields'].items():
    if ('date' in field.lower() or field=='Review deadline (source)') and value and not __import__('re').match(r'^\d{4}-\d{2}-\d{2}$',value):

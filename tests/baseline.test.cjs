@@ -181,4 +181,305 @@ test('Backup recovery diff calculation detects modified records, drafts, and ove
   assert.equal(modifiedRecordsCount, 2, 'Detects 2 total records merged from incoming backup');
 });
 
+test('error ring buffer maintains max capacity and captures error metadata', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  assert(appCode.includes('const MAX_ERROR_LOGS = 10;'));
+  assert(appCode.includes('function captureRuntimeError'));
+  assert(appCode.includes('function captureDiagnostics'));
+
+  const sandbox = {
+    KEY: 'cps-hub-workspace-v2',
+    location: { hash: '#/morning-report' },
+    window: { innerWidth: 390, innerHeight: 844, addEventListener: () => {} },
+    document: { documentElement: { clientWidth: 390, clientHeight: 844 } }
+  };
+
+  const bufferCode = appCode.slice(
+    appCode.indexOf('const MAX_ERROR_LOGS = 10;'),
+    appCode.indexOf('const groups={')
+  );
+
+  vm.runInNewContext(bufferCode, sandbox);
+
+  // Log 12 errors to verify 10-item ring buffer behavior
+  for (let i = 1; i <= 12; i++) {
+    sandbox.captureRuntimeError({
+      message: `Test error ${i}`,
+      source: 'app.js',
+      lineno: i * 10,
+      colno: 5
+    });
+  }
+
+  const diagnostics = sandbox.captureDiagnostics();
+  assert.equal(diagnostics.errorLogs.length, 10, 'Ring buffer must cap at 10 errors');
+  assert.equal(diagnostics.errorLogs[0].message, 'Test error 3', 'Oldest entries shifted out');
+  assert.equal(diagnostics.errorLogs[9].message, 'Test error 12', 'Newest entry present');
+  assert.equal(diagnostics.route, '#/morning-report');
+  assert.equal(diagnostics.viewport, '390x844 (Mobile)');
+  assert.equal(diagnostics.workspaceVersion, 'cps-hub-workspace-v2');
+  assert(diagnostics.timestamp);
+});
+
+test('issue reporting schema persists to workspace.issues and tracks status transitions', () => {
+  const workspace = {
+    issues: [],
+    history: [],
+    isAdmin: false
+  };
+
+  const mockIssue = {
+    id: 'issue:test-uuid-1',
+    timestamp: new Date().toISOString(),
+    reporter: 'Dr. Rivera',
+    section: 'Morning Report',
+    description: 'The date on Morning Report did not save when tapped.',
+    diagnostics: {
+      route: '#/morning-report',
+      viewport: '390x844 (Mobile)',
+      workspaceVersion: 'cps-hub-workspace-v2',
+      timestamp: new Date().toISOString(),
+      errorLogs: []
+    },
+    status: 'Open'
+  };
+
+  // Simulate report submission
+  workspace.issues.unshift(mockIssue);
+  assert.equal(workspace.issues.length, 1);
+  assert.equal(workspace.issues[0].status, 'Open');
+  assert.equal(workspace.issues[0].reporter, 'Dr. Rivera');
+  assert.equal(workspace.issues[0].diagnostics.workspaceVersion, 'cps-hub-workspace-v2');
+
+  // Simulate status progression by admin
+  workspace.issues[0].status = 'In Progress';
+  assert.equal(workspace.issues[0].status, 'In Progress');
+
+  workspace.issues[0].status = 'Resolved';
+  assert.equal(workspace.issues[0].status, 'Resolved');
+});
+
+test('admin role guard permits Super admin and restricts standard member', () => {
+  const sandbox = {};
+
+  const adminCheckCode = `
+    function isAdmin(workspace) {
+      return Boolean(workspace.isAdmin || workspace.role === 'Super admin' || workspace.role === 'admin' || workspace.profile === '@admin');
+    }
+    function canAccessAdminIssues(workspace, targetRoute) {
+      if (targetRoute === 'admin/issues' || targetRoute === '/admin/issues' || targetRoute === 'Issue Reports') {
+        return isAdmin(workspace);
+      }
+      return true;
+    }
+  `;
+
+  vm.runInNewContext(adminCheckCode, sandbox);
+
+  // Standard member profile
+  const memberWorkspace = { isAdmin: false, role: 'VMR Leadership' };
+  assert.equal(sandbox.isAdmin(memberWorkspace), false, 'Standard member is not admin');
+  assert.equal(sandbox.canAccessAdminIssues(memberWorkspace, 'admin/issues'), false, 'Standard member blocked from admin/issues');
+  assert.equal(sandbox.canAccessAdminIssues(memberWorkspace, 'Morning Report'), true, 'Standard member can access standard routes');
+
+  // Super admin profile (@admin)
+  const adminWorkspace1 = { isAdmin: true, role: 'Super admin' };
+  assert.equal(sandbox.isAdmin(adminWorkspace1), true, 'Super admin workspace has admin rights');
+  assert.equal(sandbox.canAccessAdminIssues(adminWorkspace1, 'admin/issues'), true, 'Super admin permitted to access admin/issues');
+
+  const adminWorkspace2 = { isAdmin: false, profile: '@admin' };
+  assert.equal(sandbox.isAdmin(adminWorkspace2), true, '@admin profile recognized');
+  assert.equal(sandbox.canAccessAdminIssues(adminWorkspace2, 'admin/issues'), true);
+});
+
+test('staffing entry preserves adjacent coworker lines, pipe roles, and handles TP shorthand', () => {
+  const role = 'Scribe', name = 'Dr. Alice';
+  const rolePat = role === 'Teaching Points' ? '(?:Teaching Points|TP)' : 'Scribe';
+  const lineRegex = new RegExp(`(^|\\r?\\n)([^\\S\\r\\n]*${rolePat}:[^\\S\\r\\n]*)([^\\r\\n|]*)(.*?)($|\\r?\\n)`, 'i');
+
+  // Case 1: Empty Scribe followed by assigned Teaching Points coworker
+  const input1 = "Scribe: \nTeaching Points: Dr. Bob\nCase Presenter: ";
+  const result1 = input1.replace(lineRegex, (match, p1, p2, p3, p4, p5) => `${p1}${p2}${name}${p4}${p5}`);
+  assert(result1.includes("Scribe: Dr. Alice"));
+  assert(result1.includes("Teaching Points: Dr. Bob"), "Adjacent coworker Dr. Bob must NOT be deleted");
+
+  // Case 2: Pipe-separated roles on a single line
+  const input2 = "Scribe: Dr. Old | Teaching Points: Dr. Bob";
+  const result2 = input2.replace(lineRegex, (match, p1, p2, p3, p4, p5) => `${p1}${p2}${name}${p4}${p5}`);
+  assert(result2.includes("Scribe: Dr. Alice"));
+  assert(result2.includes("| Teaching Points: Dr. Bob"), "Pipe-separated Teaching Points must be preserved");
+
+  // Case 3: TP shorthand for Teaching Points
+  const tpRole = 'Teaching Points', tpName = 'Dr. Charlie';
+  const tpRolePat = '(?:Teaching Points|TP)';
+  const tpRegex = new RegExp(`(^|\\r?\\n)([^\\S\\r\\n]*${tpRolePat}:[^\\S\\r\\n]*)([^\\r\\n|]*)(.*?)($|\\r?\\n)`, 'i');
+  const input3 = "Scribe: Dr. Alice\nTP: TBD\nCase Presenter: ";
+  const result3 = input3.replace(tpRegex, (match, p1, p2, p3, p4, p5) => `${p1}${p2}${tpName}${p4}${p5}`);
+  assert(result3.includes("TP: Dr. Charlie"), "TP shorthand must be populated");
+  assert(result3.includes("Scribe: Dr. Alice"));
+});
+
+test('mrGaps accurately detects unassigned slots without label bleed', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {};
+  vm.runInNewContext(
+    appCode.slice(appCode.indexOf('function mrGaps'), appCode.indexOf('function weekKey')),
+    sandbox
+  );
+
+  // Totally unassigned row
+  const emptyRec = {
+    fields: {
+      Facilitator: 'TBD',
+      Presenter: '',
+      'Scribe / teaching points sign-ups': 'Scribe: \nTeaching Points: \nCase Presenter:'
+    }
+  };
+  const gaps = sandbox.mrGaps(emptyRec);
+  assert(gaps.includes('Facilitator'), 'Facilitator TBD must be a gap');
+  assert(gaps.includes('Presenter'), 'Empty Presenter must be a gap');
+  assert(gaps.includes('Scribe'), 'Empty Scribe must be a gap (no label bleed)');
+  assert(gaps.includes('Teaching Points'), 'Empty Teaching Points must be a gap');
+  assert.equal(gaps.length, 4, 'All 4 roles must be flagged as gaps');
+
+  // Fully assigned row
+  const filledRec = {
+    fields: {
+      Facilitator: 'Rabih & Reza',
+      Presenter: 'Kaleem',
+      'Scribe / teaching points sign-ups': 'Scribe: Lukas\nTeaching Points: Varsha\nCase Presenter: Kaleem'
+    }
+  };
+  assert.equal(sandbox.mrGaps(filledRec).length, 0, 'Fully assigned session has zero gaps');
+
+  // Stacked session delimiter boundary
+  const stackedRec = {
+    fields: {
+      Facilitator: 'Youssef',
+      Presenter: '',
+      'Scribe / teaching points sign-ups': 'Scribe: \nTeaching Points: \nCase Presenter: \n_____________________________________\n\nScribe: \nTeaching Points: \nCase Presenter: Eyron'
+    }
+  };
+  const stackedGaps = sandbox.mrGaps(stackedRec);
+  assert(stackedGaps.includes('Presenter'), 'Blank first session presenter must be detected as gap');
+});
+
+test('recordDate reliably normalizes non-ISO dates, timestamps, US formats, and CRC fields', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {
+    iso: v => /^\d{4}-\d{2}-\d{2}$/.test(v),
+  };
+  vm.runInNewContext(
+    appCode.slice(appCode.indexOf('function dateValue'), appCode.indexOf('const iso=')) + '\n' +
+    appCode.slice(appCode.indexOf('function recordDate'), appCode.indexOf('function extraFilters')),
+    sandbox
+  );
+
+  // Written date from Row 30
+  assert.equal(sandbox.recordDate({ fields: { Date: 'Thursday - October 8, 2026' } }), '2026-10-08');
+
+  // Timestamp format
+  assert.equal(sandbox.recordDate({ fields: { Date: '2026-10-31 00:00:00' } }), '2026-10-31');
+
+  // US format from CRC
+  assert.equal(sandbox.recordDate({ fields: { 'VMR date': '6/8/2023' } }), '2023-06-08');
+  assert.equal(sandbox.recordDate({ fields: { 'DATE OF PRESENTATION': '5/19/2023' } }), '2023-05-19');
+
+  // Blank and placeholder dates
+  assert.equal(sandbox.recordDate({ fields: { Date: 'TBD' } }), '');
+  assert.equal(sandbox.recordDate({ fields: { Date: '#VALUE!' } }), '');
+});
+
+test('Leader of the Week recognizes embedded spaces in date ranges', () => {
+  const raw = '07/13 - 07 /19';
+  const m = raw.match(/^(\d{1,2})\s*\/\s*(\d{1,2})\s*-\s*(\d{1,2})\s*\/\s*(\d{1,2})$/);
+  assert(m, 'Space-tolerant regex matches row 23 date format');
+  assert.equal(m[1], '07');
+  assert.equal(m[2], '13');
+  assert.equal(m[3], '07');
+  assert.equal(m[4], '19');
+});
+
+test('app.js defines matrixView and integrates into Morning Report view switcher', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  assert(appCode.includes('function matrixView'), 'matrixView function must be defined');
+  assert(appCode.includes('data-set-view="matrix"'), 'Matrix button must exist in view switcher');
+  assert(appCode.includes("mode==='matrix'&&tab==='Morning Report'?matrixView(rr)"), 'matrixView must be invoked in mode matrix');
+});
+
+test('matrixView renders 2D tabular rows with date badges and assigned/gap role cells', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {
+    esc: v => String(v ?? ''),
+    today: () => '2026-09-07',
+    iso: v => /^\d{4}-\d{2}-\d{2}$/.test(v),
+    workspace: { favorites: ['mr:1'], edits: {}, added: [] },
+    db: {
+      'Morning Report': {
+        columns: ['Date', 'Type', 'Facilitator', 'Presenter', 'Scribe / teaching points sign-ups']
+      }
+    }
+  };
+
+  const helperCode = `
+    ${appCode.slice(appCode.indexOf('function dateValue'), appCode.indexOf('const iso='))}
+    ${appCode.slice(appCode.indexOf('function recordDate'), appCode.indexOf('function extraFilters'))}
+    ${appCode.slice(appCode.indexOf('function mrGaps'), appCode.indexOf('function workflowCard'))}
+  `;
+  vm.runInNewContext(helperCode, sandbox);
+
+  const mockRecords = [
+    {
+      id: 'mr:1',
+      tab: 'Morning Report',
+      fields: {
+        Date: '2026-09-07',
+        Type: 'Morning Report',
+        Facilitator: 'Dr. House',
+        Presenter: 'Dr. Chase',
+        'Scribe / teaching points sign-ups': 'Scribe: Dr. Cameron\nTeaching Points: Dr. Foreman'
+      },
+      flags: []
+    },
+    {
+      id: 'mr:2',
+      tab: 'Morning Report',
+      fields: {
+        Date: '2026-09-08',
+        Type: 'Morning Report',
+        Facilitator: 'TBD',
+        Presenter: '',
+        'Scribe / teaching points sign-ups': 'Scribe: \nTeaching Points: '
+      },
+      flags: []
+    }
+  ];
+
+  sandbox.title = (r) => r.fields.Date;
+  const html = sandbox.matrixView(mockRecords);
+
+  assert(html.includes('class="matrix-table"'), 'Table container rendered');
+  assert(html.includes('class="matrix-week-row"'), 'Week header row rendered');
+  assert(html.includes('Dr. House'), 'Assigned facilitator rendered');
+  assert(html.includes('Dr. Chase'), 'Assigned presenter rendered');
+  assert(html.includes('Dr. Cameron'), 'Assigned scribe rendered');
+  assert(html.includes('Dr. Foreman'), 'Assigned teaching points rendered');
+
+  assert(html.includes('data-role="Facilitator"'), 'Gap button for missing Facilitator');
+  assert(html.includes('data-role="Presenter"'), 'Gap button for missing Presenter');
+  assert(html.includes('data-role="Scribe"'), 'Gap button for missing Scribe');
+  assert(html.includes('data-role="Teaching Points"'), 'Gap button for missing Teaching Points');
+  assert(html.includes('matrix-slot-gap'), 'Gap styling class applied');
+  assert(html.includes('gap-action-btn'), 'Action button class attached for quick claim');
+});
+
+test('styles.css contains high-contrast gap tokens and matrix layout definitions', () => {
+  const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+  assert(css.includes('--gap-bg: #fef2f2'), 'High-contrast gap background token');
+  assert(css.includes('--gap-text: #991b1b'), 'High-contrast gap text token (WCAG AAA)');
+  assert(css.includes('--gap-border: #fecaca'), 'High-contrast gap border token');
+  assert(css.includes('.matrix-table'), '.matrix-table defined');
+  assert(css.includes('.matrix-slot-gap'), '.matrix-slot-gap defined');
+  assert(css.includes('max-width: 2560px'), 'Ultrawide container expansion up to 2560px');
+});
 
