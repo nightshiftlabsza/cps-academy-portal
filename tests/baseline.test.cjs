@@ -457,6 +457,7 @@ test('matrixView renders 2D tabular rows with date badges and assigned/gap role 
   ];
 
   sandbox.title = (r) => r.fields.Date;
+  sandbox.records=()=>mockRecords;
   const html = sandbox.matrixView(mockRecords);
 
   assert(html.includes('class="matrix-table"'), 'Table container rendered');
