@@ -147,9 +147,22 @@ async function fetchJson(url) {
     await navigateTo('Home', '.operational-grid');
     await capture('desktop-home.png');
 
-    // 2. Desktop Morning Report
-    await navigateTo('Morning Report', '.agenda-view');
+    // 2. Desktop Morning Report (Weekly Agenda view)
+    await navigateTo('Morning Report', '.matrix-view');
+    await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('[data-set-view="agenda"]')?.click()`
+    });
+    await waitForSelector(cdp, '.agenda-view');
+    await new Promise((r) => setTimeout(r, 300));
     await capture('desktop-morning-report.png');
+
+    // 2b. Desktop Staffing Matrix (Clinical Matrix view from Feature 4)
+    await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('[data-set-view="matrix"]')?.click()`
+    });
+    await waitForSelector(cdp, '.matrix-view');
+    await new Promise((r) => setTimeout(r, 300));
+    await capture('desktop-staffing-matrix.png');
 
     // 3. Desktop Podcast Board
     await navigateTo('Podcast Episodes', '.pipeline-auto');
@@ -167,8 +180,12 @@ async function fetchJson(url) {
     await navigateTo('Home', '.operational-grid');
     await capture('mobile-home.png');
 
-    // 6. Mobile Morning Report
-    await navigateTo('Morning Report', '.agenda-view');
+    // 6. Mobile Morning Report (Agenda cards with single-tap assignment buttons)
+    await navigateTo('Morning Report', '.matrix-view');
+    await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('[data-set-view="agenda"]')?.click()`
+    });
+    await waitForSelector(cdp, '.agenda-view');
     await cdp.send('Runtime.evaluate', {
       expression: `(() => {
         const gapCard = document.querySelector('.gap-action-btn')?.closest('.agenda-card') || document.querySelector('.agenda-card');

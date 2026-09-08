@@ -6,6 +6,44 @@
     <meta name="theme-color" content="#142c3f" />
     <title>CPS Academy Hub</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%23142c3f'/%3E%3Ctext x='20' y='25' text-anchor='middle' font-family='sans-serif' font-size='13' fill='white'%3ECPS%3C/text%3E%3C/svg%3E" />
+    <script>
+      (() => {
+        const KEY = "cps-hub-appearance-v1";
+        const root = document.documentElement;
+        const system = matchMedia("(prefers-color-scheme: dark)");
+        const themes = ["emerald", "cobalt", "plum"];
+        const modes = ["light", "dark", "system"];
+        let saved;
+        try {
+          saved = JSON.parse(localStorage.getItem(KEY) || "null");
+        } catch {}
+        const prefs = {
+          theme: themes.includes(saved?.theme) ? saved.theme : "emerald",
+          mode: modes.includes(saved?.mode) ? saved.mode : "system"
+        };
+        function apply() {
+          root.dataset.theme = prefs.theme;
+          root.dataset.mode = prefs.mode === "system" ? (system.matches ? "dark" : "light") : prefs.mode;
+        }
+        function setAppearance(update = {}) {
+          if (themes.includes(update.theme)) prefs.theme = update.theme;
+          if (modes.includes(update.mode)) prefs.mode = update.mode;
+          apply();
+          try {
+            localStorage.setItem(KEY, JSON.stringify(prefs));
+          } catch {}
+          return { ...prefs };
+        }
+        system.addEventListener("change", () => {
+          if (prefs.mode === "system") apply();
+        });
+        window.cpsAppearance = {
+          set: setAppearance,
+          get: () => ({ ...prefs })
+        };
+        apply();
+      })();
+    </script>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -22,8 +60,8 @@
           <span aria-hidden="true">›</span>
         </button>
         <div class="profile">
-          <div class="avatar avatar-z">ZG</div>
-          <div><strong id="profile-name">Zakariyya</strong><span id="profile-role">VMR Leadership</span></div>
+          <div class="avatar avatar-z" id="profile-avatar">ZG</div>
+          <div><strong id="profile-name">Zakariyya</strong><span id="profile-role">VMR Leadership</span><span id="profile-identity-badge" class="tag small local-profile-tag" style="display:none;margin-top:2px;">Local test profile</span></div>
           <button class="icon-button" id="profile-options-btn" aria-label="Account and developer preferences">⚙</button>
         </div>
       </aside>
@@ -104,7 +142,7 @@
     <dialog id="quick-claim-dialog" class="dialog">
       <form method="dialog" class="dialog-card" id="quick-claim-form">
         <div class="dialog-head">
-          <div><p class="eyebrow" id="qc-eyebrow">Quick Staffing</p><h2 id="qc-title">Claim Role</h2></div>
+          <div><p class="eyebrow" id="qc-eyebrow">Quick Staffing</p><h2 id="qc-title">Sign Up for Role</h2></div>
           <button class="icon-button" value="cancel" aria-label="Close">×</button>
         </div>
         <p id="qc-session-desc" class="muted" style="margin:0;font-size:13px;"></p>
@@ -114,7 +152,70 @@
         <p class="form-note">Saved on this device. (Shared persistence deferred to Milestone 5).</p>
         <div class="dialog-actions">
           <button class="button secondary" value="cancel">Cancel</button>
-          <button type="submit" class="button primary" id="qc-submit-btn" value="default">Confirm &amp; Claim</button>
+          <button type="submit" class="button primary" id="qc-submit-btn" value="default">Confirm &amp; Sign Up</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="staff-token-dialog" class="dialog staff-popover-dialog">
+      <form method="dialog" class="dialog-card staff-popover-card" id="staff-token-form">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">Session Staffing</p>
+            <h2 id="st-dialog-title" style="font-size:18px;margin-top:2px;">Staff Member</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <div id="st-dialog-body" class="staff-popover-actions">
+          <button type="button" class="button secondary" id="st-swap-btn">⇄ Swap with another person</button>
+          <button type="button" class="button secondary" id="st-remove-btn" style="color:var(--gap-text);border-color:var(--gap-border);">✕ Remove from session (Open slot)</button>
+        </div>
+        <div id="st-swap-input-container" style="display:none;margin-top:4px;">
+          <label>New person's name
+            <input id="st-new-name" class="input" placeholder="Enter replacement name" autocomplete="off" />
+          </label>
+          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">
+            <button type="button" class="button secondary small" id="st-swap-back-btn">Back</button>
+            <button type="button" class="button primary small" id="st-swap-confirm-btn">Confirm Swap</button>
+          </div>
+        </div>
+        <div class="dialog-actions" style="margin-top:8px;">
+          <button class="button secondary" value="cancel">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="swap-dialog" class="dialog">
+      <form method="dialog" class="dialog-card" id="swap-form">
+        <div class="dialog-head">
+          <div><p class="eyebrow" id="swap-eyebrow">Shift Coverage &amp; Swap</p><h2 id="swap-title">Need to swap?</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <p id="swap-session-summary" class="muted" style="margin:0 0 12px 0;font-size:13px;"></p>
+        <input type="hidden" id="swap-session-id" />
+        <input type="hidden" id="swap-role" />
+        <label>Reason for coverage
+          <select id="swap-reason" class="select">
+            <option value="On-call hospital duty">On-call hospital duty / Clinical conflict</option>
+            <option value="Clinic conflict">Clinic or procedural schedule conflict</option>
+            <option value="Personal emergency">Personal / family emergency</option>
+            <option value="Academic conflict">Conference or exam conflict</option>
+            <option value="Other">Other scheduling conflict</option>
+          </select>
+        </label>
+        <label>Action
+          <select id="swap-action-type" class="select">
+            <option value="release">Release slot (Open for volunteers / Needs Volunteers)</option>
+            <option value="transfer">Transfer slot directly to colleague</option>
+          </select>
+        </label>
+        <label id="swap-transfer-label" style="display:none;">Colleague Name
+          <input id="swap-colleague-name" class="input" placeholder="Enter colleague's name" autocomplete="off" />
+        </label>
+        <p class="form-note">Saved on this device. Releasing marks the slot as a staffing gap immediately visible to volunteers.</p>
+        <div class="dialog-actions">
+          <button class="button secondary" value="cancel">Cancel</button>
+          <button type="submit" class="button primary" id="confirm-swap-btn" value="default">Confirm Shift Swap</button>
         </div>
       </form>
     </dialog>
@@ -161,6 +262,44 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <div class="pref-item">
+          <div class="pref-meta">
+            <strong>Local Test Profile</strong>
+            <p class="muted" id="mock-profile-status">Local mock identity for testing claiming and logbooks.</p>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="button secondary small" id="activate-mock-profile-btn">Set Dev Profile</button>
+            <button type="button" class="button secondary small" id="clear-mock-profile-btn">Sign Out</button>
+          </div>
+        <div class="pref-item" style="border-top:1px solid var(--line);padding-top:12px;">
+          <div class="pref-meta">
+            <strong>Workspace Theme</strong>
+            <p class="muted">Select institutional color palette.</p>
+          </div>
+          <select id="appearance-theme" class="select" style="max-width:150px;">
+            <option value="emerald">Academic Emerald</option>
+            <option value="cobalt">Clinical Cobalt</option>
+            <option value="plum">Editorial Plum</option>
+          </select>
+        </div>
+        <div class="pref-item">
+          <div class="pref-meta">
+            <strong>Appearance Mode</strong>
+            <p class="muted">Light, dark, or follow system theme.</p>
+          </div>
+          <select id="appearance-mode" class="select" style="max-width:150px;">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+        <div class="pref-item" style="border-top:1px solid var(--line);padding-top:12px;">
+          <div class="pref-meta">
+            <strong>Personal Logbook</strong>
+            <p class="muted">View recorded assignments and distinct sessions.</p>
+          </div>
+          <button type="button" class="button secondary small" id="nav-logbook-btn">Open Logbook</button>
+        </div>
         <p class="form-note">Controls local testing permissions for this browser instance.</p>
         <div class="dialog-actions">
           <button class="button primary" value="cancel">Done</button>
@@ -169,6 +308,11 @@
     </dialog>
 
     <script src="session-core.js"></script>
+    <script src="search-core.js"></script>
+    <script src="identity.js"></script>
+    <script src="offline.js"></script>
+    <script src="logbook.js"></script>
+    <script src="windowed-list.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

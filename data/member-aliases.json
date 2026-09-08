@@ -1,0 +1,7 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "schemaVersion": 1,
+  "description": "Reviewed member aliases and occurrence-specific identity decisions for historical logbook compilation.",
+  "policy": "Identity decisions must not override cancellation, uncertain session attribution, or conditional participation. Canonical person IDs must be preserved.",
+  "decisions": []
+}

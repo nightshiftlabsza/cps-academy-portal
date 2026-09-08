@@ -36,6 +36,17 @@ function roleName(label) {
   if (/chat/i.test(label)) return 'chat_support';
   return 'scribe';
 }
+function normalizeRole(role) {
+  if (!role) return null;
+  const r = role.toLowerCase().replace(/[\s_-]+/g, '');
+  if (r.includes('facilitator')) return 'facilitator';
+  if (r.includes('presenter')) return 'presenter';
+  if (r.includes('teach') || r === 'tp') return 'teaching_points';
+  if (r.includes('chat')) return 'chat_support';
+  if (r.includes('discussant') || r.includes('activeparticipant')) return 'discussant';
+  if (r.includes('scribe')) return 'scribe';
+  return roleName(role);
+}
 function extractRoles(fields) {
   const segments = [], unparsed = [];
   for (const [field,role] of [['Facilitator','facilitator'],['Presenter','presenter'],['Chat support','chat_support'],...Array.from({length:4},(_,i)=>[`Active participant ${i+1}`,'discussant'])]) {
@@ -69,10 +80,74 @@ function identityIndex(registry) {
     return {reason:candidates.length ? 'unverified-short-name' : 'unknown-alias',candidates};
   }};
 }
-function compile(workbook, registry, {asOf,sourceHash,registryHash,compilerHash=null,sessionParserHash=null,splitMorningReport}) {
+function buildAliasIndex(aliases, registry) {
+  if (!aliases) return null;
+  const ids = new Set(registry.identities.map(i => i.id));
+  const decisions = Array.isArray(aliases.decisions) ? aliases.decisions : [];
+  const occurrenceDecisions = [];
+  const globalAliases = new Map();
+  for (const d of decisions) {
+    if (!d || typeof d !== 'object' || !d.id) continue;
+    if (d.status !== 'accepted') continue;
+    if (!d.personId || !ids.has(d.personId)) {
+      throw new Error(`Alias decision ${d.id} references invalid or unpreserved personId: ${d.personId}`);
+    }
+    const isOccurrence = d.type === 'occurrence' || Boolean(d.sessionId || d.recordId || d.target?.sessionId || d.target?.recordId);
+    if (isOccurrence) {
+      occurrenceDecisions.push({
+        id: d.id,
+        personId: d.personId,
+        sessionId: d.sessionId || d.target?.sessionId || null,
+        recordId: d.recordId || d.target?.recordId || null,
+        role: d.role || d.target?.role ? normalizeRole(d.role || d.target?.role) : null,
+        raw: d.raw || d.target?.raw || d.alias || d.target?.alias || null,
+        occurrenceIndex: d.occurrenceIndex !== undefined ? d.occurrenceIndex : (d.target?.occurrenceIndex !== undefined ? d.target.occurrenceIndex : null)
+      });
+    } else {
+      const aliasRaw = d.alias || d.raw || d.target?.alias || d.target?.raw;
+      if (!aliasRaw) continue;
+      const key = normalize(aliasRaw);
+      if (!globalAliases.has(key)) globalAliases.set(key, []);
+      globalAliases.get(key).push({ id: d.id, personId: d.personId });
+    }
+  }
+  if (Array.isArray(aliases.globalAliases)) {
+    for (const g of aliases.globalAliases) {
+      if (!g || typeof g !== 'object' || !g.id || g.status !== 'accepted') continue;
+      if (!g.personId || !ids.has(g.personId)) throw new Error(`Global alias ${g.id} references invalid personId: ${g.personId}`);
+      const key = normalize(g.alias || g.raw);
+      if (!globalAliases.has(key)) globalAliases.set(key, []);
+      globalAliases.get(key).push({ id: g.id, personId: g.personId });
+    }
+  }
+  return {
+    matchOccurrence(evidence, tokenOccurrenceIndex = null) {
+      for (const dec of occurrenceDecisions) {
+        if (dec.sessionId && dec.sessionId !== evidence.sessionId) continue;
+        if (dec.recordId && dec.recordId !== evidence.recordId) continue;
+        if (!dec.sessionId && !dec.recordId) continue;
+        if (dec.role && dec.role !== evidence.role && normalizeRole(dec.role) !== evidence.role) continue;
+        if (dec.raw && normalize(dec.raw) !== normalize(evidence.raw)) continue;
+        if (dec.occurrenceIndex !== null && tokenOccurrenceIndex !== null && dec.occurrenceIndex !== tokenOccurrenceIndex) continue;
+        return { id: dec.personId, decisionId: dec.id };
+      }
+      return null;
+    },
+    matchGlobal(raw) {
+      const matches = globalAliases.get(normalize(raw));
+      if (!matches || matches.length === 0) return null;
+      const distinctPeople = [...new Set(matches.map(m => m.personId))];
+      if (distinctPeople.length > 1) return { reason: 'ambiguous-alias', candidates: distinctPeople.sort() };
+      return { id: matches[0].personId, decisionId: matches[0].id };
+    }
+  };
+}
+function compile(workbook, registry, {asOf,sourceHash,registryHash,compilerHash=null,sessionParserHash=null,splitMorningReport,aliases=null,aliasHash=null}) {
   if (!validDate(asOf)) throw new Error('An explicit valid --as-of YYYY-MM-DD is required');
   if (typeof splitMorningReport !== 'function') throw new Error('Session splitter is required');
-  const index = identityIndex(registry), people = Object.create(null), unresolved = [], rows = [], exclusions = [];
+  const index = identityIndex(registry), aliasIdx = buildAliasIndex(aliases, registry);
+  const people = Object.create(null), unresolved = [], rows = [], exclusions = [];
+  const appliedDecisionIds = new Set();
   let tokenCount=0,resolvedTokens=0,duplicateTokens=0,placeholderTokens=0,excludedTokens=0,sessionCount=0;
   for (const series of ['Morning Report','CPS Academy VMRs']) {
     if (!Array.isArray(workbook[series]?.records)) throw new Error(`Missing series: ${series}`);
@@ -91,18 +166,46 @@ function compile(workbook, registry, {asOf,sourceHash,registryHash,compilerHash=
           const tokens=peopleTokens(segment.raw);
           const boundaryUnclear=Object.hasOwn(session.session?.unassignedFields || {},segment.field);
           const conditional=/\b(?:or|backup|back-up|maybe)\b|\?/i.test(segment.raw);
-          for (const raw of tokens) {
+          for (let tIdx = 0; tIdx < tokens.length; tIdx++) {
+            const raw = tokens[tIdx];
             tokenCount++; audit.tokens++;
             const evidence={...ref,field:segment.field,role:segment.role,raw};
             if(cancelled || /\b(?:STRIKE|cancelled|canceled)\b/i.test(raw)) {excludedTokens++; exclusions.push({...evidence,reason:'cancellation-or-strikethrough'});continue;}
             if(placeholder(raw)){placeholderTokens++;exclusions.push({...evidence,reason:'placeholder'});continue;}
             if(boundaryUnclear){unresolved.push({...evidence,reason:'unassigned-session-field',candidates:[]});continue;}
             if (conditional) {unresolved.push({...evidence,reason:'conditional-assignment',candidates:[]});continue;}
-            const match=index.resolve(raw);
-            if(!match.id){unresolved.push({...evidence,...match});continue;}
+
+            let resolvedId = null;
+            // 1. Accepted occurrence-specific decision
+            const occMatch = aliasIdx?.matchOccurrence(evidence, tIdx);
+            if (occMatch) {
+              resolvedId = occMatch.id;
+              appliedDecisionIds.add(occMatch.decisionId);
+            } else {
+              // 2. Accepted global alias
+              const globMatch = aliasIdx?.matchGlobal(raw);
+              if (globMatch) {
+                if (!globMatch.id) {
+                  unresolved.push({ ...evidence, ...globMatch });
+                  continue;
+                }
+                resolvedId = globMatch.id;
+                appliedDecisionIds.add(globMatch.decisionId);
+              } else {
+                // 3. Existing exact registry resolution
+                const match = index.resolve(raw);
+                if (!match.id) {
+                  // 4. Unresolved
+                  unresolved.push({ ...evidence, ...match });
+                  continue;
+                }
+                resolvedId = match.id;
+              }
+            }
+
             resolvedTokens++;
-            if(!people[match.id]) {const person=registry.identities.find(p=>p.id===match.id);people[match.id]={name:person.name,externalAccountId:null,entries:[]};}
-            const person=people[match.id], entryId='assignment-'+hash(`${sourceHash}|${session.id}|${segment.role}|${match.id}`).slice(0,24);
+            if(!people[resolvedId]) {const person=registry.identities.find(p=>p.id===resolvedId);people[resolvedId]={name:person.name,externalAccountId:null,entries:[]};}
+            const person=people[resolvedId], entryId='assignment-'+hash(`${sourceHash}|${session.id}|${segment.role}|${resolvedId}`).slice(0,24);
             const existing=person.entries.find(e=>e.id===entryId);
             if(existing){existing.evidence.push(evidence);duplicateTokens++;continue;}
             person.entries.push({id:entryId,sessionId:session.id,date,temporalState,series,role:segment.role,status:'unverified-workbook-assignment',title:fields['Session title']||fields.Type||'',evidence:[evidence]});
@@ -114,7 +217,7 @@ function compile(workbook, registry, {asOf,sourceHash,registryHash,compilerHash=
   for(const person of Object.values(people)) person.entries.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||a.id.localeCompare(b.id));
   const unresolvedTokens=unresolved.filter(u=>u.role).length;
   if(tokenCount!==resolvedTokens+unresolvedTokens+placeholderTokens+excludedTokens) throw new Error('Token accounting failed');
-  return {schemaVersion:1,asOf,sourceHash,registryHash,compilerHash,sessionParserHash,privacy:'PRIVATE_ADMIN_BACKFILL_NOT_A_PUBLIC_ASSET',identityContract:'Local canonical IDs require reviewed external account mapping. Assignments are not attendance.',audit:{sourceRows:rows.length,seriesRows:Object.fromEntries(['Morning Report','CPS Academy VMRs'].map(s=>[s,workbook[s].records.length])),sessions:sessionCount,tokenCount,resolvedTokens,duplicateTokens,unresolvedTokens,placeholderTokens,excludedTokens,uniqueAssignments:resolvedTokens-duplicateTokens},people,rows,unresolved,exclusions};
+  return {schemaVersion:1,asOf,sourceHash,registryHash,compilerHash,sessionParserHash,aliasHash:aliasHash||null,decisionIds:[...appliedDecisionIds].sort(),privacy:'PRIVATE_ADMIN_BACKFILL_NOT_A_PUBLIC_ASSET',identityContract:'Local canonical IDs require reviewed external account mapping. Assignments are not attendance.',audit:{sourceRows:rows.length,seriesRows:Object.fromEntries(['Morning Report','CPS Academy VMRs'].map(s=>[s,workbook[s].records.length])),sessions:sessionCount,tokenCount,resolvedTokens,duplicateTokens,unresolvedTokens,placeholderTokens,excludedTokens,uniqueAssignments:resolvedTokens-duplicateTokens},people,rows,unresolved,exclusions};
 }
 function writeImmutable(file,text,replace=false) {
   if(fs.existsSync(file)) {if(fs.readFileSync(file,'utf8')===text)return 'unchanged';if(!replace)throw new Error('Ledger differs; use a new --output path or explicit --replace after review');}
@@ -128,18 +231,28 @@ function writeImmutable(file,text,replace=false) {
 }
 function main(args) {
   if (args.length === 1 && args[0] === '--help') {
-    console.log('Compile the private workbook assignment ledger offline.\nUsage: node scripts/compile-logbooks.cjs --as-of YYYY-MM-DD [--input workbook.json] [--identities data/logbook-identities.json] [--output historical-contributions.json] [--replace]\nIdentical output is unchanged. Different output requires --replace or a new output path. Assignments do not certify attendance.');
+    console.log('Compile the private workbook assignment ledger offline.\nUsage: node scripts/compile-logbooks.cjs --as-of YYYY-MM-DD [--input workbook.json] [--identities data/logbook-identities.json] [--aliases data/member-aliases.json] [--output historical-contributions.candidate.json] [--replace]\nCandidates are generated to historical-contributions.candidate.json by default. Use scripts/diff-logbooks.cjs to inspect changes before explicit --replace. Assignments do not certify attendance.');
     return;
   }
-  const options={};for(let i=0;i<args.length;i++){if(args[i]==='--replace'){options.replace=true;continue;}if(!['--as-of','--input','--identities','--output'].includes(args[i])||!args[i+1]||args[i+1].startsWith('--'))throw new Error(`Unknown or incomplete argument: ${args[i]}`);options[args[i].slice(2)]=args[++i];}
-  const source=fs.readFileSync(path.resolve(options.input||path.join(ROOT,'workbook.json')));
-  const registry=fs.readFileSync(path.resolve(options.identities||path.join(ROOT,'data/logbook-identities.json')));
-  const ledger=compile(JSON.parse(source),JSON.parse(registry),{asOf:options['as-of'],sourceHash:hash(source),registryHash:hash(registry),compilerHash:hash(fs.readFileSync(__filename)),sessionParserHash:hash(fs.readFileSync(path.join(ROOT,'session-core.js'))),splitMorningReport:require('../session-core.js').splitMorningReport});
-  const output=path.resolve(options.output||path.join(ROOT,'historical-contributions.json'));
-  const protectedPaths=[options.input||path.join(ROOT,'workbook.json'),options.identities||path.join(ROOT,'data/logbook-identities.json'),__filename,path.join(ROOT,'session-core.js')].map(p=>path.resolve(p).toLowerCase());
-  if(protectedPaths.includes(output.toLowerCase()))throw new Error('Output must not overwrite a source, identity registry or compiler file');
-  const state=writeImmutable(output,JSON.stringify(ledger,null,2)+'\n',options.replace);
-  console.log(JSON.stringify({state,output,audit:ledger.audit},null,2));
+  const options={};for(let i=0;i<args.length;i++){if(args[i]==='--replace'){options.replace=true;continue;}if(!['--as-of','--input','--identities','--aliases','--output'].includes(args[i])||!args[i+1]||args[i+1].startsWith('--'))throw new Error(`Unknown or incomplete argument: ${args[i]}`);options[args[i].slice(2)]=args[++i];}
+  const sourceRaw=fs.readFileSync(path.resolve(options.input||path.join(ROOT,'workbook.json')));
+  const registryRaw=fs.readFileSync(path.resolve(options.identities||path.join(ROOT,'data/logbook-identities.json')));
+  let aliases=null,aliasHash=null;
+  const aliasesPath=options.aliases?path.resolve(options.aliases):null;
+  if(aliasesPath){
+    if(!fs.existsSync(aliasesPath))throw new Error(`Aliases file not found: ${aliasesPath}`);
+    const raw=fs.readFileSync(aliasesPath);
+    aliases=JSON.parse(raw);
+    aliasHash=hash(raw);
+  }
+  const ledger=compile(JSON.parse(sourceRaw),JSON.parse(registryRaw),{asOf:options['as-of'],sourceHash:hash(sourceRaw),registryHash:hash(registryRaw),compilerHash:hash(fs.readFileSync(__filename)),sessionParserHash:hash(fs.readFileSync(path.join(ROOT,'session-core.js'))),splitMorningReport:require('../session-core.js').splitMorningReport,aliases,aliasHash});
+  const defaultOutput=options.replace?'historical-contributions.json':'historical-contributions.candidate.json';
+  const output=path.resolve(options.output||path.join(ROOT,defaultOutput));
+  const protectedPaths=[options.input||path.join(ROOT,'workbook.json'),options.identities||path.join(ROOT,'data/logbook-identities.json'),aliasesPath,__filename,path.join(ROOT,'session-core.js')].filter(Boolean).map(p=>path.resolve(p).toLowerCase());
+  if(protectedPaths.includes(output.toLowerCase()))throw new Error('Output must not overwrite a source, identity registry, aliases or compiler file');
+  const isCandidate=path.basename(output).includes('candidate');
+  const state=writeImmutable(output,JSON.stringify(ledger,null,2)+'\n',options.replace||isCandidate);
+  console.log(JSON.stringify({state,output,audit:ledger.audit,aliasHash,appliedDecisions:ledger.decisionIds.length},null,2));
 }
-module.exports={compile,peopleTokens,extractRoles,identityIndex,dateOf,writeImmutable,hash,normalize};
+module.exports={compile,peopleTokens,extractRoles,identityIndex,buildAliasIndex,dateOf,writeImmutable,hash,normalize};
 if(require.main===module){try{main(process.argv.slice(2));}catch(error){console.error(error.message);process.exitCode=1;}}

@@ -6,8 +6,14 @@ const core=require('../session-core.js');
 const workbook=require('../workbook.json');
 const KEY='cps-hub-workspace-v2';
 (async()=>{
- const {chromium}=require('playwright-core');
- const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;
+  let chromium;
+  try {
+    chromium = require('playwright-core').chromium;
+  } catch {
+    console.log('[SKIP] Optional playwright-core not installed. Edge CDP test suites (test:tablet, test:perf, test:offline) provide browser verification.');
+    process.exit(0);
+  }
+  const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;
  try{
   browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
   const base=`http://127.0.0.1:${server.address().port}`;
@@ -41,6 +47,17 @@ const KEY='cps-hub-workspace-v2';
    const calendar=p.locator('[data-calendar]:not([disabled])').first();await calendar.waitFor();
    const downloaded=p.waitForEvent('download');await calendar.click();const download=await downloaded;
    assert.match(download.suggestedFilename(),/\.ics$/i);const stream=await download.createReadStream();let ics='';for await(const chunk of stream)ics+=chunk.toString();assert.match(ics,/BEGIN:VCALENDAR\r\n/);assert.match(ics,/DTSTART:\d{8}T\d{6}Z/);
+   await p.evaluate(() => { if (typeof Identity !== 'undefined') Identity.setMockUser(Identity.getDevelopmentProfile()); });
+   const gapBtn = p.locator('.gap-action-btn').first();
+   if (await gapBtn.count() > 0) {
+     await gapBtn.click();
+     const undoBtn = p.locator('#toast-undo-action');
+     await undoBtn.waitFor();
+     await undoBtn.click();
+   }
+   await nav('profile/logbook');
+   await p.getByRole('heading', { name: /Assignment Logbook/i }).waitFor();
+   await overflow('logbook');
    await nav('CPS Academy VMRs');const vmr=await p.locator('[data-open][data-area]').first().getAttribute('data-open');await open(vmr);
    const original=await p.locator('[data-field="Facilitator"]').inputValue();await p.locator('[data-field="Facilitator"]').fill('QA Persisted Facilitator');await p.locator('#dialog-primary').click();await p.reload();await open(vmr);assert.equal(await p.locator('[data-field="Facilitator"]').inputValue(),'QA Persisted Facilitator');
    await p.locator('#restore-record').click();await p.locator('#confirm-restore').click();await open(vmr);assert.equal(await p.locator('[data-field="Facilitator"]').inputValue(),original);await close();

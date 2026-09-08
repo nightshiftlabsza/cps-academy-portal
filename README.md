@@ -43,7 +43,7 @@ The normal tests require only Node.js. Browser tests need Chromium. `CHROMIUM_PA
 - `AGENTS.md` / `CLAUDE.md`: shared instructions for coding agents.
 
 ## What works and what remains
-Dashboard, pins, search, cards/tables, date and skill filters, staffing helper, archive links, local drafts/edits/restore, backup import/export and activity history work. Edits are device-local; there is no shared database, member authorization or live Sheets connection. Source dates remain intact; ambiguous dates are not guessed.
+Dashboard, pins, search with match snippets, cards/tables, date and skill filters, staffing helper, archive links, local drafts/edits/restore, backup import/export, versioned offline loading via service worker (`sw.js`), cache recovery, and activity history work. Edits are device-local; there is no shared database, member authorization or live Sheets connection. Source dates remain intact; ambiguous dates are not guessed.
 
 Moving source code does NOT transfer browser-local edits from the hosted URL to localhost. On the hosted portal, use Workspace → Download backup, then import it at the local URL. Keep backups private. The original uploaded workbook is not part of this code archive; retain it separately if needed for later import work.
 

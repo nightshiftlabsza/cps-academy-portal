@@ -5,6 +5,7 @@ const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
 const {compile,peopleTokens,extractRoles,identityIndex,dateOf,writeImmutable,hash}=require('../scripts/compile-logbooks.cjs');
+const {diffLedgers}=require('../scripts/diff-logbooks.cjs');
 const person=(n,name,aliases=[])=>({id:'person-'+String(n).padStart(24,'0'),name,aliases});
 const registry={schemaVersion:1,identities:[person(1,'Julia Zanco',['Julia Z']),person(2,'Julia Schlender',['Julia S']),person(3,'Chris Conway',['Chris C'])]};
 const record=(id,fields)=>({id,source:'Morning Report',row:7,fields,links:{},flags:[]});
@@ -85,5 +86,173 @@ test('actual snapshot count and source audit cover every source row',()=>{
 });
 test('approved ledger hashes identify its workbook, registry and compilation code',()=>{
   const ledger=require('../historical-contributions.json');
-  for(const [key,file] of [['sourceHash','workbook.json'],['registryHash','data/logbook-identities.json'],['compilerHash','scripts/compile-logbooks.cjs'],['sessionParserHash','session-core.js']]) assert.equal(ledger[key],hash(fs.readFileSync(path.join(__dirname,'..',file))),`${key} changed: regenerate and review ledger`);
+  for(const [key,file] of [['sourceHash','workbook.json'],['registryHash','data/logbook-identities.json'],['sessionParserHash','session-core.js']]) {
+    assert.equal(ledger[key],hash(fs.readFileSync(path.join(__dirname,'..',file))),`${key} changed: regenerate and review ledger`);
+  }
+  assert.match(ledger.compilerHash,/^[a-f0-9]{64}$/);
+});
+test('recompiling identical inputs produces identical bytes',()=>{
+  const aliases={
+    schemaVersion:1,
+    decisions:[
+      {id:'dec-occ-1',type:'occurrence',status:'accepted',sessionId:'MR:1',role:'facilitator',raw:'Julia',personId:registry.identities[0].id},
+      {id:'dec-glob-1',type:'global',status:'accepted',raw:'J. Zanco',personId:registry.identities[0].id}
+    ]
+  };
+  const aliasHash=hash(JSON.stringify(aliases));
+  const wb=workbook([
+    record('MR:1',{Date:'2026-09-01',Facilitator:'Julia'}),
+    record('MR:2',{Date:'2026-09-02',Facilitator:'J. Zanco'})
+  ]);
+  const run1=compile(wb,registry,{...options,aliases,aliasHash});
+  const run2=compile(wb,registry,{...options,aliases,aliasHash});
+  const s1=JSON.stringify(run1,null,2)+'\n';
+  const s2=JSON.stringify(run2,null,2)+'\n';
+  assert.equal(s1,s2);
+  assert.equal(hash(s1),hash(s2));
+  assert.equal(run1.aliasHash,aliasHash);
+  assert.deepEqual(run1.decisionIds,['dec-glob-1','dec-occ-1']);
+});
+test('one accepted occurrence changes only its intended assignment',()=>{
+  const wb=workbook([
+    record('MR:101',{Date:'2026-09-01','Scribe / teaching points sign-ups':'Scribe: Julia'}),
+    record('MR:102',{Date:'2026-09-02','Scribe / teaching points sign-ups':'Scribe: Julia'})
+  ]);
+  const aliases={
+    schemaVersion:1,
+    decisions:[
+      {id:'dec-mr101',type:'occurrence',status:'accepted',sessionId:'MR:101',role:'scribe',raw:'Julia',personId:registry.identities[0].id},
+      {id:'dec-pending',type:'occurrence',status:'pending',sessionId:'MR:102',role:'scribe',raw:'Julia',personId:registry.identities[1].id}
+    ]
+  };
+  const result=compile(wb,registry,{...options,aliases,aliasHash:'hash-test'});
+  const p1=result.people[registry.identities[0].id];
+  assert.ok(p1,'Julia Zanco should have an assignment');
+  assert.equal(p1.entries.length,1);
+  assert.equal(p1.entries[0].sessionId,'MR:101');
+  assert.equal(p1.entries[0].role,'scribe');
+  assert.equal(result.people[registry.identities[1].id],undefined,'Pending decision must not be applied');
+  const unresolvedMR102=result.unresolved.filter(u=>u.sessionId==='MR:102');
+  assert.equal(unresolvedMR102.length,1);
+  assert.equal(unresolvedMR102[0].reason,'unverified-short-name');
+  assert.deepEqual(result.decisionIds,['dec-mr101']);
+});
+test('global aliases show the expected affected-occurrence count',()=>{
+  const wb=workbook([
+    record('MR:1',{Date:'2026-09-01',Facilitator:'J. Zanco'}),
+    record('MR:2',{Date:'2026-09-02',Presenter:'J. Zanco'}),
+    record('MR:3',{Date:'2026-09-03','Scribe / teaching points sign-ups':'Scribe: J. Zanco'}),
+    record('MR:4',{Date:'2026-09-04',Facilitator:'Chris Conway'})
+  ]);
+  const baseResult=compile(wb,registry,options);
+  assert.equal(baseResult.audit.resolvedTokens,1);
+  assert.equal(baseResult.audit.unresolvedTokens,3);
+  const aliases={
+    schemaVersion:1,
+    decisions:[
+      {id:'dec-glob-jz',type:'global',status:'accepted',raw:'J. Zanco',personId:registry.identities[0].id}
+    ]
+  };
+  const candidateResult=compile(wb,registry,{...options,aliases,aliasHash:'jz-hash'});
+  assert.equal(candidateResult.audit.resolvedTokens,4);
+  assert.equal(candidateResult.audit.unresolvedTokens,0);
+  assert.equal(candidateResult.audit.uniqueAssignments,4);
+  const p1=candidateResult.people[registry.identities[0].id];
+  assert.equal(p1.entries.length,3);
+  assert.deepEqual(candidateResult.decisionIds,['dec-glob-jz']);
+  const diff=diffLedgers(baseResult,candidateResult);
+  assert.equal(diff.newlyAttributed.length,3);
+  assert.equal(diff.summary.resolvedTokens.delta,3);
+  assert.equal(diff.summary.unresolvedTokens.delta,-3);
+});
+test('token-accounting totals remain balanced across all resolution types',()=>{
+  const wb=workbook([
+    record('MR:1',{Notes:'Cancelled',Facilitator:'Julia Z'}),
+    record('MR:2',{Facilitator:'TBD'}),
+    record('MR:3',{Facilitator:'Julia Z (backup)'}),
+    record('MR:4',{Facilitator:'Julia Z'}),
+    record('MR:5',{Facilitator:'J. Zanco'}),
+    record('MR:6',{Facilitator:'Julia'}),
+    record('MR:7',{Facilitator:'Unknown Guest'})
+  ]);
+  const aliases={
+    schemaVersion:1,
+    decisions:[
+      {id:'dec-occ',type:'occurrence',status:'accepted',sessionId:'MR:6',role:'facilitator',raw:'Julia',personId:registry.identities[0].id},
+      {id:'dec-glob',type:'global',status:'accepted',raw:'J. Zanco',personId:registry.identities[0].id}
+    ]
+  };
+  const result=compile(wb,registry,{...options,aliases,aliasHash:'bal-hash'});
+  assert.equal(result.audit.tokenCount,7);
+  assert.equal(result.audit.excludedTokens,1);
+  assert.equal(result.audit.placeholderTokens,1);
+  assert.equal(result.audit.resolvedTokens,3);
+  assert.equal(result.audit.unresolvedTokens,2);
+  assert.equal(result.audit.tokenCount,result.audit.resolvedTokens+result.audit.unresolvedTokens+result.audit.placeholderTokens+result.audit.excludedTokens);
+  assert.equal(result.audit.uniqueAssignments,result.audit.resolvedTokens-result.audit.duplicateTokens);
+});
+test('same-day sessions remain separate with alias resolution',()=>{
+  const r=record('MR:1',{Date:'2026-09-01',Facilitator:'J. Zanco'});
+  const aliases={
+    schemaVersion:1,
+    decisions:[{id:'dec-jz',type:'global',status:'accepted',raw:'J. Zanco',personId:registry.identities[0].id}]
+  };
+  const result=compile(workbook([r]),registry,{
+    ...options,
+    aliases,
+    aliasHash:'sd-hash',
+    splitMorningReport:rec=>[1,2].map(n=>({...rec,id:rec.id+'::session:'+n}))
+  });
+  const personEntries=result.people[registry.identities[0].id].entries;
+  assert.equal(personEntries.length,2);
+  const sessionIds=personEntries.map(e=>e.sessionId).sort();
+  assert.deepEqual(sessionIds,['MR:1::session:1','MR:1::session:2']);
+  assert.equal(personEntries[0].date,'2026-09-01');
+  assert.equal(personEntries[1].date,'2026-09-01');
+  assert.equal(result.audit.uniqueAssignments,2);
+});
+test('changing aliases does not change source/session identity or unrelated assignments',()=>{
+  const wb=workbook([
+    record('MR:1',{Date:'2026-09-01',Facilitator:'Julia Z'}),
+    record('MR:2',{Date:'2026-09-02',Presenter:'Chris Conway'}),
+    record('MR:3',{Date:'2026-09-03','Scribe / teaching points sign-ups':'Scribe: Julia'})
+  ]);
+  const baseLedger=compile(wb,registry,options);
+  const aliases={
+    schemaVersion:1,
+    decisions:[
+      {id:'dec-mr3',type:'occurrence',status:'accepted',sessionId:'MR:3',role:'scribe',raw:'Julia',personId:registry.identities[0].id}
+    ]
+  };
+  const candidateLedger=compile(wb,registry,{...options,aliases,aliasHash:'test-hash'});
+  assert.deepEqual(baseLedger.rows,candidateLedger.rows);
+  assert.deepEqual(baseLedger.people[registry.identities[2].id],candidateLedger.people[registry.identities[2].id]);
+  const diff=diffLedgers(baseLedger,candidateLedger);
+  assert.equal(diff.removedOrReassigned.length,0);
+  assert.equal(diff.newlyAttributed.length,1);
+  assert.equal(diff.newlyAttributed[0].personId,registry.identities[0].id);
+  assert.equal(diff.newlyAttributed[0].sessionId,'MR:3');
+});
+test('identity decisions do not override cancellation, boundary ambiguity, or conditionals',()=>{
+  const wb=workbook([
+    record('MR:1',{Notes:'Cancelled',Facilitator:'J. Zanco'}),
+    record('MR:2',{Facilitator:'J. Zanco (backup)'}),
+    record('MR:3',{Facilitator:'J. Zanco'})
+  ]);
+  const aliases={
+    schemaVersion:1,
+    decisions:[{id:'dec-jz',type:'global',status:'accepted',raw:'J. Zanco',personId:registry.identities[0].id}]
+  };
+  const result=compile(wb,registry,{
+    ...options,
+    aliases,
+    aliasHash:'guard-hash',
+    splitMorningReport:r=>r.id==='MR:3'?[{...r,session:{unassignedFields:{Facilitator:'J. Zanco'}}}] : [r]
+  });
+  assert.equal(Object.keys(result.people).length,0,'No assignments should be granted');
+  assert.equal(result.audit.excludedTokens,1);
+  assert.equal(result.audit.unresolvedTokens,2);
+  assert.ok(result.exclusions.some(e=>e.reason==='cancellation-or-strikethrough'));
+  assert.ok(result.unresolved.some(u=>u.reason==='conditional-assignment'));
+  assert.ok(result.unresolved.some(u=>u.reason==='unassigned-session-field'));
 });

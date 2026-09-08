@@ -13,6 +13,13 @@
   const ZONES = { PST: -480, PDT: -420, EST: -300, EDT: -240, UTC: 0, GMT: 0, PT: 'America/Los_Angeles', ET: 'America/New_York' };
   const formatters = new Map();
   const text = value => String(value ?? '');
+  const MAX_CACHE_SIZE = 4000;
+  const splitCache = new Map();
+  const timeResolutionCache = new Map();
+  const timeFormatCache = new Map();
+  const facilitatorCache = new Map();
+  let splitCalls = 0, splitHits = 0;
+  let facilitatorCalls = 0, facilitatorHits = 0;
 
   function splitField(value) {
     // Only a whole divider line denotes a new session. Co-staff names do not.
@@ -21,10 +28,26 @@
 
   function splitMorningReport(record) {
     if (record.session) return [record];
+    splitCalls++;
+    const cacheKey = `${record.id}::${SPLIT_FIELDS.map(k => record.fields?.[k] || '').join('||')}`;
+    if (splitCache.has(cacheKey)) {
+      splitHits++;
+      return splitCache.get(cacheKey).map(r => ({
+        ...r,
+        fields: { ...r.fields },
+        flags: [...r.flags],
+        ...(r.session ? { session: { ...r.session, unresolved: [...r.session.unresolved] } } : {})
+      }));
+    }
     const fields = record.fields || {};
     const parts = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, splitField(value)]));
     const count = Math.max(1, ...SPLIT_FIELDS.map(key => (parts[key] || []).length));
-    if (count === 1) return [{ ...record, fields: { ...fields }, flags: [...(record.flags || [])] }];
+    if (count === 1) {
+      const res = [{ ...record, fields: { ...fields }, flags: [...(record.flags || [])] }];
+      if (splitCache.size >= MAX_CACHE_SIZE) splitCache.delete(splitCache.keys().next().value);
+      splitCache.set(cacheKey, res.map(r => Object.freeze({ ...r, fields: Object.freeze({ ...r.fields }), flags: Object.freeze([...r.flags]) })));
+      return res;
+    }
     const unresolved = [];
     const unassignedFields = {};
     for (const [key, values] of Object.entries(parts)) {
@@ -36,7 +59,7 @@
         unresolved.push(`${key}: source block count does not match the session count.`);
       }
     }
-    return Array.from({ length: count }, (_, index) => {
+    const children = Array.from({ length: count }, (_, index) => {
       const childFields = {};
       for (const [key, values] of Object.entries(parts)) {
         childFields[key] = values.length === count ? values[index]
@@ -50,6 +73,14 @@
           sourceFields: { ...fields }, unassignedFields: { ...unassignedFields }, version: VERSION }
       };
     });
+    if (splitCache.size >= MAX_CACHE_SIZE) splitCache.delete(splitCache.keys().next().value);
+    splitCache.set(cacheKey, children.map(r => Object.freeze({
+      ...r,
+      fields: Object.freeze({ ...r.fields }),
+      flags: Object.freeze([...r.flags]),
+      session: Object.freeze({ ...r.session, unresolved: Object.freeze([...r.session.unresolved]) })
+    })));
+    return children;
   }
 
   function validDate(value) {
@@ -119,8 +150,20 @@
   }
   function parseSessionTime(record) {
     const fields = record.fields || {};
+    const legacyKey = Object.keys(record.session?.legacyOverrides || {}).sort().join(';');
+    const unresKey = (record.session?.unresolved || []).join(';');
+    const recordId = record.id || '';
+    const cacheKey = `${recordId}::${VERSION}::${fields.Date || ''}::${fields['Pacific time (source)'] || ''}::${fields['Eastern time (source)'] || ''}::${fields['Date / time (source)'] || ''}::${fields.Start || ''}::${fields.Type || ''}::${fields.Notes || ''}::${unresKey}::${legacyKey}`;
+    if (timeResolutionCache.has(cacheKey)) {
+      return timeResolutionCache.get(cacheKey);
+    }
     const sourceLabel = sourceTimeLabel(fields);
-    const fail = reason => ({ status: 'unresolved', startUtc: null, endUtc: null, sourceLabel, reason, durationAssumed: false });
+    const fail = reason => {
+      const res = { status: 'unresolved', startUtc: null, endUtc: null, sourceLabel, reason, durationAssumed: false };
+      if (timeResolutionCache.size >= MAX_CACHE_SIZE) timeResolutionCache.delete(timeResolutionCache.keys().next().value);
+      timeResolutionCache.set(cacheKey, res);
+      return res;
+    };
     if (Object.keys(record.session?.legacyOverrides || {}).some(key => /date|time/i.test(key))) return fail('Earlier row-level date/time edits need review for this session.');
     if (/\b(cancelled|canceled|moved\s+to|postponed)\b/i.test([fields.Type, fields.Notes, fields['Date / time (source)']].join(' '))) return fail('Source indicates a cancellation or changed schedule; verify the session first.');
     if (record.session?.unresolved?.some(s => /time|Date/i.test(s))) return fail('Time blocks do not align with the split sessions; verify source times.');
@@ -169,19 +212,37 @@
     if (knownEnds.some(e => e !== knownEnds[0])) return fail('Source end times disagree.');
     const end = knownEnds[0] ?? start + 3600000;
     if (end <= start || end - start > 86400000) return fail('Session duration is invalid.');
-    return { status: 'resolved', startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(),
+    const resolved = { status: 'resolved', startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(),
       sourceLabel: clocks.map(c => `${clockLabel(c.start)}${c.end ? '–' + clockLabel(c.end) : ''} ${c.zone}`).join(' / '),
       reason: '', durationAssumed: !knownEnds.length, sourceDate: date };
+    if (timeResolutionCache.size >= MAX_CACHE_SIZE) timeResolutionCache.delete(timeResolutionCache.keys().next().value);
+    timeResolutionCache.set(cacheKey, resolved);
+    return resolved;
   }
 
   function formatSessionTime(record, timeZone) {
     const time = parseSessionTime(record);
-    if (time.status !== 'resolved') return `${time.sourceLabel} • ${time.reason}`;
+    const zone = timeZone || (typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC');
+    const recordId = record.id || '';
+    const formatKey = `${recordId}::${time.status}::${time.startUtc}::${time.sourceLabel}::${time.reason}::${zone}`;
+    if (timeFormatCache.has(formatKey)) return timeFormatCache.get(formatKey);
+
+    if (time.status !== 'resolved') {
+      const res = `${time.sourceLabel} • ${time.reason}`;
+      if (timeFormatCache.size >= MAX_CACHE_SIZE) timeFormatCache.delete(timeFormatCache.keys().next().value);
+      timeFormatCache.set(formatKey, res);
+      return res;
+    }
     try {
-      const zone = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
       const local = new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(time.startUtc));
-      return `${time.sourceLabel} • ${local} your time (${zone})`;
-    } catch { return `${time.sourceLabel} • Local timezone unavailable`; }
+      const formatted = `${time.sourceLabel} • ${local} your time (${zone})`;
+      if (timeFormatCache.size >= MAX_CACHE_SIZE) timeFormatCache.delete(timeFormatCache.keys().next().value);
+      timeFormatCache.set(formatKey, formatted);
+      return formatted;
+    } catch {
+      const fallback = `${time.sourceLabel} • Local timezone unavailable`;
+      return fallback;
+    }
   }
   function escapeCalendar(value) {
     return text(value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').replace(/\\/g, '\\\\').replace(/\r\n|\r|\n/g, '\\n').replace(/;/g, '\\;').replace(/,/g, '\\,');
@@ -218,9 +279,14 @@
     return lines.map(foldCalendar).join('\r\n') + '\r\n';
   }
   function facilitatorNames(value) {
+    facilitatorCalls++;
+    const raw = text(value);
+    if (facilitatorCache.has(raw)) {
+      facilitatorHits++;
+      return facilitatorCache.get(raw);
+    }
     // Delimit people only outside parenthetical annotations.
     const pieces = []; let current = '', depth = 0;
-    const raw = text(value);
     for (let i = 0; i < raw.length; i++) {
       const char = raw[i];
       if (char === '(') depth++;
@@ -232,7 +298,10 @@
       } else current += char;
     }
     if (current.trim()) pieces.push(current.trim());
-    return [...new Set(pieces)].filter(p => !/^(?:tbd|none|n\/a|-|—)$/i.test(p));
+    const res = Object.freeze([...new Set(pieces)].filter(p => !/^(?:tbd|none|n\/a|-|—)$/i.test(p)));
+    if (facilitatorCache.size >= MAX_CACHE_SIZE) facilitatorCache.delete(facilitatorCache.keys().next().value);
+    facilitatorCache.set(raw, res);
+    return res;
   }
   function matchesFacets(record, selection = {}, gapFn = () => []) {
     const f = record.fields || {};
@@ -240,5 +309,55 @@
       && (!selection.facilitator || facilitatorNames(f.Facilitator).some(name => name.toLowerCase() === text(selection.facilitator).toLowerCase()))
       && (!selection.gapsOnly || gapFn(record).length > 0);
   }
-  return Object.freeze({ VERSION, splitField, splitMorningReport, validDate, parseDate, parseClock, parseSessionTime, formatSessionTime, createCalendar, facilitatorNames, matchesFacets });
+  function invalidateRecord(id) {
+    if (!id) return;
+    const prefix = `${id}::`;
+    for (const key of splitCache.keys()) {
+      if (key.startsWith(prefix)) splitCache.delete(key);
+    }
+    for (const key of timeResolutionCache.keys()) {
+      if (key.startsWith(prefix)) timeResolutionCache.delete(key);
+    }
+    for (const key of timeFormatCache.keys()) {
+      if (key.startsWith(prefix)) timeFormatCache.delete(key);
+    }
+  }
+  function clearCaches() {
+    splitCache.clear();
+    timeResolutionCache.clear();
+    timeFormatCache.clear();
+    facilitatorCache.clear();
+    splitCalls = 0;
+    splitHits = 0;
+    facilitatorCalls = 0;
+    facilitatorHits = 0;
+  }
+  function getCacheStats() {
+    return {
+      splitSize: splitCache.size,
+      timeResolutionSize: timeResolutionCache.size,
+      timeFormatSize: timeFormatCache.size,
+      facilitatorSize: facilitatorCache.size,
+      splitCalls,
+      splitHits,
+      facilitatorCalls,
+      facilitatorHits
+    };
+  }
+  return Object.freeze({
+    VERSION,
+    splitField,
+    splitMorningReport,
+    validDate,
+    parseDate,
+    parseClock,
+    parseSessionTime,
+    formatSessionTime,
+    createCalendar,
+    facilitatorNames,
+    matchesFacets,
+    invalidateRecord,
+    clearCaches,
+    getCacheStats
+  });
 });

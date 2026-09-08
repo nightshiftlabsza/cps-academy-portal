@@ -3,8 +3,10 @@
   "asOf": "2026-09-07",
   "sourceHash": "3cc241556f220d2c42af335e1c33c5f4042ed17dfcc5c4bc0e6f3370baf3f9e3",
   "registryHash": "aad6e159a43bfaf543f7dfd10b467fe1a2feb5e123c4dca775887a4f2307a728",
-  "compilerHash": "268600b8064ecd186070d5d52bcc0d0dfcc635ab1e79379180c0e97fa5c07a2d",
-  "sessionParserHash": "f55d1f6979a48e30f225b29f95881c0396336ebda139d98ef01b74da6a1b7568",
+  "compilerHash": "5200620e5185b23795756419827a719d75c840bf407250d27fd2d30301605db0",
+  "sessionParserHash": "1de5d3374fce766f1313c535dc1b0ac6169b96d79a08677ef1d3325aa4de23e0",
+  "aliasHash": null,
+  "decisionIds": [],
   "privacy": "PRIVATE_ADMIN_BACKFILL_NOT_A_PUBLIC_ASSET",
   "identityContract": "Local canonical IDs require reviewed external account mapping. Assignments are not attendance.",
   "audit": {

@@ -484,3 +484,277 @@ test('styles.css contains high-contrast gap tokens and matrix layout definitions
   assert(css.includes('.matrix-slot-gap'), '.matrix-slot-gap defined');
   assert(css.includes('max-width: 2560px'), 'Ultrawide container expansion up to 2560px');
 });
+
+test('getUserCommitments extracts user commitments within 7-day bounds and excludes past or distant sessions', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const SessionCore = require('../session-core.js');
+
+  const sandbox = {
+    URL,
+    SessionCore,
+    today: () => '2026-09-08',
+    iso: v => /^\d{4}-\d{2}-\d{2}$/.test(v),
+    workspace: { edits: {}, added: [] },
+    db: { 'Morning Report': { records: [] }, 'CPS Academy VMRs': { records: [] } }
+  };
+
+  const helperCode = `
+    ${appCode.slice(appCode.indexOf('function dateValue'), appCode.indexOf('const iso='))}
+    ${appCode.slice(appCode.indexOf('function recordDate'), appCode.indexOf('function extraFilters'))}
+    ${appCode.slice(appCode.indexOf('function mrGaps'), appCode.indexOf('function weekKey'))}
+    ${appCode.slice(appCode.indexOf('function sessionZoomUrl'), appCode.indexOf('function home()'))}
+  `;
+
+  vm.runInNewContext(helperCode, sandbox);
+
+  const mockRecords = [
+    {
+      id: 'mr:past',
+      tab: 'Morning Report',
+      fields: {
+        Date: '2026-09-07',
+        Facilitator: 'Dr. House',
+        Presenter: '',
+        'Scribe / teaching points sign-ups': 'Scribe: Dr. House'
+      },
+      flags: []
+    },
+    {
+      id: 'mr:today',
+      tab: 'Morning Report',
+      fields: {
+        Date: '2026-09-08',
+        Facilitator: 'Dr. House',
+        Presenter: 'Dr. Chase',
+        'Scribe / teaching points sign-ups': 'Scribe: \nTeaching Points: '
+      },
+      flags: []
+    },
+    {
+      id: 'mr:day2',
+      tab: 'Morning Report',
+      fields: {
+        Date: '2026-09-10',
+        Facilitator: 'Dr. Cuddy',
+        Presenter: 'Dr. Wilson',
+        'Scribe / teaching points sign-ups': 'Scribe: Dr. House\nTeaching Points: Dr. Cameron'
+      },
+      flags: []
+    },
+    {
+      id: 'mr:day5',
+      tab: 'Morning Report',
+      fields: {
+        Date: '2026-09-13',
+        Facilitator: 'Dr. Foreman',
+        Presenter: 'Dr. House',
+        'Scribe / teaching points sign-ups': ''
+      },
+      flags: []
+    },
+    {
+      id: 'mr:day8',
+      tab: 'Morning Report',
+      fields: {
+        Date: '2026-09-16',
+        Facilitator: 'Dr. House',
+        Presenter: '',
+        'Scribe / teaching points sign-ups': ''
+      },
+      flags: []
+    }
+  ];
+
+  const profile = { name: 'Dr. House' };
+  const commitments = sandbox.getUserCommitments(profile, 7, {
+    referenceDate: '2026-09-08',
+    records: mockRecords
+  });
+
+  assert.equal(commitments.length, 3, 'Must extract exactly 3 sessions within 7-day bounds');
+  assert.equal(commitments[0].date, '2026-09-08');
+  assert.equal(commitments[0].daysUntil, 0);
+  assert.equal(commitments[0].urgency, 'urgent');
+  assert.deepEqual([...commitments[0].roles], ['Facilitator']);
+
+  assert.equal(commitments[1].date, '2026-09-10');
+  assert.equal(commitments[1].daysUntil, 2);
+  assert.equal(commitments[1].urgency, 'upcoming');
+  assert.deepEqual([...commitments[1].roles], ['Scribe']);
+
+  assert.equal(commitments[2].date, '2026-09-13');
+  assert.equal(commitments[2].daysUntil, 5);
+  assert.equal(commitments[2].urgency, 'upcoming');
+  assert.deepEqual([...commitments[2].roles], ['Presenter']);
+});
+
+test('Accurate role attribution across multi-person tokenized cells, TP shorthand, and alias matching', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const SessionCore = require('../session-core.js');
+
+  const sandbox = {
+    URL,
+    SessionCore,
+    today: () => '2026-09-08',
+    iso: v => /^\d{4}-\d{2}-\d{2}$/.test(v),
+    workspace: { edits: {}, added: [] },
+    db: { 'Morning Report': { records: [] }, 'CPS Academy VMRs': { records: [] } }
+  };
+
+  const helperCode = `
+    ${appCode.slice(appCode.indexOf('function dateValue'), appCode.indexOf('const iso='))}
+    ${appCode.slice(appCode.indexOf('function recordDate'), appCode.indexOf('function extraFilters'))}
+    ${appCode.slice(appCode.indexOf('function mrGaps'), appCode.indexOf('function weekKey'))}
+    ${appCode.slice(appCode.indexOf('function sessionZoomUrl'), appCode.indexOf('function home()'))}
+  `;
+
+  vm.runInNewContext(helperCode, sandbox);
+
+  const mockSession = {
+    id: 'mr:multi-token',
+    tab: 'Morning Report',
+    fields: {
+      Date: '2026-09-09',
+      Facilitator: 'Rabih & Reza',
+      Presenter: '',
+      'Scribe / teaching points sign-ups': 'Scribe: Dr. Alice | TP: Dr. Bob (can switch)\nCase Presenter: Dr. Charlie',
+      'Meeting info': 'https://us02web.zoom.us/j/9876543210'
+    },
+    flags: []
+  };
+
+  const rezaCommitments = sandbox.getUserCommitments({ name: 'Reza' }, 7, {
+    referenceDate: '2026-09-08',
+    records: [mockSession]
+  });
+  assert.equal(rezaCommitments.length, 1);
+  assert.equal(rezaCommitments[0].role, 'Facilitator');
+  assert(rezaCommitments[0].coStaff.includes('Rabih'), 'Rabih identified as co-facilitator');
+  assert(rezaCommitments[0].coStaff.includes('Dr. Charlie'), 'Dr. Charlie identified as presenter');
+  assert.equal(rezaCommitments[0].zoomUrl, 'https://us02web.zoom.us/j/9876543210');
+
+  const bobCommitments = sandbox.getUserCommitments({ name: 'Dr. Bob' }, 7, {
+    referenceDate: '2026-09-08',
+    records: [mockSession]
+  });
+  assert.equal(bobCommitments.length, 1);
+  assert.equal(bobCommitments[0].role, 'Teaching Points');
+  assert(bobCommitments[0].coStaff.includes('Dr. Alice'), 'Dr. Alice identified as scribe coworker');
+
+  const aliasDecisionFixture = {
+    schemaVersion: 1,
+    decisions: [
+      { id: 'd:1', personId: 'person-zg', raw: 'Zak G', canonicalName: 'Zakariyya Gardee' }
+    ]
+  };
+
+  const aliasSession = {
+    id: 'mr:alias-session',
+    tab: 'Morning Report',
+    fields: {
+      Date: '2026-09-11',
+      Facilitator: 'Zak G + Reza',
+      Presenter: '',
+      'Scribe / teaching points sign-ups': ''
+    },
+    flags: []
+  };
+
+  const zgCommitments = sandbox.getUserCommitments(
+    { id: 'zg', personId: 'person-zg', name: 'Zakariyya Gardee', aliases: ['Zakariyya G'] },
+    7,
+    {
+      referenceDate: '2026-09-08',
+      records: [aliasSession],
+      aliases: aliasDecisionFixture
+    }
+  );
+  assert.equal(zgCommitments.length, 1, 'Alias Zak G resolves to Zakariyya Gardee');
+  assert.equal(zgCommitments[0].role, 'Facilitator');
+});
+
+test('Graceful empty states when no sessions are assigned (zero guilt, zero cheerleading)', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const SessionCore = require('../session-core.js');
+
+  const sandbox = {
+    URL,
+    SessionCore,
+    today: () => '2026-09-08',
+    iso: v => /^\d{4}-\d{2}-\d{2}$/.test(v),
+    workspace: { edits: {}, added: [], reporterName: 'Dr. Unassigned' },
+    db: { 'Morning Report': { records: [] }, 'CPS Academy VMRs': { records: [] } },
+    Identity: {
+      getCurrentUser: () => ({ id: 'unassigned-member', name: 'Dr. Unassigned' })
+    }
+  };
+
+  const helperCode = `
+    ${appCode.slice(appCode.indexOf('function dateValue'), appCode.indexOf('const iso='))}
+    ${appCode.slice(appCode.indexOf('function recordDate'), appCode.indexOf('function extraFilters'))}
+    ${appCode.slice(appCode.indexOf('function mrGaps'), appCode.indexOf('function weekKey'))}
+    ${appCode.slice(appCode.indexOf('function sessionZoomUrl'), appCode.indexOf('function home()'))}
+  `;
+
+  vm.runInNewContext(helperCode, sandbox);
+
+  const emptyCommitments = sandbox.getUserCommitments({ name: 'Dr. Unassigned' }, 7, {
+    referenceDate: '2026-09-08',
+    records: []
+  });
+  assert.equal(emptyCommitments.length, 0);
+
+  const html = sandbox.renderMyCommitmentsWidget();
+  assert(html.includes('No scheduled commitments in the next 7 days.'), 'Displays exact quiet phrase');
+  assert(html.includes('commitments-quiet'), 'Applies calm unobtrusive styling class');
+  assert(!html.includes('great job'), 'Zero cheerleading');
+  assert(!html.includes('missed'), 'Zero guilt');
+
+  sandbox.Identity.getCurrentUser = () => null;
+  sandbox.workspace.reporterName = '';
+  const signedOutHtml = sandbox.renderMyCommitmentsWidget();
+  assert(signedOutHtml.includes('Signed out'), 'Handles signed-out state cleanly');
+  assert(signedOutHtml.includes('commitments-open-prefs-btn'), 'Provides preferences button');
+});
+
+test('Temporal urgency badge and Zoom launch link formatting adhere to clinical spec', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const SessionCore = require('../session-core.js');
+
+  const sandbox = {
+    URL,
+    SessionCore,
+    today: () => '2026-09-08',
+    iso: v => /^\d{4}-\d{2}-\d{2}$/.test(v)
+  };
+
+  const helperCode = `
+    ${appCode.slice(appCode.indexOf('function sessionZoomUrl'), appCode.indexOf('function home()'))}
+  `;
+  vm.runInNewContext(helperCode, sandbox);
+
+  const todayBadge = sandbox.formatUrgencyBadge({ daysUntil: 0, sessionTime: { startUtc: '2026-09-08T16:00:00Z' } });
+  assert(todayBadge.includes('urgency-badge-urgent'), 'Today has urgent badge class');
+  assert(todayBadge.includes('Today'), 'Today formatted');
+
+  const tomorrowBadge = sandbox.formatUrgencyBadge({ daysUntil: 1, sessionTime: { startUtc: '2026-09-09T18:00:00Z' } });
+  assert(tomorrowBadge.includes('urgency-badge-urgent'), 'Tomorrow has urgent badge class');
+  assert(tomorrowBadge.includes('Tomorrow'), 'Tomorrow formatted');
+
+  const calmBadge = sandbox.formatUrgencyBadge({ daysUntil: 4, sessionTime: null });
+  assert(calmBadge.includes('urgency-badge-calm'), '4 days has calm amber badge class');
+  assert(calmBadge.includes('Upcoming: in 4 days'), 'Calm badge text formatted');
+
+  const withZoom = {
+    fields: { Notes: 'Discussion on zoom https://us02web.zoom.us/j/123456789 passcode 42' },
+    links: {}
+  };
+  assert.equal(sandbox.sessionZoomUrl(withZoom), 'https://us02web.zoom.us/j/123456789');
+
+  const withoutZoom = {
+    fields: { Notes: 'In person meeting' },
+    links: {}
+  };
+  assert.equal(sandbox.sessionZoomUrl(withoutZoom), '');
+});
+

@@ -62,11 +62,19 @@ The ledger is not a public asset or browser logbook. Serving it would expose oth
 
 ## Verified local milestone
 
-The local milestone passes 52 native Node tests and the operations browser suite at 1440px and 390px using Microsoft Edge. The browser suite checks search, split cards and matrix rows, isolated edits after reload, compound filtering, timezone display, calendar download, VMR restore, drafts and backup import into a fresh workspace. Console errors and page overflow fail the suite. A 390px screenshot was also inspected.
+The local milestone passes 125 native Node tests (`npm test`), static asset build (`npm run build`), tablet matrix audits at 768px/820px/1024px (`npm run test:tablet`), offline recovery audits (`npm run test:offline`), and performance/windowing audits (`npm run test:perf`) using Microsoft Edge.
+
+Key performance and architectural gates established:
+- **Render Caching (Task 11)**: Split caching and search memoization improved warm filter performance by **19.4x** (297ms down to 15ms) with 100% split cache hit rate (warm-path CPU data-projection benchmark; scrolling responsiveness is governed separately by DOM node virtualization in Task 12).
+- **Virtual List Windowing (Task 12)**: Large Morning Report schedule (2,892 items) and completed logbook records are virtualized into 21–28 active DOM rows with dynamic top/bottom spacers, retaining keyboard focus and a "Show all for Find (Ctrl+F)" toggle.
+- **Search Explanations (Task 08)**: Result cards render extracted search snippets with safe `<mark>` highlighting and section alias indicators without XSS vulnerabilities.
+- **Versioned Offline Service Worker (Task 09)**: Pre-caches shell assets under `cps-portal-shell-v0.4.0`, handles network fallbacks, dirty form protection, and selective cache purging.
+- **Disabled-by-Default Sync Contract (Task 10)**: Strict read-only sync handler in `api/_lib/sync-contract.cjs` returning 503 `SYNC_NOT_CONFIGURED`, validating schemas up to 64 KiB, and preventing credential leaks.
+- **Static Build Allowlist (Task 13)**: Build and local server strictly bundle and serve 11 designated app assets, guaranteeing that raw ledgers, identity registries, and configuration files are never exposed.
 
 The compiled ledger accounts for 2,623 source rows and 2,801 sessions: 10,630 role tokens comprise 681 resolved assignments, 9,672 unresolved tokens, 156 placeholders and 121 cancellation/strike exclusions. These are attribution results, not attendance totals. A second compilation with identical inputs returns `unchanged`. Source workbook and hosting metadata bytes were verified unchanged.
 
-Reproduce with `npm test`, `npm run build`, `npm run test:operations` (optional browser tools described in README), and `node scripts/compile-logbooks.cjs --as-of 2026-09-07`. The original browser smoke test remains available as `npm run test:browser`.
+Reproduce with `npm test`, `npm run build`, `npm run test:perf`, `npm run test:tablet`, `npm run test:offline`, and `node scripts/compile-logbooks.cjs --as-of 2026-09-07`.
 
 ## Production boundary and collaborator handoff
 

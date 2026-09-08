@@ -11,6 +11,10 @@
     "test": "node --test tests/*.test.cjs",
     "test:browser": "node tests/browser.cjs",
     "test:operations": "node tests/browser-operations.cjs",
+    "test:perf": "node tests/browser-performance.cjs",
+    "test:tablet": "node tests/browser-tablet.cjs",
+    "test:offline": "node tests/browser-offline.cjs",
+    "test:all": "npm test && npm run build && node tests/browser-performance.cjs && node tests/browser-tablet.cjs",
     "compile:logbooks": "node scripts/compile-logbooks.cjs"
   }
 }

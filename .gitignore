@@ -13,6 +13,7 @@
 upload/
 backups/
 cps-hub-backup*.json
+*.candidate.json
 node_modules/
 dist/
 build/
@@ -20,7 +21,7 @@ coverage/
 playwright-report/
 test-results/
 screenshots/
-.edge-tmp-profile/
+.edge-*/
 *.log
 *.zip
 *.tgz
