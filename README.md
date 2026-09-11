@@ -27,9 +27,12 @@ Copies the five site assets into `dist/`. It does not deploy anything. The devel
 npm install --no-save --package-lock=false playwright-core
 npx --yes --package playwright-core playwright-core install chromium
 npm run test:browser
+npm run test:mobile
 ```
 
 The normal tests require only Node.js. Browser tests need Chromium. `CHROMIUM_PATH` can point to an existing compatible executable. These checks run locally and do not change the hosted site.
+
+The mobile suite covers all 18 sections at 320, 360, 390, 430, 820 and 1440 pixels, alternate views and details, synthetic long content, and mobile admin/logbook workflows. Set `CPS_QA_SCREENSHOTS=1` to save private screenshots in the ignored `screenshots/` folder. See [mobile audit notes](docs/mobile-ux-audit.md) for design decisions and validation limits.
 
 ## Stack and structure
 - `index.html`: page shell and dialogs.

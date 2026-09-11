@@ -71,11 +71,12 @@
           <div class="mobile-brand"><span class="brand-mark">CPS</span><strong>Academy Hub</strong></div>
           <div class="search-wrap">
             <span aria-hidden="true">⌕</span>
-            <input id="global-search" type="search" placeholder="Search this view…" autocomplete="off" />
+            <input id="global-search" type="search" aria-label="Search all Academy records" placeholder="Search this view…" autocomplete="off" />
             <kbd>⌘ K</kbd>
           </div>
           <div class="top-actions">
             <button class="icon-button notification-button" aria-label="Notifications">◌<span></span></button>
+            <button class="icon-button mobile-prefs-btn" id="mobile-prefs-btn" aria-label="Workspace and profile preferences">⚙</button>
             <button class="button primary" id="new-item-button"><span aria-hidden="true">＋</span> New item</button>
           </div>
         </header>
@@ -92,6 +93,13 @@
     </button>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <dialog id="navigation-dialog" class="dialog navigation-dialog" aria-labelledby="navigation-title">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-head"><h2 id="navigation-title">All sections</h2><button class="icon-button" aria-label="Close navigation">×</button></div>
+        <nav id="all-sections" aria-label="All Academy sections"></nav>
+      </form>
+    </dialog>
 
     <dialog id="detail-dialog" class="dialog">
       <form method="dialog" class="dialog-card">
@@ -137,6 +145,19 @@
           <button type="button" class="button primary" id="confirm-import-btn">Apply Import</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="record-actions-dialog" class="dialog">
+      <div class="dialog-card">
+        <div class="dialog-head">
+          <div><p class="eyebrow" id="record-actions-eyebrow">Session Actions</p><h2 id="record-actions-title">Options</h2></div>
+          <button class="icon-button dialog-close-btn" onclick="$('#record-actions-dialog').close()" aria-label="Close">×</button>
+        </div>
+        <div id="record-actions-body" style="display:grid;gap:10px;padding:12px 0;"></div>
+        <div class="dialog-actions">
+          <button type="button" class="button secondary" onclick="$('#record-actions-dialog').close()">Close</button>
+        </div>
+      </div>
     </dialog>
 
     <dialog id="quick-claim-dialog" class="dialog">
@@ -249,7 +270,7 @@
     <dialog id="admin-prefs-dialog" class="dialog">
       <form method="dialog" class="dialog-card" id="admin-prefs-form">
         <div class="dialog-head">
-          <div><p class="eyebrow">Local Preferences</p><h2>Developer &amp; Admin Mode</h2></div>
+          <div><p class="eyebrow">Local Preferences</p><h2>Workspace &amp; Profile Preferences</h2></div>
           <button class="icon-button" value="cancel" aria-label="Close">×</button>
         </div>
         <div class="pref-item">
@@ -258,7 +279,7 @@
             <p class="muted">Enable Super admin permissions and access to the Issue Triage dashboard.</p>
           </div>
           <label class="toggle-switch">
-            <input type="checkbox" id="admin-toggle" />
+            <input type="checkbox" id="admin-toggle" aria-label="Enable local admin profile" />
             <span class="toggle-slider"></span>
           </label>
         </div>
@@ -271,12 +292,13 @@
             <button type="button" class="button secondary small" id="activate-mock-profile-btn">Set Dev Profile</button>
             <button type="button" class="button secondary small" id="clear-mock-profile-btn">Sign Out</button>
           </div>
+        </div>
         <div class="pref-item" style="border-top:1px solid var(--line);padding-top:12px;">
           <div class="pref-meta">
-            <strong>Workspace Theme</strong>
+            <label for="appearance-theme" style="font-weight:700;display:block;cursor:pointer;">Workspace Theme</label>
             <p class="muted">Select institutional color palette.</p>
           </div>
-          <select id="appearance-theme" class="select" style="max-width:150px;">
+          <select id="appearance-theme" class="select" style="min-width:160px;">
             <option value="emerald">Academic Emerald</option>
             <option value="cobalt">Clinical Cobalt</option>
             <option value="plum">Editorial Plum</option>
@@ -284,10 +306,10 @@
         </div>
         <div class="pref-item">
           <div class="pref-meta">
-            <strong>Appearance Mode</strong>
+            <label for="appearance-mode" style="font-weight:700;display:block;cursor:pointer;">Appearance Mode</label>
             <p class="muted">Light, dark, or follow system theme.</p>
           </div>
-          <select id="appearance-mode" class="select" style="max-width:150px;">
+          <select id="appearance-mode" class="select" style="min-width:160px;">
             <option value="system">System</option>
             <option value="light">Light</option>
             <option value="dark">Dark</option>

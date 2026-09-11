@@ -21,7 +21,7 @@ const KEY='cps-hub-workspace-v2';
    const context=await browser.newContext({viewport:{width,height:900},timezoneId:'Africa/Johannesburg',acceptDownloads:true});
    const p=await context.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));p.on('console',msg=>{if(msg.type()==='error')errors.push(msg.text())});
    const nav=async area=>{await p.goto(base+'/#'+encodeURIComponent(area));await p.locator('#page h1').waitFor();};
-   const open=async id=>{await p.locator(`[data-open="${id}"][data-area]`).first().click();await p.locator('#detail-dialog[open]').waitFor();};
+   const open=async id=>{await p.locator("#page h1").waitFor();const direct=p.locator(`[data-open="${id}"][data-area]`).first();if(await direct.count())await direct.click();else{await p.locator(`[data-record-menu="${id}"]`).first().click();await p.locator("#menu-act-open").click();}await p.locator('#detail-dialog[open]').waitFor();};
    const close=async()=>{await p.keyboard.press('Escape');};
    const state=()=>p.evaluate(key=>JSON.parse(localStorage.getItem(key)),KEY);
    const overflow=async label=>assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${width}px overflow at ${label}`);
