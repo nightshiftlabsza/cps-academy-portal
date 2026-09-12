@@ -13,7 +13,7 @@
     'CRC': 'crc clinical reasoning case presenter mentor',
     'CRC - retired': 'crc retired mentorship archive legacy mentee mentor case presentation',
     'OrgStructure': 'orgstructure org structure org chart leadership teams',
-    'Members': 'members orgstructure org structure directory sponsors country',
+    'Members': 'members orgstructure org structure directory sponsors country participants core team leaders inactive cohort',
     'Research @CPSolvers': 'research cpsolvers collaborators publications skills',
     'Podcast Episodes': 'podcast episodes audio editor release',
     'Schema review': 'schema review infographic video pipeline',
@@ -32,6 +32,11 @@
     const editSig = r._editSig || '';
     const cacheKey = `${r.id || ''}::${t}::${editSig}::${r.source || ''}::${Object.values(r.fields || {}).join(' ')}`;
     if (searchIndexCache.has(cacheKey)) return searchIndexCache.get(cacheKey);
+    if (r && r._search && !editSig) {
+      if (searchIndexCache.size >= MAX_SEARCH_CACHE_SIZE) searchIndexCache.delete(searchIndexCache.keys().next().value);
+      searchIndexCache.set(cacheKey, r._search);
+      return r._search;
+    }
     const res = `${t} ${r.source || ''} ${tabAliases[t] || ''} ${Object.values(r.fields || {}).join(' ')}`.toLowerCase();
     if (searchIndexCache.size >= MAX_SEARCH_CACHE_SIZE) searchIndexCache.delete(searchIndexCache.keys().next().value);
     searchIndexCache.set(cacheKey, res);

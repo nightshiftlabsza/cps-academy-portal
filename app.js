@@ -55,7 +55,7 @@ function captureDiagnostics() {
 }
 
 const groups={Sessions:['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs','Leader of the Week'],People:['Members','OrgStructure','CRC','CRC - retired'],Production:['Podcast Episodes','Schema review'],Research:['Research @CPSolvers','Conferences'],Links:['Important links']};
-const descriptions={'Morning Report':'The session team, sign-ups and teaching support in one place.','CPS Academy VMRs':'Explore the Academy’s learning archive. Find a topic, facilitator or recording.','CRC':'Follow presenters, mentoring assignments and case progress.','CRC - retired':'Archived and legacy clinical reasoning case mentorship records.','Members':'Find Academy members, sponsors and social handles.','OrgStructure':'Responsibilities and teams, as recorded in the workbook.','Research @CPSolvers':'Find collaborators by research skills and availability.','Podcast Episodes':'Coordinate ownership and editing. The workbook target is readiness two days before release.','Schema review':'Coordinate video, infographic and review assignments. Friday review → Monday upload.','Important links':'Your recurring Academy resources, ready to open.','Residency Programs':'Partner hospital residency programs, discussants and session facilitators.'};
+const descriptions={'Morning Report':'The session team, sign-ups and teaching support in one place.','CPS Academy VMRs':'Explore the Academy’s learning archive. Find a topic, facilitator or recording.','CRC':'Follow presenters, mentoring assignments and case progress.','CRC - retired':'Archived and legacy clinical reasoning case mentorship records.','Members':'Find Academy members, sponsors and social handles.','OrgStructure':'Responsibilities and teams, as recorded in the workbook.','Research @CPSolvers':'Find collaborators by research skills and availability.','Podcast Episodes':'Coordinate ownership and editing. The workbook target is readiness two days before release.','Schema review':'Coordinate video, infographic and review assignments. Friday review → Monday upload.','Important links':'Your recurring Academy resources, ready to open.','Conferences':'Academic conferences, congresses, and scholarship opportunities.','Residency Programs':'Partner hospital residency programs, discussants and session facilitators.'};
 const titles={'Morning Report':'Date','CPS Academy VMRs':'Session title','Members':'Name','OrgStructure':'Team / responsibility','CRC':'Presenter','CRC - retired':'MENTEE','Research @CPSolvers':'Name','Podcast Episodes':'Episode','Schema review':'Schema','Conferences':'Congress','Important links':'Resource','Leader of the Week':'Member','Special VMRs':'Details','Student Forum':'Topic','Residency Programs':'Residency Programs'};
 const facets={'Morning Report':'Type','CPS Academy VMRs':'Facilitator','Members':'Country','CRC':'Status','CRC - retired':"PRESENTER'S COUNTRY",'Research @CPSolvers':'Availability','Schema review':'Status','Podcast Episodes':'Audio editor','OrgStructure':'Role','Special VMRs':'Type','Residency Programs':'Facilitator'};
 const tabAliases={'Morning Report':'morning report mr vmr daily session','CPS Academy VMRs':'cps academy vmrs vmr archive session recording learning','CRC':'crc clinical reasoning case presenter mentor','CRC - retired':'crc retired mentorship archive legacy mentee mentor case presentation rounds round','OrgStructure':'orgstructure org structure org chart leadership teams teams & leadership teams and leadership','Members':'members orgstructure org structure directory sponsors country participants core team leaders inactive cohort','Research @CPSolvers':'research cpsolvers collaborators publications skills','Podcast Episodes':'podcast episodes audio editor release','Schema review':'schema review infographic video pipeline','Conferences':'conferences congress scholarship meeting','Important links':'important links resources bookmarks recurring','Leader of the Week':'leader of the week member','Special VMRs':'special vmrs vmr details','Student Forum':'student forum topic expert vmr','Residency Programs':'residency programs partner hospital discussants junior member facilitator allegheny october november december january february'};
@@ -77,6 +77,25 @@ function getOrgRecordGroup(id){
   }
   return null;
 }
+
+// ==========================================
+// Research Collaborators View State (Prompt 5)
+// ==========================================
+const RESEARCH_SKILLS = [
+  'Prior CPS publications',
+  'Research writing',
+  'Data analytics',
+  'Cross-sectional studies',
+  'Systematic reviews',
+  'Qualitative studies',
+  'Case reports'
+];
+let researchSearchQuery = '';
+let researchSkillFilter = 'all';
+let researchAvailabilityFilter = 'all';
+let researchFilter = 'all';
+let researchVisibleSkills = new Set(RESEARCH_SKILLS);
+let researchPickerOpen = false;
 
 // ==========================================
 // Display Classification Layer (Prompt 2)
@@ -319,8 +338,347 @@ function recordSearchText(r,t){
   return text;
 }
 function searchMatches(r,t,terms){const txt=recordSearchText(r,t);return terms.every(term=>txt.includes(term))}
-let skill='',dateFrom='',dateTo='',owner='',showAll=false,sessionType='',sessionFacilitator='',gapsOnly=false,sectionQuery='';
-let db={},tab='Home',query='',searchPage=0,filter='All',facet='',sort='source',page=0,mode='cards',selected=null,editingTab='',quickClaimRecord=null,quickClaimRole='',issueFilter='All',issueSectionFilter='',workspace={edits:{},added:[],favorites:[],history:[],recent:[],issues:[],isAdmin:false,role:'VMR Leadership'},storageIssue=false;
+let skill='',dateFrom='',dateTo='',owner='',sessionType='',sessionFacilitator='',gapsOnly=false,sectionQuery='';
+let db={},tab='Home',query='',searchPage=0,filter='All',facet='',sort='source',page=0,mode='cards',showAll=false,selected=null,editingTab='',quickClaimRecord=null,quickClaimRole='',issueFilter='All',issueSectionFilter='',workspace={edits:{},added:[],favorites:[],history:[],recent:[],issues:[],isAdmin:false,role:'VMR Leadership'},storageIssue=false;
+let memberSearchQuery='',memberCohortFilter='all',memberCountryFilter='all',memberSort='source',memberExpandedCohorts=new Set(['participants','core','leaders','inactive','other']),memberExpandedDetails=new Set(),memberShowStructural=false;
+
+// ==========================================
+// Transient Browsing State Management (Prompt 6)
+// ==========================================
+const BROWSING_STORAGE_KEY = 'cps-browsing-state-v1';
+const sectionBrowsingMemory = new Map();
+let globalSearchActive = false;
+let globalSearchLastSection = 'Home';
+let globalSearchSavedState = null;
+let lastDialogOpener = null;
+let currentAnchorRecordId = null;
+
+function getSavedBrowsingMap() {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      const raw = sessionStorage.getItem(BROWSING_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    }
+  } catch {}
+  return {};
+}
+
+function persistBrowsingMap(obj) {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(BROWSING_STORAGE_KEY, JSON.stringify(obj));
+    }
+  } catch {}
+}
+
+function getSectionState(t) {
+  if (sectionBrowsingMemory.has(t)) return sectionBrowsingMemory.get(t);
+  const map = getSavedBrowsingMap();
+  if (map[t]) {
+    sectionBrowsingMemory.set(t, map[t]);
+    return map[t];
+  }
+  return null;
+}
+
+function setSectionAnchor(t, anchorId) {
+  if (!t || !anchorId) return;
+  currentAnchorRecordId = anchorId;
+  const current = getSectionState(t) || {};
+  current.anchorId = anchorId;
+  sectionBrowsingMemory.set(t, current);
+}
+
+function findTopVisibleRecordId() {
+  if (typeof document === 'undefined') return null;
+  const topOffset = ((document.querySelector('.topbar')?.offsetHeight || 60) + 20);
+  const candidates = document.querySelectorAll('[data-record-id], tr[data-open], article.panel[data-open], .mobile-record, .research-row, .conference-brief-card');
+  for (const el of candidates) {
+    const rect = el.getBoundingClientRect();
+    if (rect.bottom > topOffset && rect.top < (typeof window !== 'undefined' ? window.innerHeight : 800)) {
+      return el.dataset.recordId || el.dataset.open || el.id || null;
+    }
+  }
+  return null;
+}
+
+function saveSectionState(t) {
+  if (!t || t === 'admin/issues' || t === 'profile/logbook') return;
+  const currentScroll = typeof window !== 'undefined' ? (window.scrollY || window.pageYOffset || 0) : 0;
+  const topAnchor = typeof findTopVisibleRecordId === 'function' ? findTopVisibleRecordId() : null;
+  const prev = getSectionState(t) || {};
+
+  const state = {
+    ...prev,
+    scrollY: currentScroll,
+    anchorId: currentAnchorRecordId || prev.anchorId || topAnchor,
+    sectionQuery: sectionQuery || '',
+    query: query || '',
+    filter: filter || 'All',
+    facet: facet || '',
+    owner: owner || '',
+    sessionType: sessionType || '',
+    sessionFacilitator: sessionFacilitator || '',
+    gapsOnly: Boolean(gapsOnly),
+    skill: skill || '',
+    dateFrom: dateFrom || '',
+    dateTo: dateTo || '',
+    sort: sort || 'source',
+    mode: mode || 'cards',
+    page: page || 0,
+    showAll: Boolean(showAll),
+    // Section-specific:
+    memberSearchQuery: typeof memberSearchQuery !== 'undefined' ? memberSearchQuery : '',
+    memberCohortFilter: typeof memberCohortFilter !== 'undefined' ? memberCohortFilter : 'all',
+    memberCountryFilter: typeof memberCountryFilter !== 'undefined' ? memberCountryFilter : 'all',
+    memberSort: typeof memberSort !== 'undefined' ? memberSort : 'source',
+    memberShowStructural: typeof memberShowStructural !== 'undefined' ? Boolean(memberShowStructural) : false,
+    memberExpandedCohorts: typeof memberExpandedCohorts !== 'undefined' ? [...memberExpandedCohorts] : [],
+    orgSearchQuery: typeof orgSearchQuery !== 'undefined' ? orgSearchQuery : '',
+    orgGroupFilter: typeof orgGroupFilter !== 'undefined' ? orgGroupFilter : 'all',
+    orgExpandedGroups: typeof orgExpandedGroups !== 'undefined' ? [...orgExpandedGroups] : [],
+    researchSearchQuery: typeof researchSearchQuery !== 'undefined' ? researchSearchQuery : '',
+    researchSkillFilter: typeof researchSkillFilter !== 'undefined' ? researchSkillFilter : 'all',
+    researchAvailabilityFilter: typeof researchAvailabilityFilter !== 'undefined' ? researchAvailabilityFilter : 'all',
+    researchFilter: typeof researchFilter !== 'undefined' ? researchFilter : 'all',
+    researchVisibleSkills: typeof researchVisibleSkills !== 'undefined' ? [...researchVisibleSkills] : [],
+    researchPickerOpen: typeof researchPickerOpen !== 'undefined' ? Boolean(researchPickerOpen) : false,
+    linksSearchQuery: typeof linksSearchQuery !== 'undefined' ? linksSearchQuery : '',
+    linksFilter: typeof linksFilter !== 'undefined' ? linksFilter : 'all',
+    linksCategoryFilter: typeof linksCategoryFilter !== 'undefined' ? linksCategoryFilter : 'all',
+    conferenceSearchQuery: typeof conferenceSearchQuery !== 'undefined' ? conferenceSearchQuery : '',
+    conferenceFilter: typeof conferenceFilter !== 'undefined' ? conferenceFilter : 'all'
+  };
+
+  sectionBrowsingMemory.set(t, state);
+  const map = getSavedBrowsingMap();
+  map[t] = state;
+  persistBrowsingMap(map);
+}
+
+function clampPageForSection(t, targetPage) {
+  let count = 0;
+  if (db && db[t]) {
+    try {
+      count = (t === tab) ? filtered().length : records(t).length;
+    } catch {
+      count = records(t).length;
+    }
+  } else if (t === 'Members' && db && db['Members']) {
+    count = records('Members').length;
+  }
+  const pageSize = showAll ? (count || 1) : (t === 'Members' ? 50 : 12);
+  const maxPage = Math.max(0, Math.ceil(count / pageSize) - 1);
+  page = Math.min(Math.max(0, targetPage), maxPage);
+}
+
+function restoreSectionState(t) {
+  const saved = getSectionState(t);
+  const isMobile = typeof window !== 'undefined' && (window.innerWidth || 0) <= 760;
+
+  if (!saved) {
+    filter = t === 'Morning Report' ? 'Upcoming' : 'All';
+    owner = '';
+    facet = '';
+    sessionType = '';
+    sessionFacilitator = '';
+    gapsOnly = false;
+    sectionQuery = '';
+    skill = '';
+    dateFrom = '';
+    dateTo = '';
+    sort = t === 'CPS Academy VMRs' ? 'date' : 'source';
+    page = 0;
+    showAll = false;
+    currentAnchorRecordId = null;
+    if (t === 'Morning Report') mode = isMobile ? 'agenda' : 'matrix';
+    else if (['Podcast Episodes', 'Schema review'].includes(t)) mode = 'board';
+    else mode = 'cards';
+    return;
+  }
+
+  currentAnchorRecordId = saved.anchorId || null;
+  sectionQuery = saved.sectionQuery || '';
+  filter = saved.filter || (t === 'Morning Report' ? 'Upcoming' : 'All');
+  facet = saved.facet || '';
+  owner = saved.owner || '';
+  sessionType = saved.sessionType || '';
+  sessionFacilitator = saved.sessionFacilitator || '';
+  gapsOnly = Boolean(saved.gapsOnly);
+  skill = saved.skill || '';
+  dateFrom = saved.dateFrom || '';
+  dateTo = saved.dateTo || '';
+  sort = saved.sort || (t === 'CPS Academy VMRs' ? 'date' : 'source');
+  showAll = Boolean(saved.showAll);
+
+  if (t === 'Morning Report') {
+    if (isMobile) {
+      mode = (saved.mode === 'matrix') ? 'agenda' : (saved.mode || 'agenda');
+    } else {
+      mode = saved.mode || 'matrix';
+    }
+  } else if (['Podcast Episodes', 'Schema review'].includes(t)) {
+    mode = ['board', 'cards', 'table'].includes(saved.mode) ? saved.mode : 'board';
+  } else {
+    mode = ['cards', 'table'].includes(saved.mode) ? saved.mode : 'cards';
+  }
+
+  if (typeof memberSearchQuery !== 'undefined' && saved.memberSearchQuery !== undefined) memberSearchQuery = saved.memberSearchQuery;
+  if (typeof memberCohortFilter !== 'undefined' && saved.memberCohortFilter !== undefined) memberCohortFilter = saved.memberCohortFilter;
+  if (typeof memberCountryFilter !== 'undefined' && saved.memberCountryFilter !== undefined) memberCountryFilter = saved.memberCountryFilter;
+  if (typeof memberSort !== 'undefined' && saved.memberSort !== undefined) memberSort = saved.memberSort;
+  if (typeof memberShowStructural !== 'undefined' && saved.memberShowStructural !== undefined) memberShowStructural = saved.memberShowStructural;
+  if (typeof memberExpandedCohorts !== 'undefined' && saved.memberExpandedCohorts) {
+    memberExpandedCohorts = new Set(saved.memberExpandedCohorts);
+  }
+
+  if (typeof orgSearchQuery !== 'undefined' && saved.orgSearchQuery !== undefined) orgSearchQuery = saved.orgSearchQuery;
+  if (typeof orgGroupFilter !== 'undefined' && saved.orgGroupFilter !== undefined) orgGroupFilter = saved.orgGroupFilter;
+  if (typeof orgExpandedGroups !== 'undefined' && saved.orgExpandedGroups) {
+    orgExpandedGroups = new Set(saved.orgExpandedGroups);
+  }
+
+  if (typeof researchSearchQuery !== 'undefined' && saved.researchSearchQuery !== undefined) researchSearchQuery = saved.researchSearchQuery;
+  if (typeof researchSkillFilter !== 'undefined' && saved.researchSkillFilter !== undefined) researchSkillFilter = saved.researchSkillFilter;
+  if (typeof researchAvailabilityFilter !== 'undefined' && saved.researchAvailabilityFilter !== undefined) researchAvailabilityFilter = saved.researchAvailabilityFilter;
+  if (typeof researchFilter !== 'undefined' && saved.researchFilter !== undefined) researchFilter = saved.researchFilter;
+  if (typeof researchVisibleSkills !== 'undefined' && saved.researchVisibleSkills) {
+    researchVisibleSkills = new Set(saved.researchVisibleSkills);
+  }
+  if (typeof researchPickerOpen !== 'undefined' && saved.researchPickerOpen !== undefined) researchPickerOpen = saved.researchPickerOpen;
+
+  if (typeof linksSearchQuery !== 'undefined' && saved.linksSearchQuery !== undefined) linksSearchQuery = saved.linksSearchQuery;
+  if (typeof linksFilter !== 'undefined' && saved.linksFilter !== undefined) linksFilter = saved.linksFilter;
+  if (typeof linksCategoryFilter !== 'undefined' && saved.linksCategoryFilter !== undefined) linksCategoryFilter = saved.linksCategoryFilter;
+
+  if (typeof conferenceSearchQuery !== 'undefined' && saved.conferenceSearchQuery !== undefined) conferenceSearchQuery = saved.conferenceSearchQuery;
+  if (typeof conferenceFilter !== 'undefined' && saved.conferenceFilter !== undefined) conferenceFilter = saved.conferenceFilter;
+
+  clampPageForSection(t, saved.page || 0);
+}
+
+function restoreScrollAndAnchor(sectionName) {
+  if (typeof window === 'undefined') return;
+  const state = getSectionState(sectionName);
+  if (!state) return;
+
+  const performScroll = () => {
+    let restored = false;
+    if (state.anchorId) {
+      const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(state.anchorId) : state.anchorId.replace(/"/g, '\\"');
+      const el = document.querySelector(`[data-record-id="${escaped}"], [data-open="${escaped}"], [data-star="${escaped}"], #${escaped}`);
+      if (el) {
+        const topbar = document.querySelector('.topbar');
+        const topOffset = topbar ? topbar.offsetHeight + 16 : 70;
+        const rect = el.getBoundingClientRect();
+        const currentScroll = window.scrollY || window.pageYOffset || 0;
+        const targetScroll = currentScroll + rect.top - topOffset;
+        window.scrollTo({ top: Math.max(0, targetScroll), behavior: 'instant' });
+        restored = true;
+      }
+    }
+    if (!restored && typeof state.scrollY === 'number' && state.scrollY > 0) {
+      window.scrollTo({ top: state.scrollY, behavior: 'instant' });
+    }
+  };
+
+  if (typeof requestAnimationFrame !== 'undefined') {
+    requestAnimationFrame(performScroll);
+  } else {
+    setTimeout(performScroll, 20);
+  }
+}
+
+function clearSectionFilters(t) {
+  sectionQuery = '';
+  filter = t === 'Morning Report' ? 'Upcoming' : 'All';
+  facet = '';
+  owner = '';
+  sessionType = '';
+  sessionFacilitator = '';
+  gapsOnly = false;
+  skill = '';
+  dateFrom = '';
+  dateTo = '';
+  sort = t === 'CPS Academy VMRs' ? 'date' : 'source';
+  page = 0;
+  showAll = false;
+  currentAnchorRecordId = null;
+
+  if (t === 'Members') {
+    memberSearchQuery = '';
+    memberCohortFilter = 'all';
+    memberCountryFilter = 'all';
+    memberSort = 'source';
+  } else if (t === 'OrgStructure') {
+    orgSearchQuery = '';
+    orgGroupFilter = 'all';
+    orgExpandedGroups = new Set(ORG_GROUPS.map(g => g.id).concat(['other']));
+  } else if (t === 'Research @CPSolvers') {
+    researchSearchQuery = '';
+    researchSkillFilter = 'all';
+    researchAvailabilityFilter = 'all';
+    researchFilter = 'all';
+  } else if (t === 'Important links') {
+    linksSearchQuery = '';
+    linksFilter = 'all';
+    linksCategoryFilter = 'all';
+  } else if (t === 'Conferences') {
+    conferenceSearchQuery = '';
+    conferenceFilter = 'all';
+  }
+
+  saveSectionState(t);
+  render();
+}
+
+function focusAccessibleDestination(isPagination = false) {
+  if (typeof document === 'undefined') return;
+  if (isPagination) {
+    const target = document.querySelector('.pagination, .data-table tbody tr, .hub-grid article, .member-table tbody tr, .results-count');
+    if (target) {
+      if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+      try { target.focus({ preventScroll: true }); } catch {}
+      return;
+    }
+  }
+  const h1 = document.querySelector('#page h1');
+  if (h1) {
+    h1.setAttribute('tabindex', '-1');
+    try { h1.focus({ preventScroll: true }); } catch {}
+  } else {
+    const pageEl = document.querySelector('#page');
+    if (pageEl) {
+      try { pageEl.focus({ preventScroll: true }); } catch {}
+    }
+  }
+}
+
+function trackDialogOpener(el) {
+  if (typeof document !== 'undefined') {
+    lastDialogOpener = el || document.activeElement;
+  }
+}
+
+function setupDialogFocusReturn() {
+  if (typeof document === 'undefined') return;
+  document.querySelectorAll('dialog').forEach(diag => {
+    if (!diag._hasCloseFocusListener) {
+      diag._hasCloseFocusListener = true;
+      diag.addEventListener('close', () => {
+        if (lastDialogOpener && typeof lastDialogOpener.focus === 'function' && document.body.contains(lastDialogOpener)) {
+          try {
+            lastDialogOpener.focus({ preventScroll: true });
+          } catch {}
+        }
+      });
+    }
+  });
+}
+
 let initialFormValues={};
 let reviewedSessionFields=new Set();
 function changedFields(fields,initial,confirmed=[]){
@@ -402,6 +760,8 @@ const today=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Los_Ang
 function urls(r,key){return [...new Set([r.links?.[key],...(String(r.fields[key]||'').match(/https?:\/\/[^\s<>]+/g)||[])].filter(u=>u&&/^https?:\/\//i.test(u)))]}
 function anchor(url,label){return `<a class="button secondary small" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>`}
 function chip(s,kind=''){return `<span class="tag ${kind}">${esc(s)}</span>`}
+function getResourceActionLabel(url){if(!url)return 'Open resource';if(/presentation/i.test(url))return 'Open whiteboard';if(/document/i.test(url))return 'Open document';if(/drive\.google/i.test(url))return 'Open folder';return 'Open resource';}
+function getResourceSubtitle(r){const linkField=(r.fields.Link||'').trim();if(!linkField||/^https?:\/\//i.test(linkField))return '';return linkField;}
 function isAdmin(){return Boolean(workspace.isAdmin||workspace.role==='Super admin'||workspace.role==='admin'||workspace.profile==='@admin')}
 function updateProfileDisplay(){
   const r=$('#profile-role');
@@ -431,6 +791,11 @@ function navigate(t){
     if(typeof confirmDiscard==='function'&&!confirmDiscard())return;
     dialog.close();
   }
+  if (globalSearchActive && query.trim()) {
+    globalSearchSavedState = { query, searchPage, lastSection: globalSearchLastSection };
+  }
+  saveSectionState(tab);
+
   if(t==='admin/issues'||t==='/admin/issues'||t==='Issue Reports'){
     if(!isAdmin()){toast('Admin access required.');navigate('Home');return}
     tab='admin/issues';query='';searchPage=0;filter='All';page=0;$('#global-search').value='';location.hash='/admin/issues';render();window.scrollTo(0,0);return;
@@ -438,12 +803,16 @@ function navigate(t){
   if(t==='profile/logbook'||t==='/profile/logbook'||t==='#/profile/logbook'){
     tab='profile/logbook';query='';searchPage=0;filter='All';page=0;$('#global-search').value='';location.hash='/profile/logbook';render();window.scrollTo(0,0);return;
   }
-  tab=t;query='';searchPage=0;filter=t==='Morning Report'?'Upcoming':'All';owner='';facet='';sessionType='';sessionFacilitator='';gapsOnly=false;sectionQuery='';skill='';dateFrom='';dateTo='';sort=t==='CPS Academy VMRs'?'date':'source';page=0;if(t==='Morning Report')mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'agenda':'matrix';else if(['Podcast Episodes','Schema review'].includes(t))mode=mode==='cards'||mode==='table'?mode:'board';else if(mode==='agenda'||mode==='matrix'||mode==='board')mode='cards';$('#global-search').value='';location.hash=encodeURIComponent(t);render();window.scrollTo(0,0)
+  tab=t;query='';searchPage=0;globalSearchActive=false;if($('#global-search'))$('#global-search').value='';location.hash=encodeURIComponent(t);
+  restoreSectionState(t);
+  render();
+  restoreScrollAndAnchor(t);
+  focusAccessibleDestination();
 }
 function nav(){
   const entries=['Home',...Object.keys(groups),'Workspace',...(isAdmin()?['Issue Reports']:[])];
   const current=tab==='admin/issues'?'Issue Reports':tab==='profile/logbook'?'':(Object.keys(groups).find(g=>groups[g].includes(tab))||tab);
-  $('#desktop-nav').innerHTML=entries.map(g=>`<button class="nav-button ${current===g?'active':''}" data-nav="${g}">${g}${g==='Issue Reports'&&workspace.issues.filter(i=>i.status==='Open').length?` <span class="nav-badge">${workspace.issues.filter(i=>i.status==='Open').length}</span>`:''}</button>`).join('');
+  $('#desktop-nav').innerHTML=entries.map(g=>`<button class="nav-button ${current===g?'active':''}" ${current===g?'aria-current="page"':''} data-nav="${g}">${g}${g==='Issue Reports'&&workspace.issues.filter(i=>i.status==='Open').length?` <span class="nav-badge">${workspace.issues.filter(i=>i.status==='Open').length}</span>`:''}</button>`).join('');
   const primary=['Home','Sessions','People','Links'];
   $('#mobile-nav').innerHTML=primary.map(g=>`<button class="nav-button ${current===g?'active':''}" ${current===g?'aria-current="page"':''} data-nav="${g}">${g}</button>`).join('')+`<button class="nav-button ${!primary.includes(current)?'active':''}" id="more-navigation" aria-haspopup="dialog">More</button>`;
   $('#all-sections').innerHTML=entries.map(g=>`<button type="button" class="button ${current===g?'primary':'secondary'}" data-nav="${g}" ${current===g?'aria-current="page"':''}>${g}</button>`).join('')+`<button type="button" class="button secondary" data-nav="profile/logbook">My logbook</button>`;
@@ -469,7 +838,8 @@ function card(r,t=tab,inSearch=false){const f=r.fields;let body='',tag='';
     body = `<p class="card-line"><small>Cohort</small><span>${esc(cohortName)}</span></p>` +
            (cohortName === 'Marked inactive in source' ? `<p class="muted" style="font-size:11px;">Historical context: marked inactive in source workbook tab.</p>` : '') +
            `<p>${esc(f.Subspecialty||f.Location||'Academy member')}</p>` +
-           `<p class="muted">Sponsor: ${esc(f.Sponsor||'Not entered')}</p><p>${esc(f['Social handles']||'No social handle entered')}</p>`;
+           `<p class="muted">Sponsor: ${esc(f.Sponsor||'Not entered')}</p><p>${esc(f['Social handles']||'No social handle entered')}</p>` +
+           (f.Name ? `<div style="margin-top:6px;"><button type="button" class="button secondary small find-in-teams-btn" data-member-name="${esc(f.Name)}">Find this name in teams ↗</button></div>` : '');
   }
  }
  else if(t==='OrgStructure'){
@@ -482,7 +852,17 @@ function card(r,t=tab,inSearch=false){const f=r.fields;let body='',tag='';
        (f.Role?`<p class="card-line"><small>Role</small><span style="white-space:pre-line;">${esc(f.Role)}</span></p>`:'');
  }
  else if(t==='Research @CPSolvers'){tag=f.Availability||'Availability not entered';body=`<div class="person-meta">${['Research writing','Data analytics','Cross-sectional studies','Systematic reviews','Qualitative studies','Case reports'].filter(k=>f[k]==='Yes').map(k=>chip(k)).join('')||'No skills entered'}</div>`}
- else if(t==='Important links'){tag='Academy resource';body=`<div class="card-links">${urls(r,'Link').map(u=>anchor(u,'Open resource')).join('')||'<p class="muted">No usable link in source. Open details to add one.</p>'}</div>`}
+  else if(t==='Important links'){tag='Academy resource';const sub=getResourceSubtitle(r);const linkUrl=urls(r,'Link')[0];body=(sub?`<p class="muted" style="font-size:12px;margin-bottom:6px;">${esc(sub)}</p>`:'')+`<div class="card-links">${linkUrl?anchor(linkUrl,getResourceActionLabel(linkUrl)):'<span class="link-unavailable-badge">Link unavailable</span>'}</div>`}
+  else if(t==='Conferences'){
+    tag=f.Subspecialty||'Conference';
+    const linkUrl=urls(r,'Link')[0];
+    const dates=f.Start&&f.End?`${f.Start} – ${f.End}`:(f.Start||f.End||'Date not entered');
+    body=`<p class="card-line"><small>Dates</small><span>${esc(dates)}</span></p>`+
+         `<p class="card-line"><small>Location</small><span>${esc(f.City||'Not entered')}</span></p>`+
+         (f['Members attending']?`<p class="card-line"><small>Attending</small><span>${esc(f['Members attending'])}</span></p>`:'')+
+         (f.Scholarship?`<p class="card-line"><small>Scholarship</small><span>${esc(f.Scholarship)}</span></p>`:'')+
+         `<div class="card-links">${linkUrl?anchor(linkUrl,'Visit conference website'):'<span class="link-unavailable-badge">Website link unavailable</span>'}</div>`;
+  }
  else if(t==='Residency Programs'){
   if(c && c.category === RECORD_CATEGORY.SOURCE_HEADING){
     tag = `Month label · ${c.month || 'Source heading'}`;
@@ -915,7 +1295,7 @@ function renderFilters(rr, t, filters, field, options, viewSwitcher) {
 }
 
 function areaPicker(){const areas=groups[Object.keys(groups).find(g=>groups[g].includes(tab))];return `<label class="mobile-area-picker">Section<select id="area-picker" aria-label="Academy section">${areas.map(t=>`<option value="${esc(t)}" ${t===tab?'selected':''}>${esc(sectionLabel(t))}</option>`).join('')}</select></label>`}
-function listing(){let rr=filtered();const pageSize=showAll?rr.length:12;page=showAll?0:Math.min(page,Math.max(0,Math.ceil(rr.length/pageSize)-1));const current=showAll?rr:rr.slice(page*pageSize,page*pageSize+pageSize),field=['Morning Report','CPS Academy VMRs'].includes(tab)?'':facets[tab],options=field?[...new Set(records().map(r=>r.fields[field]).filter(Boolean))].sort():[];const filters=['All',...(['Morning Report','CPS Academy VMRs'].includes(tab)?['Upcoming','This Week','Needs Volunteers','My Sessions','Staffing gaps','Missing facilitator']:[]),...(db[tab].columns.includes('Recording')?['Has recording']:[]),'Pinned','Needs review','Local edits'];const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Matrix</button><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Agenda</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:['Podcast Episodes','Schema review'].includes(tab)?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;$('#page').innerHTML=header(sectionLabel(tab),descriptions[tab]||'Programme records, assignments and source details.')+banner()+sopBanner(tab)+areaPicker()+`<div class="toolbar area-tabs">${groups[Object.keys(groups).find(g=>groups[g].includes(tab))].map(t=>`<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>${renderFilters(rr,tab,filters,field,options,viewSwitcher)}<p class="muted results-count">${formatResultsCount(rr,tab,records())}${sort==='date'?' · Unresolved dates follow recognised dates':''}${dateFrom||dateTo?' · Records with unresolved dates are excluded from this range':''}</p>${rr.length?(mode==='matrix'&&tab==='Morning Report'?matrixView(rr):(mode==='agenda'&&tab==='Morning Report'?agendaView(rr):(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)?workflowBoard(rr,tab):(mode==='cards'?`<section class="hub-grid">${current.map(r=>card(r)).join('')}</section>`:table(current))))): '<section class="empty-state panel"><h2>No matching records</h2><p>Clear the filters or try a broader search.</p><button class="button secondary" data-clear-filters>Clear filters</button></section>'}${(mode==='matrix'&&tab==='Morning Report')||(mode==='agenda'&&tab==='Morning Report')||(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab))||showAll?'':`<div class="toolbar pagination"><button class="button secondary" id="prev" ${page===0?'disabled':''}>Previous</button><span>Page ${page+1} of ${Math.max(1,Math.ceil(rr.length/12))}</span><button class="button secondary" id="next" ${(page+1)*12>=rr.length?'disabled':''}>Next</button></div>`}${tab==='CRC'&&db['CRC - retired']?crcDrawer():''}`;bindExtraFilters();if($('#area-picker'))$('#area-picker').onchange=e=>navigate(e.target.value);$('#filter').onchange=e=>{filter=e.target.value;page=0;render()};if($('#facet'))$('#facet').onchange=e=>{facet=e.target.value;page=0;render()};$('#sort').onchange=e=>{sort=e.target.value;render()};if($('#show-all-toggle'))$('#show-all-toggle').onchange=e=>{showAll=e.target.checked;page=0;render()};$('#clear').onclick=()=>{query='';filter='All';facet='';owner='';sessionType='';sessionFacilitator='';gapsOnly=false;sectionQuery='';skill='';dateFrom='';dateTo='';sort='source';page=0;showAll=false;$('#global-search').value='';render()};if($('#view'))$('#view').onclick=()=>{mode=mode==='cards'?'table':'cards';render()};document.querySelectorAll('[data-set-view]').forEach(b=>b.onclick=()=>{mode=b.dataset.setView;render()});if($('#prev'))$('#prev').onclick=()=>{page--;render();window.scrollTo(0,0)};if($('#next'))$('#next').onclick=()=>{page++;render();window.scrollTo(0,0)};if(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab))bindBoardEvents(tab);}
+function listing(){if(tab==='Morning Report'&&(typeof window!=='undefined'&&(window.innerWidth||0)<=760)&&mode==='matrix')mode='agenda';let rr=filtered();const pageSize=showAll?rr.length:12;page=showAll?0:Math.min(page,Math.max(0,Math.ceil(rr.length/pageSize)-1));const current=showAll?rr:rr.slice(page*pageSize,page*pageSize+pageSize),field=['Morning Report','CPS Academy VMRs'].includes(tab)?'':facets[tab],options=field?[...new Set(records().map(r=>r.fields[field]).filter(Boolean))].sort():[];const filters=['All',...(['Morning Report','CPS Academy VMRs'].includes(tab)?['Upcoming','This Week','Needs Volunteers','My Sessions','Staffing gaps','Missing facilitator']:[]),...(db[tab].columns.includes('Recording')?['Has recording']:[]),'Pinned','Needs review','Local edits'];const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Matrix</button><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Agenda</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:['Podcast Episodes','Schema review'].includes(tab)?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;$('#page').innerHTML=header(sectionLabel(tab),descriptions[tab]||'Programme records, assignments and source details.')+banner()+sopBanner(tab)+areaPicker()+`<div class="toolbar area-tabs">${groups[Object.keys(groups).find(g=>groups[g].includes(tab))].map(t=>`<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>${renderFilters(rr,tab,filters,field,options,viewSwitcher)}<p class="muted results-count">${formatResultsCount(rr,tab,records())}${sort==='date'?' · Unresolved dates follow recognised dates':''}${dateFrom||dateTo?' · Records with unresolved dates are excluded from this range':''}</p>${rr.length?(mode==='matrix'&&tab==='Morning Report'?matrixView(rr):(mode==='agenda'&&tab==='Morning Report'?agendaView(rr):(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)?workflowBoard(rr,tab):(mode==='cards'?`<section class="hub-grid">${current.map(r=>card(r)).join('')}</section>`:table(current))))): '<section class="empty-state panel"><h2>No matching records</h2><p>Clear the filters or try a broader search.</p><button class="button secondary" data-clear-filters>Clear filters</button></section>'}${(mode==='matrix'&&tab==='Morning Report')||(mode==='agenda'&&tab==='Morning Report')||(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab))||showAll?'':`<div class="toolbar pagination"><button class="button secondary" id="prev" ${page===0?'disabled':''}>Previous</button><span>Page ${page+1} of ${Math.max(1,Math.ceil(rr.length/12))}</span><button class="button secondary" id="next" ${(page+1)*12>=rr.length?'disabled':''}>Next</button></div>`}${tab==='CRC'&&db['CRC - retired']?crcDrawer():''}`;bindExtraFilters();if($('#area-picker'))$('#area-picker').onchange=e=>navigate(e.target.value);$('#filter').onchange=e=>{filter=e.target.value;page=0;render()};if($('#facet'))$('#facet').onchange=e=>{facet=e.target.value;page=0;render()};$('#sort').onchange=e=>{sort=e.target.value;render()};if($('#show-all-toggle'))$('#show-all-toggle').onchange=e=>{showAll=e.target.checked;page=0;render()};$('#clear').onclick=()=>{query='';filter='All';facet='';owner='';sessionType='';sessionFacilitator='';gapsOnly=false;sectionQuery='';skill='';dateFrom='';dateTo='';sort='source';page=0;showAll=false;$('#global-search').value='';render()};if($('#view'))$('#view').onclick=()=>{mode=mode==='cards'?'table':'cards';render()};document.querySelectorAll('[data-set-view]').forEach(b=>b.onclick=()=>{mode=b.dataset.setView;render()});if($('#prev'))$('#prev').onclick=()=>{page--;render();window.scrollTo(0,0)};if($('#next'))$('#next').onclick=()=>{page++;render();window.scrollTo(0,0)};if(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab))bindBoardEvents(tab);}
 function crcDrawer(){const retired=records('CRC - retired');const c=getClassificationCounts(retired,'CRC - retired');return `<details class="panel legacy-drawer" style="margin-top:24px"><summary style="cursor:pointer;padding:16px 20px;font-weight:700;display:flex;align-items:center;justify-content:space-between;user-select:none"><span>📁 Archived / Legacy Mentorship (${c.namedEntries} cases in 15 rounds)</span><span class="muted" style="font-size:12px;font-weight:normal">Expand archive records ↓</span></summary><div style="padding:16px 20px;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><p class="muted" style="margin:0">Historical mentorship rounds preserved from original workbook (${c.namedEntries} cases, 15 round headings, ${c.placeholders} placeholders). Active cases remain front-and-center above.</p><button class="button secondary small" data-go="CRC - retired">Full Archive View →</button></div><div class="hub-grid">${retired.slice(0,9).map(r=>card(r,'CRC - retired')).join('')}</div><div style="margin-top:16px;text-align:center"><button class="button secondary small" data-go="CRC - retired">Browse all ${retired.length} archived records →</button></div></div></details>`}
 function table(rr){
  if(window.innerWidth<=760){
@@ -1047,6 +1427,1265 @@ function renderOrgRow(r){
       </div>
     </td>
   </tr>`;
+}
+
+const MEMBER_COHORT_DEFS = [
+  { id: 'participants', name: 'Participants', key: 'Participants', headingId: null, description: 'Academic year participants' },
+  { id: 'core', name: 'Core team members', key: 'Core team', headingId: 'Members:80', description: 'Core team members' },
+  { id: 'leaders', name: 'Leaders', key: 'Leaders', headingId: 'Members:146', description: 'Academy leadership cohort' },
+  { id: 'inactive', name: 'Marked inactive in source', key: 'Marked inactive in source', headingId: 'Members:189', description: 'Historical members marked inactive in source' }
+];
+
+function findMemberInTeams(name) {
+  if (!name) return;
+  orgSearchQuery = name.trim();
+  orgGroupFilter = 'all';
+  navigate('OrgStructure');
+}
+
+function getCohortBadgeClass(cohort) {
+  if (cohort === 'Participants') return 'participants';
+  if (cohort === 'Core team') return 'core';
+  if (cohort === 'Leaders') return 'leaders';
+  if (cohort === 'Marked inactive in source') return 'inactive';
+  return 'default';
+}
+
+function renderMemberDesktopRow(item) {
+  const r = item.record;
+  const c = item.classification;
+  const f = r.fields || {};
+  const isPinned = workspace.favorites.includes(r.id);
+  const isExpanded = memberExpandedDetails.has(r.id);
+  const cohortName = c.cohort || 'Members';
+  const cohortClass = getCohortBadgeClass(cohortName);
+  const flagsChip = (r.flags && r.flags.length) ? chip('Verify source details', 'review-chip') : '';
+  const localChip = workspace.edits[r.id] ? chip('Local changes', 'local-chip') : (r.id.startsWith('local:') ? chip('Locally added', 'local-chip') : '');
+  const dynChip = c.wasHeading ? chip('Locally edited from heading', 'local-chip') : '';
+
+  return `<tr class="member-row" data-id="${esc(r.id)}">
+    <td class="td-name">
+      <div class="member-name-wrap">
+        <div class="member-name-title-row">
+          <strong class="member-name">${esc(f.Name || 'Unnamed member')}</strong>
+          <span class="tag tag-cohort tag-cohort-${cohortClass} member-mobile-cohort">${esc(cohortName)}</span>
+        </div>
+        ${(flagsChip || localChip || dynChip) ? `<div class="member-badges-wrap">${flagsChip}${localChip}${dynChip}</div>` : ''}
+      </div>
+    </td>
+    <td class="td-cohort">
+      <span class="tag tag-cohort tag-cohort-${cohortClass}">${esc(cohortName)}</span>
+    </td>
+    <td class="td-country">
+      <span class="member-country-val">${esc(f.Country || '—')}</span>
+    </td>
+    <td class="td-secondary">
+      <div class="member-secondary-fields">
+        ${f.Sponsor ? `<span class="member-sponsor"><small class="muted">Sponsor:</small> ${esc(f.Sponsor)}</span>` : ''}
+        ${f.Subspecialty ? `<span class="member-subspecialty"><small class="muted">Subspecialty:</small> ${esc(f.Subspecialty)}</span>` : ''}
+        ${!f.Sponsor && !f.Subspecialty ? `<span class="muted">—</span>` : ''}
+      </div>
+    </td>
+    <td class="td-actions">
+      <div class="member-actions-wrap">
+        <button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="Members">Details</button>
+        <button type="button" class="button secondary small find-in-teams-btn" data-member-name="${esc(f.Name || '')}" title="Find this name in teams and responsibilities">Find in teams ↗</button>
+        <button type="button" class="icon-button star ${isPinned ? 'is-starred' : ''}" data-star="${esc(r.id)}" aria-label="${isPinned ? 'Unpin' : 'Pin'} record">${isPinned ? '★' : '☆'}</button>
+        <button type="button" class="text-button member-expand-btn mobile-only-inline" data-expand-id="${esc(r.id)}">${isExpanded ? 'Less details ▴' : 'Contact &amp; more ▾'}</button>
+      </div>
+      ${isExpanded ? `
+        <div class="member-row-expanded">
+          ${f.Email ? `<p class="card-line"><small>Email</small><a href="mailto:${esc(f.Email)}">${esc(f.Email)}</a></p>` : ''}
+          ${f['Social handles'] ? `<p class="card-line"><small>Social</small><span>${esc(f['Social handles'])}</span></p>` : ''}
+          ${f.Location ? `<p class="card-line"><small>Location</small><span>${esc(f.Location)}</span></p>` : ''}
+          <p class="card-line"><small>Source</small><span class="muted">${esc(source(r))}</span></p>
+        </div>
+      ` : ''}
+    </td>
+  </tr>`;
+}
+
+const renderMemberRow = renderMemberDesktopRow;
+const renderMemberMobileCard = renderMemberDesktopRow;
+
+function membersView(){
+  const allRecords = records('Members');
+  const classified = allRecords.map(r => ({ record: r, classification: getRecordClassification(r, 'Members') }));
+  const substantiveMembers = classified.filter(x => x.classification.isSubstantive);
+  const structuralEntries = classified.filter(x => x.classification.isStructural);
+  const totalNamedMembers = substantiveMembers.length;
+
+  const countries = [...new Set(substantiveMembers.map(x => (x.record.fields.Country || '').trim()).filter(Boolean))].sort();
+  const queryTerms = memberSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+
+  function matchesFilters(x) {
+    const f = x.record.fields;
+    if (memberCohortFilter !== 'all' && x.classification.cohort !== memberCohortFilter) return false;
+    if (memberCountryFilter !== 'all' && (f.Country || '').trim() !== memberCountryFilter) return false;
+    if (!queryTerms.length) return true;
+    const hay = `${f.Name || ''} ${f.Country || ''} ${f.Sponsor || ''} ${f.Subspecialty || ''} ${f.Location || ''} ${f['Social handles'] || ''} ${f.Email || ''} ${x.classification.cohort || ''}`.toLowerCase();
+    return queryTerms.every(t => hay.includes(t));
+  }
+
+  const visibleMembers = substantiveMembers.filter(matchesFilters);
+  const isFiltering = queryTerms.length > 0 || memberCohortFilter !== 'all' || memberCountryFilter !== 'all';
+
+  const cohortCounts = {};
+  for (const def of MEMBER_COHORT_DEFS) {
+    cohortCounts[def.key] = substantiveMembers.filter(x => x.classification.cohort === def.key).length;
+  }
+
+  const indexHtml = `<nav class="member-index-nav" aria-label="Members directory overview">
+    <div class="member-index-label">Overview:</div>
+    <div class="member-index-chips">
+      <button type="button" class="member-index-chip ${memberCohortFilter==='all'?'active':''}" data-filter-cohort="all">
+        <span class="member-index-name">All cohorts</span>
+        <span class="member-index-count">${totalNamedMembers}</span>
+      </button>
+      ${MEMBER_COHORT_DEFS.map(def => `
+        <button type="button" class="member-index-chip ${memberCohortFilter===def.key?'active':''}" data-filter-cohort="${esc(def.key)}">
+          <span class="member-index-name">${esc(def.name)}</span>
+          <span class="member-index-count">${cohortCounts[def.key] || 0}</span>
+        </button>
+      `).join('')}
+      <button type="button" class="member-index-chip structural-chip ${memberShowStructural?'active':''}" id="toggle-structural-btn" title="Inspect 6 structural entries (headings & repeated headers) preserved from source workbook">
+        <span class="member-index-name">Source headings</span>
+        <span class="member-index-count">${structuralEntries.length}</span>
+      </button>
+    </div>
+  </nav>`;
+
+  const toolbarHtml = `<div class="member-toolbar panel">
+    <div class="member-toolbar-controls">
+      <div class="member-search-wrap">
+        <span class="member-search-icon" aria-hidden="true">⌕</span>
+        <input type="search" id="member-search-input" class="input member-search-input" placeholder="Search members by name, country, sponsor, or handle…" value="${esc(memberSearchQuery)}" aria-label="Filter member directory">
+        ${memberSearchQuery ? `<button type="button" class="icon-button member-search-clear" id="member-clear-input" aria-label="Clear filter">×</button>` : ''}
+      </div>
+      <label class="member-select-label">
+        <span class="muted">Cohort:</span>
+        <select class="select member-select" id="member-cohort-select" aria-label="Filter by cohort">
+          <option value="all" ${memberCohortFilter==='all'?'selected':''}>All cohorts (${totalNamedMembers})</option>
+          ${MEMBER_COHORT_DEFS.map(def => `<option value="${esc(def.key)}" ${memberCohortFilter===def.key?'selected':''}>${esc(def.name)} (${cohortCounts[def.key]||0})</option>`).join('')}
+        </select>
+      </label>
+      <label class="member-select-label">
+        <span class="muted">Country:</span>
+        <select class="select member-select" id="member-country-select" aria-label="Filter by country">
+          <option value="all" ${memberCountryFilter==='all'?'selected':''}>All countries (${countries.length})</option>
+          ${countries.map(c => {
+            const cnt = substantiveMembers.filter(x => (x.record.fields.Country || '').trim() === c).length;
+            return `<option value="${esc(c)}" ${memberCountryFilter===c?'selected':''}>${esc(c)} (${cnt})</option>`;
+          }).join('')}
+        </select>
+      </label>
+      <label class="member-select-label">
+        <span class="muted">Order:</span>
+        <select class="select member-select" id="member-sort-select" aria-label="Sort member directory">
+          <option value="source" ${memberSort==='source'?'selected':''}>Workbook source order</option>
+          <option value="az" ${memberSort==='az'?'selected':''}>Name A–Z</option>
+        </select>
+      </label>
+      <div class="member-actions">
+        ${memberSort === 'source' ? `
+          <button type="button" class="button secondary small" id="member-expand-all">Expand all</button>
+          <button type="button" class="button secondary small" id="member-collapse-all">Collapse all</button>
+        ` : ''}
+        ${isFiltering ? `<button type="button" class="button secondary small" id="member-reset-filters">Reset filters</button>` : ''}
+      </div>
+    </div>
+    <div class="member-toolbar-meta">
+      <p class="muted results-count" id="members-results-meta">
+        ${formatResultsCount(isFiltering ? visibleMembers.map(x => x.record) : allRecords, 'Members', allRecords)}
+      </p>
+    </div>
+  </div>`;
+
+  const structuralDrawerHtml = `<details class="panel member-structural-drawer" id="member-structural-drawer" ${memberShowStructural ? 'open' : ''}>
+    <summary class="member-structural-summary">
+      <strong>📋 Source Structural Entries (${structuralEntries.length} headings &amp; repeated headers)</strong>
+      <span class="muted" style="font-size:12px;">Preserved from original workbook snapshot · Excluded from people counts</span>
+    </summary>
+    <div class="member-structural-body">
+      <p class="muted" style="font-size:13px; margin: 4px 0 12px 0;">These rows are structural section separators or repeated column headers in the source workbook tab. They remain accessible for reference, audit, and local editing.</p>
+      <div class="member-table-container">
+        <table class="data-table member-table">
+          <thead>
+            <tr>
+              <th scope="col">Row</th>
+              <th scope="col">Role</th>
+              <th scope="col">Workbook Label</th>
+              <th scope="col">Associated Cohort</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${structuralEntries.map(x => `
+              <tr>
+                <td><code>Row ${x.record.row}</code></td>
+                <td><span class="tag">${esc(x.classification.role === 'column_header' ? 'Repeated header' : 'Cohort heading')}</span></td>
+                <td><strong>${esc(x.classification.label || x.record.fields.Name || 'Heading')}</strong></td>
+                <td><span class="tag tag-cohort tag-cohort-${getCohortBadgeClass(x.classification.cohort)}">${esc(x.classification.cohort || 'Members')}</span></td>
+                <td><button type="button" class="button secondary small" data-open="${esc(x.record.id)}" data-area="Members">Open details</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </details>`;
+
+  const totalCount = visibleMembers.length;
+
+  let contentHtml = '';
+  if (visibleMembers.length === 0) {
+    contentHtml = `<section class="empty-state panel">
+      <h2>No matching members</h2>
+      <p>No members matched your search and filter criteria.</p>
+      <button type="button" class="button secondary" id="member-empty-clear">Clear filters</button>
+    </section>`;
+  } else if (memberSort === 'az') {
+    const sorted = [...visibleMembers].sort((a, b) => (a.record.fields.Name || '').localeCompare(b.record.fields.Name || ''));
+    const letterMap = new Map();
+    for (const item of sorted) {
+      const name = (item.record.fields.Name || '').trim();
+      const firstChar = name ? name[0].toUpperCase() : '#';
+      const letter = /[A-Z]/.test(firstChar) ? firstChar : '#';
+      if (!letterMap.has(letter)) letterMap.set(letter, []);
+      letterMap.get(letter).push(item);
+    }
+    const letters = [...letterMap.keys()].sort((a, b) => a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b));
+
+    const azNavHtml = `<nav class="member-az-nav" aria-label="A–Z jump navigation">
+      <span class="muted" style="font-size:12px; font-weight:600;">Jump:</span>
+      <div class="member-az-links">
+        ${letters.map(l => `<a href="#member-letter-${l}" class="member-az-link">${l}</a>`).join('')}
+      </div>
+    </nav>`;
+
+    const letterSectionsHtml = letters.map(letter => {
+      const groupItems = letterMap.get(letter) || [];
+      const rowsHtml = groupItems.map(renderMemberRow).join('');
+      return `<section class="member-letter-section panel" id="member-letter-${letter}">
+        <div class="member-letter-header">
+          <h2 class="member-letter-title">${letter}</h2>
+          <span class="tag member-letter-count">${groupItems.length} members</span>
+        </div>
+        <div class="member-table-container">
+          <table class="data-table member-table">
+            <thead>
+              <tr>
+                <th scope="col" class="th-name">Member</th>
+                <th scope="col" class="th-cohort">Cohort</th>
+                <th scope="col" class="th-country">Country</th>
+                <th scope="col" class="th-sponsor">Sponsor / Location</th>
+                <th scope="col" class="th-social">Social / Handles</th>
+                <th scope="col" class="th-actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </div>
+      </section>`;
+    }).join('');
+
+    contentHtml = `${azNavHtml}<div class="member-az-container">${letterSectionsHtml}</div>`;
+  } else {
+    const recordMap = new Map(allRecords.map(r => [r.id, r]));
+    const cohortSections = MEMBER_COHORT_DEFS.map(def => {
+      const headingRecord = def.headingId ? recordMap.get(def.headingId) : null;
+      const items = visibleMembers.filter(x => x.classification.cohort === def.key);
+      const totalCohortCount = substantiveMembers.filter(x => x.classification.cohort === def.key).length;
+      return { def, headingRecord, items, totalCohortCount };
+    });
+
+    const mappedCohortKeys = new Set(MEMBER_COHORT_DEFS.map(d => d.key));
+    const otherItems = visibleMembers.filter(x => !mappedCohortKeys.has(x.classification.cohort));
+    if (otherItems.length > 0) {
+      cohortSections.push({
+        def: { id: 'other', name: 'Other members', key: 'other', headingId: null, description: 'Other member entries' },
+        headingRecord: null,
+        items: otherItems,
+        totalCohortCount: substantiveMembers.filter(x => !mappedCohortKeys.has(x.classification.cohort)).length
+      });
+    }
+
+    contentHtml = `<div class="member-cohorts-container">${cohortSections.map(({ def, headingRecord, items, totalCohortCount }) => {
+      if (memberCohortFilter !== 'all' && memberCohortFilter !== def.key) return '';
+      if (queryTerms.length > 0 && items.length === 0) return '';
+
+      const isOpen = queryTerms.length > 0 ? (items.length > 0) : memberExpandedCohorts.has(def.id);
+      const rowsHtml = items.map(renderMemberRow).join('');
+
+      return `<details class="panel member-cohort-section" id="member-cohort-${def.id}" ${isOpen ? 'open' : ''} data-cohort-id="${def.id}">
+        <summary class="member-cohort-summary">
+          <div class="member-cohort-header-info">
+            <span class="member-cohort-chevron" aria-hidden="true">▾</span>
+            <h2 class="member-cohort-title">${esc(def.name)}</h2>
+            <span class="tag member-cohort-count">${items.length}${items.length !== totalCohortCount ? ` of ${totalCohortCount}` : ''} members</span>
+          </div>
+          <div class="member-cohort-header-actions" onclick="event.stopPropagation()">
+            ${headingRecord ? `
+              <button type="button" class="button secondary small member-heading-btn" data-open="${esc(headingRecord.id)}" data-area="Members" title="Open source heading record ${esc(headingRecord.id)} (row ${headingRecord.row})">
+                Source heading (row ${headingRecord.row}) ↗
+              </button>
+            ` : ''}
+          </div>
+        </summary>
+        <div class="member-cohort-body">
+          <p class="muted member-cohort-desc">${esc(def.description)}</p>
+          <div class="member-table-container">
+            <table class="data-table member-table">
+              <thead>
+                <tr>
+                  <th scope="col" class="th-name">Member</th>
+                  <th scope="col" class="th-cohort">Cohort</th>
+                  <th scope="col" class="th-country">Country</th>
+                  <th scope="col" class="th-sponsor">Sponsor / Location</th>
+                  <th scope="col" class="th-social">Social / Handles</th>
+                  <th scope="col" class="th-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml || '<tr><td colspan="6" class="empty-state">No matching members in this cohort.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>`;
+    }).join('')}</div>`;
+  }
+
+  const areas = groups['People'] || ['Members', 'OrgStructure', 'CRC', 'CRC - retired'];
+  const areaTabsHtml = `<div class="toolbar area-tabs">${areas.map(t => `<button class="button ${t==='Members'?'primary':'secondary'} small" ${t==='Members'?'aria-current="page"':''} data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>`;
+
+  $('#page').innerHTML = header('Members', descriptions['Members'] || 'Find Academy members, sponsors and social handles.') +
+    banner() +
+    areaPicker() +
+    areaTabsHtml +
+    indexHtml +
+    toolbarHtml +
+    contentHtml +
+    structuralDrawerHtml;
+
+  bindMembersEvents();
+}
+
+function bindMembersEvents(){
+  const searchInput = $('#member-search-input');
+  if (searchInput) {
+    searchInput.oninput = e => {
+      memberSearchQuery = e.target.value;
+      page = 0;
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+      render();
+      const el = $('#member-search-input');
+      if (el) { el.focus(); try { el.setSelectionRange(start, end); } catch {} }
+    };
+  }
+  if ($('#prev')) {
+    $('#prev').onclick = () => {
+      page--;
+      render();
+      restoreScrollAndAnchor('Members');
+      focusAccessibleDestination(true);
+    };
+  }
+  if ($('#next')) {
+    $('#next').onclick = () => {
+      page++;
+      render();
+      restoreScrollAndAnchor('Members');
+      focusAccessibleDestination(true);
+    };
+  }
+  if ($('#member-clear-input')) {
+    $('#member-clear-input').onclick = () => {
+      memberSearchQuery = '';
+      page = 0;
+      render();
+      focusAccessibleDestination();
+    };
+  }
+  if ($('#member-empty-clear')) {
+    $('#member-empty-clear').onclick = () => {
+      clearSectionFilters('Members');
+      focusAccessibleDestination();
+    };
+  }
+  if ($('#member-reset-filters')) {
+    $('#member-reset-filters').onclick = () => {
+      clearSectionFilters('Members');
+      focusAccessibleDestination();
+    };
+  }
+  if ($('#member-cohort-select')) {
+    $('#member-cohort-select').onchange = e => {
+      memberCohortFilter = e.target.value;
+      page = 0;
+      render();
+    };
+  }
+  if ($('#member-country-select')) {
+    $('#member-country-select').onchange = e => {
+      memberCountryFilter = e.target.value;
+      page = 0;
+      render();
+    };
+  }
+  if ($('#member-sort-select')) {
+    $('#member-sort-select').onchange = e => {
+      memberSort = e.target.value;
+      render();
+    };
+  }
+  if ($('#member-expand-all')) {
+    $('#member-expand-all').onclick = () => {
+      document.querySelectorAll('.member-cohort-section').forEach(d => {
+        d.open = true;
+        if (d.dataset.cohortId) memberExpandedCohorts.add(d.dataset.cohortId);
+      });
+    };
+  }
+  if ($('#member-collapse-all')) {
+    $('#member-collapse-all').onclick = () => {
+      document.querySelectorAll('.member-cohort-section').forEach(d => {
+        d.open = false;
+        if (d.dataset.cohortId) memberExpandedCohorts.delete(d.dataset.cohortId);
+      });
+    };
+  }
+  if ($('#member-reset-filters')) {
+    $('#member-reset-filters').onclick = () => {
+      memberSearchQuery = '';
+      memberCohortFilter = 'all';
+      memberCountryFilter = 'all';
+      memberExpandedCohorts = new Set(['participants', 'core', 'leaders', 'inactive', 'other']);
+      render();
+    };
+  }
+  document.querySelectorAll('[data-filter-cohort]').forEach(b => {
+    b.onclick = () => {
+      const cohort = b.dataset.filterCohort;
+      memberCohortFilter = cohort;
+      render();
+      if (cohort !== 'all') {
+        const cId = cohort === 'Core team' ? 'core' : cohort === 'Marked inactive in source' ? 'inactive' : cohort.toLowerCase();
+        const target = $(`#member-cohort-${cId}`);
+        if (target) {
+          target.open = true;
+          target.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
+    };
+  });
+  if ($('#toggle-structural-btn')) {
+    $('#toggle-structural-btn').onclick = () => {
+      memberShowStructural = !memberShowStructural;
+      const drawer = $('#member-structural-drawer');
+      if (drawer) {
+        drawer.open = memberShowStructural;
+        if (memberShowStructural) drawer.scrollIntoView({ behavior: 'smooth' });
+      }
+    };
+  }
+  document.querySelectorAll('.member-cohort-section').forEach(d => {
+    d.ontoggle = () => {
+      if (!memberSearchQuery && d.dataset.cohortId) {
+        if (d.open) memberExpandedCohorts.add(d.dataset.cohortId);
+        else memberExpandedCohorts.delete(d.dataset.cohortId);
+      }
+    };
+  });
+  document.querySelectorAll('.member-expand-btn').forEach(b => {
+    b.onclick = () => {
+      const id = b.dataset.expandId;
+      if (memberExpandedDetails.has(id)) memberExpandedDetails.delete(id);
+      else memberExpandedDetails.add(id);
+      render();
+    };
+  });
+  document.querySelectorAll('.find-in-teams-btn').forEach(b => {
+    b.onclick = e => {
+      e.stopPropagation();
+      findMemberInTeams(b.dataset.memberName);
+    };
+  });
+}
+
+/* --- Dedicated View for Important Links --- */
+let linksSearchQuery = '';
+let linksFilter = 'all'; // 'all' | 'pinned'
+let linksCategoryFilter = 'all';
+
+const LINK_CATEGORIES = [
+  {
+    id: 'clinical-vmr',
+    name: 'Clinical Sessions & VMR',
+    icon: '🩺',
+    match: r => /vmr|whiteboard|teaching points/i.test(r.fields.Resource || '')
+  },
+  {
+    id: 'schemas-video',
+    name: 'Schemas & Video Production',
+    icon: '🎥',
+    match: r => /schema/i.test(r.fields.Resource || '')
+  },
+  {
+    id: 'podcasts-media',
+    name: 'Podcasts, Media & Publishing',
+    icon: '🎙️',
+    match: r => /podcast|audio|some|social media|website/i.test(r.fields.Resource || '')
+  },
+  {
+    id: 'operating-guides',
+    name: 'Operating Procedures & Guides',
+    icon: '📋',
+    match: r => /procedure|sop|booklet|operating|guide/i.test(r.fields.Resource || '')
+  },
+  {
+    id: 'other-resources',
+    name: 'Other Resources',
+    icon: '📌',
+    match: () => true
+  }
+];
+
+function getLinkCategory(r) {
+  for (const cat of LINK_CATEGORIES) {
+    if (cat.match(r)) return cat;
+  }
+  return LINK_CATEGORIES[LINK_CATEGORIES.length - 1];
+}
+
+function importantLinksView(){
+  const allRecords = records('Important links');
+  const queryTerms = linksSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+
+  function matchesFilters(r) {
+    if (linksFilter === 'pinned' && !workspace.favorites.includes(r.id)) return false;
+    const cat = getLinkCategory(r);
+    if (linksCategoryFilter !== 'all' && cat.id !== linksCategoryFilter) return false;
+    if (!queryTerms.length) return true;
+    const sub = getResourceSubtitle(r);
+    const hay = `${r.fields.Resource || ''} ${sub} ${cat.name}`.toLowerCase();
+    return queryTerms.every(t => hay.includes(t));
+  }
+
+  const visibleRecords = allRecords.filter(matchesFilters);
+  const isFiltering = queryTerms.length > 0 || linksFilter !== 'all' || linksCategoryFilter !== 'all';
+
+  const groupsWithItems = LINK_CATEGORIES.map(cat => {
+    const items = visibleRecords.filter(r => getLinkCategory(r).id === cat.id);
+    const totalInCat = allRecords.filter(r => getLinkCategory(r).id === cat.id).length;
+    return { ...cat, items, totalInCat };
+  }).filter(g => g.items.length > 0 || (linksCategoryFilter === g.id && isFiltering));
+
+  const totalPinned = allRecords.filter(r => workspace.favorites.includes(r.id)).length;
+  const areaGroup = Object.keys(groups).find(g => groups[g].includes('Important links')) || 'Links';
+  const areaButtons = groups[areaGroup]
+    .map(t => `<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('');
+
+  const toolbarHtml = `
+    <div class="toolbar area-tabs">${areaButtons}</div>
+    <div class="links-toolbar panel">
+      <div class="links-toolbar-controls">
+        <div class="links-search-wrap">
+          <span class="links-search-icon" aria-hidden="true">⌕</span>
+          <input type="search" id="links-search-input" class="input links-search-input" placeholder="Search 13 Academy resources and guides…" value="${esc(linksSearchQuery)}" aria-label="Search resources">
+          ${linksSearchQuery ? `<button type="button" class="icon-button links-search-clear" id="links-clear-input" aria-label="Clear search">×</button>` : ''}
+        </div>
+        <div class="links-filter-actions">
+          <button type="button" class="button ${linksFilter==='pinned'?'primary':'secondary'} small" id="links-filter-pinned">
+            ${linksFilter==='pinned' ? '★ Pinned only (' + totalPinned + ')' : '☆ Pinned (' + totalPinned + ')'}
+          </button>
+          ${isFiltering ? `<button type="button" class="button secondary small" id="links-reset-filters">Reset filters</button>` : ''}
+        </div>
+      </div>
+      <div class="links-toolbar-meta">
+        <p class="muted">${allRecords.length} resources in workbook snapshot · Showing ${visibleRecords.length} without pagination</p>
+      </div>
+    </div>
+  `;
+
+  let contentHtml = '';
+  if (visibleRecords.length === 0) {
+    contentHtml = `
+      <section class="empty-state panel">
+        <h2>No matching resources</h2>
+        <p>No resources found matching your search or filters.</p>
+        <button type="button" class="button secondary" id="links-empty-reset">Clear filters</button>
+      </section>
+    `;
+  } else {
+    contentHtml = groupsWithItems.map(g => `
+      <section class="resource-category-section panel">
+        <header class="resource-category-header">
+          <h2 class="resource-category-title">
+            <span class="category-icon" aria-hidden="true">${g.icon}</span>
+            <span>${esc(g.name)}</span>
+            <span class="badge resource-count-badge">${g.items.length}</span>
+          </h2>
+        </header>
+        <div class="resource-grid">
+          ${g.items.map(r => {
+            const f = r.fields;
+            const sub = getResourceSubtitle(r);
+            const linkUrl = urls(r, 'Link')[0];
+            const isStarred = workspace.favorites.includes(r.id);
+            const isLocal = r.id.startsWith('local:');
+            const isEdited = !isLocal && workspace.edits[r.id];
+            const actionLabel = getResourceActionLabel(linkUrl);
+
+            return `
+              <article class="resource-card" data-record-id="${esc(r.id)}">
+                <div class="resource-main">
+                  <div class="resource-header-row">
+                    <h3 class="resource-title">${esc(f.Resource || 'Untitled Resource')}</h3>
+                    <div class="resource-badges">
+                      ${isLocal ? '<span class="tag local-chip">Local draft</span>' : ''}
+                      ${isEdited ? '<span class="tag local-chip">Edited</span>' : ''}
+                    </div>
+                  </div>
+                  ${sub ? `<p class="resource-subtitle muted">${esc(sub)}</p>` : ''}
+                  <details class="resource-details-drawer">
+                    <summary>Source &amp; row info</summary>
+                    <div class="resource-details-content">
+                      <p class="muted">Reference: <code>${esc(source(r))}</code></p>
+                      ${linkUrl ? `<p class="muted resource-dest-wrap">Destination: <span class="resource-dest-url">${esc(linkUrl)}</span></p>` : '<p class="muted">No URL recorded in source.</p>'}
+                    </div>
+                  </details>
+                </div>
+                <div class="resource-actions-row">
+                  ${linkUrl ? `
+                    <a class="button secondary small resource-action-btn" href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer">
+                      ${esc(actionLabel)} ↗
+                    </a>
+                  ` : `
+                    <span class="link-unavailable-badge" title="No link provided in source">Link unavailable</span>
+                  `}
+                  <button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="Important links" aria-label="Open details for ${esc(f.Resource || 'resource')}">Details</button>
+                  <button type="button" class="icon-button star ${isStarred?'is-starred':''}" aria-label="${isStarred?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${isStarred?'★':'☆'}</button>
+                </div>
+              </article>
+            `;
+          }).join('')}
+        </div>
+      </section>
+    `).join('');
+  }
+
+  $('#page').innerHTML = header(sectionLabel('Important links'), descriptions['Important links'] || 'Your recurring Academy resources, ready to open.') +
+    banner() +
+    areaPicker() +
+    toolbarHtml +
+    contentHtml;
+
+  if ($('#area-picker')) $('#area-picker').onchange = e => navigate(e.target.value);
+  const searchInput = $('#links-search-input');
+  if (searchInput) {
+    searchInput.oninput = e => {
+      linksSearchQuery = e.target.value;
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+      render();
+      const el = $('#links-search-input');
+      if (el) {
+        el.focus();
+        try { el.setSelectionRange(start, end); } catch {}
+      }
+    };
+  }
+  if ($('#links-clear-input')) {
+    $('#links-clear-input').onclick = () => {
+      linksSearchQuery = '';
+      render();
+      focusAccessibleDestination();
+    };
+  }
+  if ($('#links-filter-pinned')) {
+    $('#links-filter-pinned').onclick = () => {
+      linksFilter = linksFilter === 'pinned' ? 'all' : 'pinned';
+      render();
+    };
+  }
+  if ($('#links-reset-filters')) {
+    $('#links-reset-filters').onclick = () => {
+      clearSectionFilters('Important links');
+      focusAccessibleDestination();
+    };
+  }
+  if ($('#links-empty-reset')) {
+    $('#links-empty-reset').onclick = () => {
+      clearSectionFilters('Important links');
+      focusAccessibleDestination();
+    };
+  }
+}
+
+/* --- Dedicated View for Conferences --- */
+let conferenceSearchQuery = '';
+let conferenceFilter = 'all'; // 'all' | 'pinned'
+
+function conferencesView(){
+  const allRecords = records('Conferences');
+  const queryTerms = conferenceSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+
+  function matchesFilters(r) {
+    if (conferenceFilter === 'pinned' && !workspace.favorites.includes(r.id)) return false;
+    if (!queryTerms.length) return true;
+    const f = r.fields;
+    const hay = `${f.Congress || ''} ${f.Subspecialty || ''} ${f.City || ''} ${f['Members attending'] || ''} ${f.Scholarship || ''} ${f.Note || ''} ${f.Start || ''} ${f.End || ''}`.toLowerCase();
+    return queryTerms.every(t => hay.includes(t));
+  }
+
+  const visibleRecords = allRecords.filter(matchesFilters);
+  const isFiltering = queryTerms.length > 0 || conferenceFilter !== 'all';
+  const totalPinned = allRecords.filter(r => workspace.favorites.includes(r.id)).length;
+
+  const areaButtons = groups.Research
+    .map(t => `<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('');
+
+  const toolbarHtml = `
+    <div class="toolbar area-tabs">${areaButtons}</div>
+    <div class="conference-toolbar panel">
+      <div class="conference-toolbar-controls">
+        <div class="conference-search-wrap">
+          <span class="conference-search-icon" aria-hidden="true">⌕</span>
+          <input type="search" id="conference-search-input" class="input conference-search-input" placeholder="Search conferences by congress, city, subspecialty, or attendee…" value="${esc(conferenceSearchQuery)}" aria-label="Search conferences">
+          ${conferenceSearchQuery ? `<button type="button" class="icon-button conference-search-clear" id="conference-clear-input" aria-label="Clear search">×</button>` : ''}
+        </div>
+        <div class="conference-filter-actions">
+          <button type="button" class="button ${conferenceFilter==='pinned'?'primary':'secondary'} small" id="conference-filter-pinned">
+            ${conferenceFilter==='pinned' ? '★ Pinned only (' + totalPinned + ')' : '☆ Pinned (' + totalPinned + ')'}
+          </button>
+          ${isFiltering ? `<button type="button" class="button secondary small" id="conference-reset-filters">Reset filters</button>` : ''}
+        </div>
+      </div>
+      <div class="conference-toolbar-meta">
+        <p class="muted">${allRecords.length} event record${allRecords.length===1?'':'s'} in workbook · Showing ${visibleRecords.length} without pagination</p>
+      </div>
+    </div>
+  `;
+
+  let contentHtml = '';
+  if (visibleRecords.length === 0) {
+    contentHtml = `
+      <section class="empty-state panel">
+        <h2>No matching conferences</h2>
+        <p>No conference entries found matching your search or filters.</p>
+        <button type="button" class="button secondary" id="conference-empty-reset">Clear filters</button>
+      </section>
+    `;
+  } else {
+    contentHtml = `<div class="conference-list">${visibleRecords.map(r => {
+      const f = r.fields;
+      const linkUrl = urls(r, 'Link')[0];
+      const cityMapUrl = r.links?.City || urls(r, 'City')[0];
+      const isStarred = workspace.favorites.includes(r.id);
+      const isLocal = r.id.startsWith('local:');
+      const isEdited = !isLocal && workspace.edits[r.id];
+
+      const attendees = (f['Members attending'] || '')
+        .split(/[,;]/)
+        .map(s => s.trim())
+        .filter(Boolean);
+
+      const datesText = (f.Start && f.End)
+        ? `${f.Start} – ${f.End}`
+        : (f.Start || f.End || 'Dates not specified');
+
+      return `
+        <article class="conference-brief-card panel" data-record-id="${esc(r.id)}">
+          <header class="conference-card-header">
+            <div class="conference-title-wrap">
+              <h2 class="conference-congress-title">${esc(f.Congress || 'Academic Congress')}</h2>
+              <div class="conference-badges">
+                ${f.Subspecialty ? `<span class="tag">${esc(f.Subspecialty)}</span>` : ''}
+                ${f.Scholarship ? `<span class="tag tag-scholarship">🎓 Scholarship: ${esc(f.Scholarship)}</span>` : ''}
+                ${isLocal ? '<span class="tag local-chip">Local draft</span>' : ''}
+                ${isEdited ? '<span class="tag local-chip">Locally edited</span>' : ''}
+              </div>
+            </div>
+            <button type="button" class="icon-button star ${isStarred?'is-starred':''}" aria-label="${isStarred?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${isStarred?'★':'☆'}</button>
+          </header>
+
+          <div class="conference-brief-grid">
+            <!-- Left Column: Logistics -->
+            <div class="conference-col conference-logistics-col">
+              <h3 class="conference-col-heading">Event Logistics</h3>
+              <dl class="conference-def-list">
+                <div class="conference-def-item">
+                  <dt class="conference-label">Dates</dt>
+                  <dd class="conference-value">
+                    <span class="conference-date-display">📅 ${esc(datesText)}</span>
+                  </dd>
+                </div>
+                <div class="conference-def-item">
+                  <dt class="conference-label">Location / City</dt>
+                  <dd class="conference-value">
+                    ${cityMapUrl ? `
+                      <a href="${esc(cityMapUrl)}" target="_blank" rel="noopener noreferrer" class="conference-map-link" title="Open location in Google Maps">
+                        📍 ${esc(f.City || 'View map')} ↗ (Maps)
+                      </a>
+                    ` : `
+                      <span>📍 ${esc(f.City || 'Not specified')}</span>
+                    `}
+                  </dd>
+                </div>
+                <div class="conference-def-item">
+                  <dt class="conference-label">Scholarship</dt>
+                  <dd class="conference-value">${esc(f.Scholarship || 'No scholarship recorded')}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <!-- Right Column: Attendees & Notes -->
+            <div class="conference-col conference-attendees-col">
+              <h3 class="conference-col-heading">Participation &amp; Brief</h3>
+              <div class="conference-def-item">
+                <span class="conference-label">Members Attending</span>
+                <div class="conference-attendees-chips">
+                  ${attendees.length ? attendees.map(a => `<span class="attendee-chip">👤 ${esc(a)}</span>`).join('') : '<span class="muted">No attendees listed</span>'}
+                </div>
+              </div>
+              <div class="conference-def-item" style="margin-top: 10px;">
+                <span class="conference-label">Notes</span>
+                <p class="conference-note ${f.Note ? '' : 'muted'}">${esc(f.Note || 'No additional notes provided.')}</p>
+              </div>
+            </div>
+          </div>
+
+          <footer class="conference-actions-footer">
+            <div class="conference-primary-actions">
+              ${linkUrl ? `
+                <a class="button primary small conference-action-btn" href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer">
+                  Visit Conference Website ↗
+                </a>
+              ` : `
+                <span class="link-unavailable-badge">Website link unavailable</span>
+              `}
+              <button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="Conferences" aria-label="Edit details for ${esc(f.Congress || 'conference')}">
+                Edit / Full details
+              </button>
+            </div>
+            <details class="conference-source-drawer">
+              <summary>Source workbook info</summary>
+              <div class="conference-source-body">
+                <small class="muted">Reference: <code>${esc(source(r))}</code> · Tab: Conferences</small>
+              </div>
+            </details>
+          </footer>
+        </article>
+      `;
+    }).join('')}</div>`;
+  }
+
+  $('#page').innerHTML = header(sectionLabel('Conferences'), descriptions['Conferences'] || 'Academic conferences, congresses, and scholarship opportunities.') +
+    banner() +
+    areaPicker() +
+    toolbarHtml +
+    contentHtml;
+
+  if ($('#area-picker')) $('#area-picker').onchange = e => navigate(e.target.value);
+  const searchInput = $('#conference-search-input');
+  if (searchInput) {
+    searchInput.oninput = e => {
+      conferenceSearchQuery = e.target.value;
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+      render();
+      const el = $('#conference-search-input');
+      if (el) {
+        el.focus();
+        try { el.setSelectionRange(start, end); } catch {}
+      }
+    };
+  }
+  if ($('#conference-clear-input')) {
+    $('#conference-clear-input').onclick = () => {
+      conferenceSearchQuery = '';
+      render();
+      focusAccessibleDestination();
+    };
+  }
+  if ($('#conference-filter-pinned')) {
+    $('#conference-filter-pinned').onclick = () => {
+      conferenceFilter = conferenceFilter === 'pinned' ? 'all' : 'pinned';
+      render();
+    };
+  }
+  if ($('#conference-reset-filters')) {
+    $('#conference-reset-filters').onclick = () => {
+      clearSectionFilters('Conferences');
+      focusAccessibleDestination();
+    };
+  }
+  if ($('#conference-empty-reset')) {
+    $('#conference-empty-reset').onclick = () => {
+      clearSectionFilters('Conferences');
+      focusAccessibleDestination();
+    };
+  }
+}
+
+// ==========================================
+// Research Collaborators Comparison View (Prompt 5)
+// ==========================================
+function formatSkillStatus(value) {
+  const v = String(value ?? '').trim();
+  if (v.toLowerCase() === 'yes') {
+    return { status: 'yes', label: 'Yes', html: '<span class="skill-pill skill-yes" aria-label="Yes">Yes</span>' };
+  }
+  if (v.toLowerCase() === 'no') {
+    return { status: 'no', label: 'No', html: '<span class="skill-pill skill-no" aria-label="No">No</span>' };
+  }
+  return { status: 'unrecorded', label: 'Not recorded', html: '<span class="skill-pill skill-unrecorded" aria-label="Not recorded" title="Not recorded in workbook">Not recorded</span>' };
+}
+
+function formatAvailabilityBadge(avail) {
+  const text = String(avail ?? '').trim();
+  if (!text) return '<span class="tag tag-avail tag-avail-unknown">Not specified</span>';
+  const lower = text.toLowerCase();
+  let modifier = 'tag-avail-other';
+  if (lower === 'available') modifier = 'tag-avail-available';
+  else if (lower.includes('not available') || lower.includes('not yet')) modifier = 'tag-avail-unavailable';
+  return `<span class="tag tag-avail ${modifier}">${esc(text)}</span>`;
+}
+
+function formatContactDisplay(contact) {
+  const text = String(contact ?? '').trim();
+  if (!text) return '<span class="muted">Not recorded</span>';
+  return `<span class="contact-text">${esc(text)}</span>`;
+}
+
+function researchView() {
+  const allRecords = records('Research @CPSolvers');
+  const substantiveRecords = allRecords.filter(r => r.fields.Name && r.fields.Name.trim());
+  const availOptions = [...new Set(substantiveRecords.map(r => (r.fields.Availability || '').trim()).filter(Boolean))].sort();
+  const queryTerms = researchSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+
+  function matchesFilters(r) {
+    const f = r.fields;
+    if (researchFilter === 'pinned' && !workspace.favorites.includes(r.id)) return false;
+    if (researchFilter === 'edited' && !(workspace.edits[r.id] || r.id.startsWith('local:'))) return false;
+    if (researchAvailabilityFilter !== 'all' && (f.Availability || '').trim().toLowerCase() !== researchAvailabilityFilter.toLowerCase()) return false;
+    if (researchSkillFilter !== 'all' && String(f[researchSkillFilter] || '').trim().toLowerCase() !== 'yes') return false;
+    if (!queryTerms.length) return true;
+    const positiveSkills = RESEARCH_SKILLS.filter(s => String(f[s] || '').trim().toLowerCase() === 'yes').join(' ');
+    const hay = `${f.Name || ''} ${f.Availability || ''} ${f['Preferred contact'] || ''} ${positiveSkills}`.toLowerCase();
+    return queryTerms.every(t => hay.includes(t));
+  }
+
+  const visibleRecords = substantiveRecords.filter(matchesFilters);
+  const isFiltering = queryTerms.length > 0 || researchFilter !== 'all' || researchAvailabilityFilter !== 'all' || researchSkillFilter !== 'all';
+  const totalPinned = substantiveRecords.filter(r => workspace.favorites.includes(r.id)).length;
+
+  const areaButtons = groups.Research
+    .map(t => `<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('');
+
+  const visibleSkillsList = RESEARCH_SKILLS.filter(s => researchVisibleSkills.has(s));
+
+  const columnPickerHtml = `
+    <details class="research-column-picker" id="research-column-picker" ${researchPickerOpen?'open':''}>
+      <summary class="button secondary small">Visible skills (${visibleSkillsList.length}/${RESEARCH_SKILLS.length}) ▾</summary>
+      <div class="research-column-panel panel">
+        <div class="research-column-panel-head">
+          <span>Compare skills in table:</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" class="text-button" id="research-columns-select-all">Select all</button>
+            <button type="button" class="text-button" id="research-columns-done">Done</button>
+          </div>
+        </div>
+        <div class="research-column-checklist">
+          ${RESEARCH_SKILLS.map(s => `
+            <label class="research-col-label">
+              <input type="checkbox" data-skill-col="${esc(s)}" ${researchVisibleSkills.has(s)?'checked':''}>
+              <span>${esc(s)}</span>
+            </label>
+          `).join('')}
+        </div>
+      </div>
+    </details>
+  `;
+
+  const toolbarHtml = `
+    <div class="toolbar area-tabs">${areaButtons}</div>
+    <div class="research-toolbar panel">
+      <div class="research-toolbar-controls">
+        <div class="research-search-wrap">
+          <span class="research-search-icon" aria-hidden="true">⌕</span>
+          <input type="search" id="research-search-input" class="input research-search-input" placeholder="Search collaborators by name, contact, availability, or skill…" value="${esc(researchSearchQuery)}" aria-label="Search research collaborators">
+          ${researchSearchQuery ? `<button type="button" class="icon-button research-search-clear" id="research-clear-input" aria-label="Clear search">×</button>` : ''}
+        </div>
+        <label class="research-select-label">
+          <span class="muted">Skill:</span>
+          <select id="research-skill-select" class="select research-select" aria-label="Filter by research skill">
+            <option value="all">Any skill</option>
+            ${RESEARCH_SKILLS.map(s => `<option value="${esc(s)}" ${researchSkillFilter===s?'selected':''}>${esc(s)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="research-select-label">
+          <span class="muted">Availability:</span>
+          <select id="research-avail-select" class="select research-select" aria-label="Filter by availability">
+            <option value="all">All availability</option>
+            ${availOptions.map(a => `<option value="${esc(a)}" ${researchAvailabilityFilter===a?'selected':''}>${esc(a)}</option>`).join('')}
+          </select>
+        </label>
+        <div class="research-filter-actions">
+          <button type="button" class="button ${researchFilter==='pinned'?'primary':'secondary'} small" id="research-filter-pinned">
+            ${researchFilter==='pinned' ? '★ Pinned (' + totalPinned + ')' : '☆ Pinned (' + totalPinned + ')'}
+          </button>
+          ${isFiltering ? `<button type="button" class="button secondary small" id="research-reset-filters">Reset filters</button>` : ''}
+        </div>
+      </div>
+      <div class="research-toolbar-meta">
+        <p class="muted">
+          ${substantiveRecords.length} collaborator${substantiveRecords.length===1?'':'s'} in workbook · Showing ${visibleRecords.length} without pagination
+          ${isFiltering ? ` (filtered from ${substantiveRecords.length})` : ''}
+        </p>
+        <div class="research-toolbar-extra">
+          ${columnPickerHtml}
+        </div>
+      </div>
+    </div>
+  `;
+
+  let contentHtml = '';
+  if (visibleRecords.length === 0) {
+    contentHtml = `
+      <section class="empty-state panel">
+        <h2>No matching collaborators</h2>
+        <p>No research collaborators match your search or filters.</p>
+        <button type="button" class="button secondary" id="research-empty-reset">Clear filters</button>
+      </section>
+    `;
+  } else {
+    // Desktop View: Comparison Table
+    const desktopTableHtml = `
+      <div class="research-desktop-view">
+        <div class="research-table-container">
+          <table class="research-table" aria-label="Research Collaborators Comparison Table">
+            <thead>
+              <tr>
+                <th scope="col" class="th-collaborator">Collaborator</th>
+                <th scope="col" class="th-availability">Availability</th>
+                ${visibleSkillsList.map(s => `<th scope="col" class="th-skill">${esc(s)}</th>`).join('')}
+                <th scope="col" class="th-contact">Preferred contact</th>
+                <th scope="col" class="th-actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${visibleRecords.map(r => {
+                const f = r.fields;
+                const isStarred = workspace.favorites.includes(r.id);
+                const isLocal = r.id.startsWith('local:');
+                const isEdited = !isLocal && workspace.edits[r.id];
+                return `
+                  <tr class="research-row" data-record-id="${esc(r.id)}">
+                    <th scope="row" class="td-collaborator">
+                      <div class="collaborator-name-cell">
+                        <span class="collaborator-name">${esc(f.Name || 'Unnamed')}</span>
+                        <div class="collaborator-badges">
+                          ${isLocal ? '<span class="tag local-chip">Local draft</span>' : ''}
+                          ${isEdited ? '<span class="tag local-chip">Locally edited</span>' : ''}
+                        </div>
+                      </div>
+                    </th>
+                    <td class="td-availability">
+                      ${formatAvailabilityBadge(f.Availability)}
+                    </td>
+                    ${visibleSkillsList.map(s => {
+                      const st = formatSkillStatus(f[s]);
+                      return `<td class="td-skill td-skill-${st.status}">${st.html}</td>`;
+                    }).join('')}
+                    <td class="td-contact">
+                      ${formatContactDisplay(f['Preferred contact'])}
+                    </td>
+                    <td class="td-actions">
+                      <div class="research-row-actions">
+                        <button type="button" class="icon-button star ${isStarred?'is-starred':''}" aria-label="${isStarred?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${isStarred?'★':'☆'}</button>
+                        <button type="button" class="button primary small" data-open="${esc(r.id)}" data-area="Research @CPSolvers">Details</button>
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    // Mobile View: Cards with Compact Positive-Skill Summary & Keyboard Disclosures
+    const mobileListHtml = `
+      <div class="research-mobile-view">
+        <div class="research-mobile-list">
+          ${visibleRecords.map(r => {
+            const f = r.fields;
+            const isStarred = workspace.favorites.includes(r.id);
+            const isLocal = r.id.startsWith('local:');
+            const isEdited = !isLocal && workspace.edits[r.id];
+            const positiveSkills = RESEARCH_SKILLS.filter(s => String(f[s] || '').trim().toLowerCase() === 'yes');
+
+            return `
+              <article class="research-mobile-card panel" data-record-id="${esc(r.id)}">
+                <header class="research-mobile-header">
+                  <div class="research-mobile-identity">
+                    <h3 class="research-collaborator-name">${esc(f.Name || 'Unnamed Collaborator')}</h3>
+                    <div class="research-mobile-tags">
+                      ${formatAvailabilityBadge(f.Availability)}
+                      ${isLocal ? '<span class="tag local-chip">Local draft</span>' : ''}
+                      ${isEdited ? '<span class="tag local-chip">Locally edited</span>' : ''}
+                    </div>
+                  </div>
+                  <div class="research-mobile-actions">
+                    <button type="button" class="icon-button star ${isStarred?'is-starred':''}" aria-label="${isStarred?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${isStarred?'★':'☆'}</button>
+                    <button type="button" class="button primary small" data-open="${esc(r.id)}" data-area="Research @CPSolvers">Details</button>
+                  </div>
+                </header>
+
+                <div class="research-positive-summary">
+                  <span class="positive-summary-label">Key skills:</span>
+                  <div class="positive-summary-chips">
+                    ${positiveSkills.length ? positiveSkills.map(s => `<span class="tag positive-skill-chip">${esc(s)}</span>`).join('') : '<span class="muted">No skills recorded as Yes</span>'}
+                  </div>
+                </div>
+
+                <details class="research-skills-disclosure">
+                  <summary class="skills-disclosure-summary">All skills &amp; contact details (${positiveSkills.length}/${RESEARCH_SKILLS.length} positive) ▾</summary>
+                  <div class="skills-disclosure-content">
+                    <div class="research-contact-block">
+                      <strong class="contact-label">Preferred contact:</strong>
+                      <div class="contact-value">${formatContactDisplay(f['Preferred contact'])}</div>
+                    </div>
+                    <div class="all-skills-checklist">
+                      ${RESEARCH_SKILLS.map(s => {
+                        const st = formatSkillStatus(f[s]);
+                        return `
+                          <div class="skill-checklist-item">
+                            <span class="skill-name">${esc(s)}</span>
+                            ${st.html}
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+                </details>
+              </article>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+
+    const isMobile = typeof window !== 'undefined' && (window.innerWidth || 0) <= 760;
+    contentHtml = isMobile ? mobileListHtml : desktopTableHtml;
+  }
+
+  $('#page').innerHTML = `
+    <div class="research-container" id="Research">
+      ${header('Research Collaborators', descriptions['Research @CPSolvers'] || 'Find collaborators by research skills and availability.')}
+      ${banner()}
+      ${toolbarHtml}
+      ${contentHtml}
+    </div>
+  `;
+
+  // Bind controls
+  const searchInput = $('#research-search-input');
+  if (searchInput) {
+    searchInput.oninput = e => {
+      researchSearchQuery = e.target.value;
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+      render();
+      const nextInput = $('#research-search-input');
+      if (nextInput) {
+        nextInput.focus();
+        try { nextInput.setSelectionRange(start, end); } catch {}
+      }
+    };
+  }
+  const clearInput = $('#research-clear-input');
+  if (clearInput) clearInput.onclick = () => { researchSearchQuery = ''; render(); focusAccessibleDestination(); };
+
+  const skillSelect = $('#research-skill-select');
+  if (skillSelect) skillSelect.onchange = e => { researchSkillFilter = e.target.value; render(); };
+
+  const availSelect = $('#research-avail-select');
+  if (availSelect) availSelect.onchange = e => { researchAvailabilityFilter = e.target.value; render(); };
+
+  const pinnedBtn = $('#research-filter-pinned');
+  if (pinnedBtn) pinnedBtn.onclick = () => {
+    researchFilter = researchFilter === 'pinned' ? 'all' : 'pinned';
+    render();
+  };
+
+  const resetBtn = $('#research-reset-filters');
+  if (resetBtn) resetBtn.onclick = () => {
+    clearSectionFilters('Research @CPSolvers');
+    focusAccessibleDestination();
+  };
+
+  const emptyResetBtn = $('#research-empty-reset');
+  if (emptyResetBtn) emptyResetBtn.onclick = () => {
+    clearSectionFilters('Research @CPSolvers');
+    focusAccessibleDestination();
+  };
+
+  const pickerEl = $('#research-column-picker');
+  if (pickerEl) {
+    pickerEl.ontoggle = () => { researchPickerOpen = pickerEl.open; };
+  }
+
+  // Column picker checkboxes
+  document.querySelectorAll('[data-skill-col]').forEach(cb => {
+    cb.onchange = e => {
+      const col = e.target.dataset.skillCol;
+      if (e.target.checked) researchVisibleSkills.add(col);
+      else researchVisibleSkills.delete(col);
+      researchPickerOpen = true;
+      render();
+    };
+  });
+
+  const panelEl = $('#research-column-picker .research-column-panel');
+  if (panelEl) {
+    panelEl.onclick = e => e.stopPropagation();
+  }
+
+  const selectAllColsBtn = $('#research-columns-select-all');
+  if (selectAllColsBtn) selectAllColsBtn.onclick = e => {
+    e.stopPropagation();
+    researchVisibleSkills = new Set(RESEARCH_SKILLS);
+    researchPickerOpen = true;
+    render();
+  };
+
+  const doneColsBtn = $('#research-columns-done');
+  if (doneColsBtn) doneColsBtn.onclick = e => {
+    e.stopPropagation();
+    researchPickerOpen = false;
+    render();
+  };
+
+  if (!$('#research-column-picker')?.dataset.boundOutside) {
+    const p = $('#research-column-picker');
+    if (p) {
+      p.dataset.boundOutside = 'true';
+      document.addEventListener('click', e => {
+        const cur = $('#research-column-picker');
+        if (cur && cur.open && !cur.contains(e.target)) {
+          researchPickerOpen = false;
+          cur.open = false;
+        }
+      });
+    }
+  }
 }
 
 function orgStructureView(){
@@ -1205,7 +2844,7 @@ function orgStructureView(){
     : '';
 
   const areas=groups['People']||['Members','OrgStructure','CRC','CRC - retired'];
-  const areaTabsHtml=`<div class="toolbar area-tabs">${areas.map(t=>`<button class="button ${t==='OrgStructure'?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>`;
+  const areaTabsHtml=`<div class="toolbar area-tabs">${areas.map(t=>`<button class="button ${t==='OrgStructure'?'primary':'secondary'} small" ${t==='OrgStructure'?'aria-current="page"':''} data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>`;
 
   $('#page').innerHTML=header('Teams & leadership',descriptions['OrgStructure']||'Responsibilities and teams, as recorded in the workbook.')+
     banner()+
@@ -1223,9 +2862,11 @@ function bindOrgEvents(){
   if(searchInput){
     searchInput.oninput=e=>{
       orgSearchQuery=e.target.value;
+      const start=e.target.selectionStart;
+      const end=e.target.selectionEnd;
       render();
       const el=$('#org-search-input');
-      if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}
+      if(el){el.focus();try{el.setSelectionRange(start,end);}catch{}}
     };
   }
   if($('#org-clear-input')){
@@ -1233,14 +2874,13 @@ function bindOrgEvents(){
       orgSearchQuery='';
       orgFullGroupShows.clear();
       render();
+      focusAccessibleDestination();
     };
   }
   if($('#org-empty-clear')){
     $('#org-empty-clear').onclick=()=>{
-      orgSearchQuery='';
-      orgGroupFilter='all';
-      orgFullGroupShows.clear();
-      render();
+      clearSectionFilters('OrgStructure');
+      focusAccessibleDestination();
     };
   }
   if($('#org-group-select')){
@@ -1267,11 +2907,8 @@ function bindOrgEvents(){
   }
   if($('#org-reset-filters')){
     $('#org-reset-filters').onclick=()=>{
-      orgSearchQuery='';
-      orgGroupFilter='all';
-      orgFullGroupShows.clear();
-      orgExpandedGroups=new Set(ORG_GROUPS.map(g=>g.id).concat(['other']));
-      render();
+      clearSectionFilters('OrgStructure');
+      focusAccessibleDestination();
     };
   }
   document.querySelectorAll('.org-toggle-full-btn').forEach(b=>{
@@ -1315,6 +2952,10 @@ function render(){
   else if(tab==='admin/issues')adminIssuesView();
   else if(tab==='profile/logbook')personalLogbookView();
   else if(tab==='OrgStructure')orgStructureView();
+  else if(tab==='Members')membersView();
+  else if(tab==='Important links')importantLinksView();
+  else if(tab==='Conferences')conferencesView();
+  else if(tab==='Research @CPSolvers')researchView();
   else listing();
   bindCalendarButtons();
   document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>navigate(b.dataset.go));
@@ -1324,6 +2965,7 @@ function render(){
   document.querySelectorAll('.staff-token').forEach(b=>b.onclick=e=>{e.stopPropagation();openStaffTokenDialog(b.dataset.sessionId,b.dataset.role,b.dataset.tokenName);});
   document.querySelectorAll('.staff-add-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();openStaffAddDialog(b.dataset.sessionId,b.dataset.addRole);});
   document.querySelectorAll('[data-swap]').forEach(b=>b.onclick=()=>openSwapDialog(b.dataset.swap,b.dataset.role));
+  document.querySelectorAll('.find-in-teams-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();findMemberInTeams(b.dataset.memberName);});
   if($('#commitments-open-prefs-btn'))$('#commitments-open-prefs-btn').onclick=()=>{const t=$('#admin-toggle');if(t)t.checked=isAdmin();updateProfileDisplay();$('#admin-prefs-dialog')?.showModal()};
   document.querySelectorAll('[data-star]').forEach(b=>b.onclick=e=>{e.stopPropagation();const id=b.dataset.star;const willBeStarred=!workspace.favorites.includes(id);if(mutate(w=>{w.favorites=willBeStarred?[...w.favorites,id]:w.favorites.filter(x=>x!==id)})){document.querySelectorAll(`[data-star="${CSS.escape?CSS.escape(id):id}"]`).forEach(starBtn=>{starBtn.textContent=willBeStarred?'★':'☆';starBtn.classList.toggle('is-starred',willBeStarred);starBtn.setAttribute('aria-label',`${willBeStarred?'Unpin':'Pin'} record`);});if(filter==='Pinned'||tab==='Home')render();else toast(willBeStarred?'Pinned to favorites':'Unpinned from favorites');}});
   document.querySelectorAll('.schedule-secondary-filters').forEach(d=>d.ontoggle=()=>{if(window.innerWidth<=760)scheduleFiltersOpen=d.open});
@@ -2151,6 +3793,11 @@ function exportPatchJson(){
 }
 function validateFields(fields,t){if(!fields||Array.isArray(fields)||typeof fields!=='object')throw Error('Invalid fields');for(const [k,v] of Object.entries(fields))if(!db[t].columns.includes(k)||(typeof v!=='string'&&typeof v!=='number'&&typeof v!=='boolean')||String(v).length>50000)throw Error('Invalid record field')}
 function globalResults(){
+  if (!globalSearchActive) {
+    saveSectionState(tab);
+    globalSearchLastSection = tab;
+    globalSearchActive = true;
+  }
   const terms=query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const searchFn = typeof SearchCore !== 'undefined' ? SearchCore.searchRecord : null;
   const found = Object.keys(db).flatMap(t => records(t).map(r => {
@@ -2163,8 +3810,8 @@ function globalResults(){
   const PAGE_SIZE=24,totalPages=Math.max(1,Math.ceil(found.length/PAGE_SIZE));
   searchPage=Math.min(searchPage,totalPages-1);
   const current=found.slice(searchPage*PAGE_SIZE,searchPage*PAGE_SIZE+PAGE_SIZE),start=found.length===0?0:searchPage*PAGE_SIZE+1,end=Math.min((searchPage+1)*PAGE_SIZE,found.length);
-  const subtitle=found.length>PAGE_SIZE?`${found.length} matches across all workbook areas. Showing ${start}–${end} (page ${searchPage+1} of ${totalPages}).`:`${found.length} matches across all workbook areas.`;
-  $('#page').innerHTML=header('Search the Academy',subtitle)+`<div class="toolbar"><button class="button secondary small" id="clear-search">← Return to ${esc(tab)}</button></div><section class="hub-grid">${current.map(({r,t})=>card(r,t,true)).join('')||'<div class="empty-state panel"><h2>No matching records</h2><p>Try searching for a name, topic, date, or workbook tab (e.g. Morning Report, OrgStructure, Podcasts).</p><button class="button secondary" id="empty-clear-search">Clear search</button></div>'}</section>${totalPages>1?`<div class="toolbar pagination"><button class="button secondary" id="search-prev" ${searchPage===0?'disabled':''}>Previous</button><span>Page ${searchPage+1} of ${totalPages}</span><button class="button secondary" id="search-next" ${(searchPage+1)*PAGE_SIZE>=found.length?'disabled':''}>Next</button></div>`:''}`;
+  const subtitle=found.length>PAGE_SIZE?`Showing ${start}–${end} of ${found.length} matches across all workbook areas (page ${searchPage+1} of ${totalPages}).`:`Showing ${found.length} matches across all workbook areas.`;
+  $('#page').innerHTML=header('Search the Academy',subtitle)+banner()+`<div class="toolbar"><button class="button secondary small" id="clear-search">← Return to ${esc(globalSearchLastSection || tab)}</button></div><p class="muted results-count" aria-live="polite">${subtitle}</p><section class="hub-grid">${current.map(({r,t})=>card(r,t,true)).join('')||'<div class="empty-state panel"><h2>No matching records</h2><p>Try searching for a name, topic, date, or workbook tab (e.g. Morning Report, OrgStructure, Podcasts).</p><button class="button secondary" id="empty-clear-search">Clear search</button></div>'}</section>${totalPages>1?`<div class="toolbar pagination"><button class="button secondary" id="search-prev" ${searchPage===0?'disabled':''}>Previous</button><span>Page ${searchPage+1} of ${totalPages}</span><button class="button secondary" id="search-next" ${(searchPage+1)*PAGE_SIZE>=found.length?'disabled':''}>Next</button></div>`:''}`;
   document.querySelectorAll('[data-snippet-target]').forEach(target => {
     const recId = target.dataset.snippetTarget;
     const item = current.find(x => x.r.id === recId);
@@ -2175,15 +3822,46 @@ function globalResults(){
       });
     }
   });
-  document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openRecord(b.dataset.open,b.dataset.area));
-  document.querySelectorAll('[data-star]').forEach(b=>b.onclick=()=>{if(mutate(w=>{w.favorites=w.favorites.includes(b.dataset.star)?w.favorites.filter(id=>id!==b.dataset.star):[...w.favorites,b.dataset.star]}))globalResults()});
-  const clearHandler=()=>{query='';searchPage=0;$('#global-search').value='';render()};
+  document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{
+    trackDialogOpener(b);
+    setSectionAnchor(b.dataset.area || tab, b.dataset.open);
+    openRecord(b.dataset.open,b.dataset.area);
+  });
+  document.querySelectorAll('[data-star]').forEach(b=>b.onclick=()=>{
+    setSectionAnchor(tab, b.dataset.star);
+    if(mutate(w=>{w.favorites=w.favorites.includes(b.dataset.star)?w.favorites.filter(id=>id!==b.dataset.star):[...w.favorites,b.dataset.star]}))globalResults();
+  });
+  const clearHandler=()=>{
+    query='';
+    searchPage=0;
+    globalSearchActive=false;
+    if($('#global-search'))$('#global-search').value='';
+    const returnTab = globalSearchLastSection || tab;
+    if (returnTab && returnTab !== tab) {
+      tab = returnTab;
+      location.hash = encodeURIComponent(returnTab);
+    }
+    restoreSectionState(tab);
+    render();
+    restoreScrollAndAnchor(tab);
+    focusAccessibleDestination();
+  };
   if($('#clear-search'))$('#clear-search').onclick=clearHandler;
+  if($('#clear'))$('#clear').onclick=clearHandler;
   if($('#empty-clear-search'))$('#empty-clear-search').onclick=clearHandler;
-  if($('#search-prev'))$('#search-prev').onclick=()=>{searchPage--;globalResults();window.scrollTo(0,0)};
-  if($('#search-next'))$('#search-next').onclick=()=>{searchPage++;globalResults();window.scrollTo(0,0)};
+  if($('#search-prev'))$('#search-prev').onclick=()=>{searchPage--;globalResults();window.scrollTo(0,0);focusAccessibleDestination(true);};
+  if($('#search-next'))$('#search-next').onclick=()=>{searchPage++;globalResults();window.scrollTo(0,0);focusAccessibleDestination(true);};
 }
-$('#global-search').oninput=e=>{query=e.target.value;searchPage=0;render()};$('#new-item-button').onclick=()=>{if(!db['Morning Report'])return toast('Please wait for the workbook to load');createRecord()};
+$('#global-search').oninput=e=>{
+  if(!globalSearchActive && e.target.value.trim()){
+    saveSectionState(tab);
+    globalSearchLastSection = tab;
+    globalSearchActive = true;
+  }
+  query=e.target.value;
+  searchPage=0;
+  render();
+};$('#new-item-button').onclick=()=>{if(!db['Morning Report'])return toast('Please wait for the workbook to load');createRecord()};
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()};if(e.key==='Escape'&&document.activeElement===$('#global-search')&&query.trim()){query='';searchPage=0;$('#global-search').value='';render()}});
 $('.sync-card').onclick=()=>navigate('Workspace');$('.sync-card strong').textContent='Workbook snapshot';$('.sync-card small').textContent='Local changes · no live sync';$('.notification-button')?.remove();
 if($('#feedback-trigger-btn'))$('#feedback-trigger-btn').onclick=openIssueModal;
@@ -2461,8 +4139,7 @@ function arrangeScheduleFilters(){
  const bar=document.querySelector('.filter-bar');if(!bar||bar.dataset.arranged)return;bar.dataset.arranged='true';bar.classList.add('schedule-filter-bar','filter-toolbar','roster-toolbar');
  const search=bar.querySelector('#section-query')?.closest('label'),views=bar.querySelector('.segmented')||bar.querySelector('#view');
  const details=bar.querySelector('.schedule-secondary-filters');
- details.classList.add('roster-filter');
- details.ontoggle=()=>{if(window.innerWidth<=760)scheduleFiltersOpen=details.open};
+ if(details){details.classList.add('roster-filter');details.ontoggle=()=>{if(window.innerWidth<=760)scheduleFiltersOpen=details.open};}
  if(search){search.classList.add('schedule-quick-search','roster-search');search.querySelector('input').placeholder=['Morning Report','CPS Academy VMRs'].includes(tab)?'Search sessions':'Search this section';bar.append(search);}
  const chips=document.createElement('div');chips.className='schedule-filter-chips';chips.setAttribute('aria-label','Schedule views');
  const activeUser=typeof Identity!=='undefined'?Identity.getCurrentUser():null;
@@ -2486,4 +4163,12 @@ if(typeof globalThis!=='undefined'){
   globalThis.getRecordClassification=getRecordClassification;
   globalThis.getClassificationCounts=getClassificationCounts;
   globalThis.formatResultsCount=formatResultsCount;
+  globalThis.BROWSING_STORAGE_KEY=BROWSING_STORAGE_KEY;
+  globalThis.saveSectionState=saveSectionState;
+  globalThis.restoreSectionState=restoreSectionState;
+  globalThis.getSectionState=getSectionState;
+  globalThis.clearSectionFilters=clearSectionFilters;
+  globalThis.clampPageForSection=clampPageForSection;
+  globalThis.setSectionAnchor=setSectionAnchor;
+  globalThis.sectionBrowsingMemory=sectionBrowsingMemory;
 }
