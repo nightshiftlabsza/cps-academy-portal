@@ -26,8 +26,8 @@ const { chromium } = require('playwright-core');
 
       // Verify Convention notice
       const conventionText = await p.locator('.schedule-week-navigator').innerText();
-      assert.match(conventionText, /Monday to Sunday/i, 'Convention note must be visible');
-      assert.match(conventionText, /Mon–Sun \(UTC\)/i, 'Convention badge must be visible');
+      assert.match(conventionText, /Monday[–\s-]+Sunday/i, 'Convention note must be visible');
+      assert.match(conventionText, /Monday[–\s-]+Sunday,\s*using workbook dates/i, 'Convention badge must be visible');
 
       // Check Prev / Next / This Week navigation
       const initialTitle = await p.locator('#week-nav-title').innerText();
