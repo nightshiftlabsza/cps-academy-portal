@@ -131,8 +131,17 @@ const { createServer } = require('../scripts/serve.cjs');
       await page.locator('.research-row-actions button[data-open]').first().click();
       await page.locator('#detail-dialog').waitFor();
       assert.equal(await page.locator('#detail-dialog').evaluate(el => el.open), true, 'Detail dialog open');
-      assert.ok(await page.locator('#dialog-content label:has-text("Research writing")').count() > 0, 'Detail dialog includes all fields');
-      await page.keyboard.press('Escape');
+      assert.ok(await page.locator('#dialog-content :text("Research writing")').count() > 0, 'Detail dialog includes all fields');
+      if (await page.locator('#edit-record-btn').isVisible()) {
+        await page.click('#edit-record-btn');
+        assert.ok(await page.locator('#dialog-content label:has-text("Research writing")').count() > 0, 'Edit form includes Research writing');
+        await page.click('#dialog-secondary'); // cancel edit -> view mode
+        if (await page.locator('#detail-dialog').evaluate(el => el.open)) {
+          await page.click('#dialog-secondary'); // close view mode
+        }
+      } else {
+        await page.keyboard.press('Escape');
+      }
 
       await context.close();
     }
