@@ -98,6 +98,26 @@ let researchVisibleSkills = new Set(RESEARCH_SKILLS);
 let researchPickerOpen = false;
 
 // ==========================================
+// Podcast Production Queues State (Prompt 11)
+// ==========================================
+const PODCAST_SERIES_LABELS = [
+  '#Endneurophobia',
+  'ARM',
+  'Clinical Unknown',
+  'Consult Question',
+  'HDx',
+  'ID love',
+  'Queer Rounds',
+  'RR',
+  'Schema',
+  'SLS',
+  'Subspecialty VMR',
+  'WDx'
+];
+let podcastSeriesFilter = '';
+let podcastPeriodFilter = 'all';
+
+// ==========================================
 // Display Classification Layer (Prompt 2)
 // ==========================================
 const RECORD_CATEGORY = {
@@ -143,6 +163,7 @@ const RESIDENCY_MONTH_HEADINGS = new Map([
 ]);
 
 function getMemberCohortByRow(row) {
+  if (typeof row !== 'number' || row == null || Number.isNaN(row)) return 'Local / unassigned';
   if (row < 80) return 'Participants';
   if (row >= 83 && row < 146) return 'Core team';
   if (row >= 149 && row < 189) return 'Leaders';
@@ -151,11 +172,12 @@ function getMemberCohortByRow(row) {
 }
 
 function getResidencyMonthByRecord(record) {
-  if (!record) return 'October';
+  if (!record) return 'Local / unassigned';
   if (RESIDENCY_MONTH_HEADINGS.has(record.id)) {
     return RESIDENCY_MONTH_HEADINGS.get(record.id).month;
   }
   const r = record.row;
+  if (typeof r !== 'number' || r == null || Number.isNaN(r) || record.id?.startsWith('local:')) return 'Local / unassigned';
   if (r < 8) return 'October';
   if (r < 13) return 'November';
   if (r < 17) return 'December';
@@ -179,14 +201,17 @@ function classifyRecord(record, t = (record?.tab || (typeof tab !== 'undefined' 
       const meta = MEMBERS_STRUCTURAL_IDS.get(record.id);
       const name = (fields.Name || '').trim();
       const email = (fields.Email || '').trim();
-      const isStillHeading = (!name || name === rawFields.Name || name.toLowerCase() === 'name' || name.toLowerCase().includes('core team') || name.toLowerCase().includes('leaders') || name.toLowerCase().includes('members inactive')) && !email;
+      const sourceRec = (typeof db !== 'undefined' && db['Members']?.records) ? db['Members'].records.find(r => r.id === record.id) : null;
+      const sourceName = ((sourceRec?.fields?.Name ?? meta.label) || '').trim();
+      const isHeadingPattern = !name || name.toLowerCase() === 'name' || name.toLowerCase().includes('core team') || name.toLowerCase().includes('leaders') || name.toLowerCase().includes('members inactive');
+      const isStillHeading = (name.toLowerCase() === sourceName.toLowerCase() || isHeadingPattern) && !email;
       if (hasLocalEdits && !isStillHeading) {
         return { category: RECORD_CATEGORY.NAMED_ENTRY, cohort: meta.cohort, role: 'member', label: name, isStructural: false, isSubstantive: true, hasLocalEdits: true, wasHeading: true, reviewNotice: `Locally edited from ${meta.role === 'column_header' ? 'repeated header' : 'source heading'}` };
       }
       return { category: RECORD_CATEGORY.SOURCE_HEADING, cohort: meta.cohort, role: meta.role, label: meta.label, isStructural: true, isSubstantive: false, hasLocalEdits, wasHeading: false, reviewNotice: null };
     }
     const name = (fields.Name || '').trim();
-    const cohort = getMemberCohortByRow(record.row);
+    const cohort = (record.id?.startsWith('local:') || record.row == null) ? 'Local / unassigned' : getMemberCohortByRow(record.row);
     if (!name && !fields.Email && !fields.Country && !fields.Sponsor) {
       return { category: RECORD_CATEGORY.PLACEHOLDER, cohort, role: 'empty_row', label: 'Empty member row', isStructural: true, isSubstantive: false, hasLocalEdits, wasPlaceholder: false, reviewNotice: 'All member fields are empty' };
     }
@@ -219,7 +244,7 @@ function classifyRecord(record, t = (record?.tab || (typeof tab !== 'undefined' 
     if (roundConfig && record.row === roundConfig.headingRow) {
       const mentee = (fields.MENTEE || '').trim();
       if (hasLocalEdits && mentee && !mentee.toUpperCase().startsWith('ROUND')) {
-        return { category: RECORD_CATEGORY.NAMED_ENTRY, round: roundName, role: 'mentorship_case', label: mentee, isStructural: false, isSubstantive: true, hasLocalEdits: true, wasHeading: true, reviewNotice: 'Locally edited from round heading: now a mentorship case' };
+        return { category: RECORD_CATEGORY.NAMED_ENTRY, round: roundName, role: 'mentorship_case', label: mentee, isStructural: false, isSubstantive: true, hasLocalEdits: true, wasHeading: true, reviewNotice: 'Locally edited from round heading: now a mentorship case', hasMentee: true };
       }
       return { category: RECORD_CATEGORY.SOURCE_HEADING, round: roundName, role: 'round_heading', label: fields.MENTEE || roundName.toUpperCase(), isStructural: true, isSubstantive: false, hasLocalEdits, wasHeading: false, reviewNotice: null };
     }
@@ -230,14 +255,15 @@ function classifyRecord(record, t = (record?.tab || (typeof tab !== 'undefined' 
     const country = (fields["PRESENTER'S COUNTRY"] || '').trim();
     const issues = (fields['ISSUES/CONCERNS'] || '').trim();
     const hasSubstantiveCase = Boolean(mentee || mentor || contact || datePres || country || issues);
+    const hasMentee = Boolean(mentee);
     const isBaselinePlaceholder = record.id === 'CRC - retired:418' || record.id === 'CRC - retired:419';
     if (!hasSubstantiveCase) {
       return { category: RECORD_CATEGORY.PLACEHOLDER, round: roundName, role: 'template_placeholder', label: 'Empty template row', isStructural: true, isSubstantive: false, hasLocalEdits, wasPlaceholder: false, reviewNotice: null };
     }
     if (isBaselinePlaceholder && hasSubstantiveCase) {
-      return { category: RECORD_CATEGORY.NAMED_ENTRY, round: roundName, role: 'mentorship_case', label: mentee || 'Mentorship case', isStructural: false, isSubstantive: true, hasLocalEdits: true, wasPlaceholder: true, reviewNotice: 'Locally edited from placeholder: now a mentorship case' };
+      return { category: RECORD_CATEGORY.NAMED_ENTRY, round: roundName, role: 'mentorship_case', label: mentee || 'Mentorship case', isStructural: false, isSubstantive: true, hasLocalEdits: true, wasPlaceholder: true, reviewNotice: 'Locally edited from placeholder: now a mentorship case', hasMentee };
     }
-    return { category: RECORD_CATEGORY.NAMED_ENTRY, round: roundName, role: 'mentorship_case', label: mentee || 'Mentorship case', isStructural: false, isSubstantive: true, hasLocalEdits, wasPlaceholder: false, reviewNotice: null };
+    return { category: RECORD_CATEGORY.NAMED_ENTRY, round: roundName, role: 'mentorship_case', label: mentee || (mentor ? `Mentor: ${mentor}` : 'Mentorship case'), isStructural: false, isSubstantive: true, hasLocalEdits, wasPlaceholder: false, reviewNotice: null, hasMentee };
   }
 
   if (effectiveTab === 'OrgStructure') {
@@ -272,6 +298,7 @@ function getRecordClassification(record, t = tab) {
 
 function getClassificationCounts(recordList, t = tab) {
   let namedEntries = 0, sourceHeadings = 0, placeholders = 0, unknowns = 0;
+  let namedMentees = 0, mentorOnly = 0;
   const cohortCounts = {};
   const monthCounts = {};
   const roundCounts = {};
@@ -279,6 +306,10 @@ function getClassificationCounts(recordList, t = tab) {
     const c = classifyRecord(r, t);
     if (c.category === RECORD_CATEGORY.NAMED_ENTRY) {
       namedEntries++;
+      if (t === 'CRC - retired') {
+        if (c.hasMentee) namedMentees++;
+        else mentorOnly++;
+      }
       if (c.cohort) cohortCounts[c.cohort] = (cohortCounts[c.cohort] || 0) + 1;
       if (c.month) monthCounts[c.month] = (monthCounts[c.month] || 0) + 1;
       if (c.round) roundCounts[c.round] = (roundCounts[c.round] || 0) + 1;
@@ -290,7 +321,7 @@ function getClassificationCounts(recordList, t = tab) {
       unknowns++;
     }
   }
-  return { total: recordList.length, namedEntries, sourceHeadings, placeholders, unknowns, cohortCounts, monthCounts, roundCounts };
+  return { total: recordList.length, namedEntries, namedMentees, mentorOnly, sourceHeadings, placeholders, unknowns, cohortCounts, monthCounts, roundCounts };
 }
 
 function formatResultsCount(filteredList, t, allList) {
@@ -298,6 +329,10 @@ function formatResultsCount(filteredList, t, allList) {
   const isFiltered = filteredList.length !== allList.length;
   const filteredCounts = isFiltered ? getClassificationCounts(filteredList, t) : totalCounts;
   if (t === 'Morning Report') {
+    if (dateFrom || dateTo) {
+      const rangeLabel = (dateFrom && dateTo) ? `${dateFrom} to ${dateTo}` : (dateFrom ? `From ${dateFrom}` : `Through ${dateTo}`);
+      return `Custom date range (${rangeLabel}) · ${filteredList.length} matches · ${allList.length} total records`;
+    }
     if (mrScheduleRangeMode === 'unresolved') {
       return `Unresolved source dates · ${filteredList.length} session${filteredList.length===1?'':'s'} requiring date review · ${allList.length} total records`;
     }
@@ -307,7 +342,7 @@ function formatResultsCount(filteredList, t, allList) {
     const currentWeekStart = mrScheduleWeekStart || getDefaultScheduleWeekStart();
     const bounds = typeof SessionCore !== 'undefined' && SessionCore.getWeekBounds ? SessionCore.getWeekBounds(currentWeekStart) : null;
     const label = bounds ? weekLabel(bounds.start, bounds.end) : `Week of ${currentWeekStart}`;
-    return `${label} (Mon–Sun) · ${filteredList.length} matches · ${allList.length} total in schedule`;
+    return `${label} · ${filteredList.length} matches · ${allList.length} total in schedule`;
   }
   if (t === 'Members') {
     if (isFiltered) {
@@ -323,9 +358,9 @@ function formatResultsCount(filteredList, t, allList) {
   }
   if (t === 'CRC - retired') {
     if (isFiltered) {
-      return `Showing ${filteredCounts.namedEntries} cases (${filteredCounts.sourceHeadings} round headings, ${filteredCounts.placeholders} placeholders) · ${totalCounts.namedEntries} cases · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
+      return `Showing ${filteredCounts.namedEntries} cases (${filteredCounts.namedMentees} named mentees, ${filteredCounts.mentorOnly} mentor-only; ${filteredCounts.sourceHeadings} round headings, ${filteredCounts.placeholders} placeholders) · ${totalCounts.namedEntries} cases (${totalCounts.namedMentees} named mentees, ${totalCounts.mentorOnly} mentor-only) · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
     }
-    return `${totalCounts.namedEntries} cases · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
+    return `${totalCounts.namedEntries} cases (${totalCounts.namedMentees} named mentees, ${totalCounts.mentorOnly} mentor-only) · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
   }
   return `${filteredList.length} matches · ${allList.length} records`;
 }
@@ -564,7 +599,9 @@ function saveSectionState(t) {
     crcStatusFilter: typeof crcStatusFilter !== 'undefined' ? crcStatusFilter : 'all',
     crcCountryFilter: typeof crcCountryFilter !== 'undefined' ? crcCountryFilter : 'all',
     crcShowSource: typeof crcShowSource !== 'undefined' ? Boolean(crcShowSource) : false,
-    crcPage: typeof crcPage !== 'undefined' ? crcPage : 0
+    crcPage: typeof crcPage !== 'undefined' ? crcPage : 0,
+    podcastSeriesFilter: typeof podcastSeriesFilter !== 'undefined' ? podcastSeriesFilter : '',
+    podcastPeriodFilter: typeof podcastPeriodFilter !== 'undefined' ? podcastPeriodFilter : 'all'
   };
 
   sectionBrowsingMemory.set(t, state);
@@ -610,8 +647,11 @@ function restoreSectionState(t) {
     page = 0;
     showAll = false;
     currentAnchorRecordId = null;
+    podcastSeriesFilter = '';
+    podcastPeriodFilter = 'all';
     if (t === 'Morning Report') { mode = isMobile ? 'agenda' : 'matrix'; mrScheduleWeekStart = getDefaultScheduleWeekStart(); mrScheduleRangeMode = 'week'; }
-    else if (['Podcast Episodes', 'Schema review'].includes(t)) mode = 'board';
+    else if (t === 'Podcast Episodes') { mode = 'queue'; podcastSeriesFilter = ''; podcastPeriodFilter = 'all'; }
+    else if (t === 'Schema review') mode = 'board';
     else if (typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[t]) mode = isMobile ? 'cards' : 'table';
     else mode = 'cards';
     return;
@@ -633,6 +673,8 @@ function restoreSectionState(t) {
   yearFilter = saved.yearFilter || 'all';
   mrScheduleWeekStart = saved.mrScheduleWeekStart || getDefaultScheduleWeekStart();
   mrScheduleRangeMode = saved.mrScheduleRangeMode || 'week';
+  podcastSeriesFilter = saved.podcastSeriesFilter || '';
+  podcastPeriodFilter = saved.podcastPeriodFilter || 'all';
 
   if (t === 'Morning Report') {
     if (isMobile) {
@@ -641,7 +683,8 @@ function restoreSectionState(t) {
       mode = saved.mode || 'matrix';
     }
   } else if (['Podcast Episodes', 'Schema review'].includes(t)) {
-    mode = ['board', 'cards', 'table'].includes(saved.mode) ? saved.mode : 'board';
+    const validModes = t === 'Podcast Episodes' ? ['queue', 'board', 'cards', 'table'] : ['board', 'cards', 'table'];
+    mode = validModes.includes(saved.mode) ? saved.mode : (t === 'Podcast Episodes' ? 'queue' : 'board');
   } else if (typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[t]) {
     mode = ['cards', 'table'].includes(saved.mode) ? saved.mode : (isMobile ? 'cards' : 'table');
   } else {
@@ -780,6 +823,9 @@ function clearSectionFilters(t) {
     crcCountryFilter = 'all';
     crcShowSource = false;
     crcPage = 0;
+  } else if (t === 'Podcast Episodes') {
+    podcastSeriesFilter = '';
+    podcastPeriodFilter = 'all';
   }
 
   saveSectionState(t);
@@ -1433,12 +1479,12 @@ function filtered(){
     if(filter==='Unresolved dates'||filter==='Unresolved source dates'||mrScheduleRangeMode==='unresolved'){
       mrScheduleRangeMode='unresolved';
     }else if(filter==='All history'||(filter==='All'&&mrScheduleRangeMode==='all')){
-      mrScheduleRangeMode='all';
+      if(!dateFrom&&!dateTo)mrScheduleRangeMode='all';
     }else if(filter==='This Week'){
       mrScheduleRangeMode='week';
-      mrScheduleWeekStart=getDefaultScheduleWeekStart();
+      if(!mrScheduleWeekStart)mrScheduleWeekStart=getDefaultScheduleWeekStart();
     }else if(filter==='All'){
-      mrScheduleRangeMode='all';
+      if(!dateFrom&&!dateTo)mrScheduleRangeMode='all';
     }
     if(!dateFrom&&!dateTo){
       if(mrScheduleRangeMode==='unresolved'){
@@ -1452,6 +1498,18 @@ function filtered(){
       }
     }
   }
+  if(tab==='Podcast Episodes'){
+    if(podcastSeriesFilter){
+      if(podcastSeriesFilter==='Other')rr=rr.filter(r=>!getPodcastSeries(r.fields.Episode));
+      else rr=rr.filter(r=>getPodcastSeries(r.fields.Episode)===podcastSeriesFilter);
+    }
+    if(podcastPeriodFilter&&podcastPeriodFilter!=='all'){
+      if(podcastPeriodFilter==='upcoming')rr=rr.filter(r=>getPodcastPeriod(r)==='upcoming');
+      else if(podcastPeriodFilter==='past')rr=rr.filter(r=>getPodcastPeriod(r)==='past');
+      else if(podcastPeriodFilter==='undated')rr=rr.filter(r=>getPodcastPeriod(r)==='undated');
+      else if(podcastPeriodFilter==='active')rr=rr.filter(r=>getPodcastPeriod(r)==='upcoming'||getPodcastPeriod(r)==='undated'||recordStage(r,'Podcast Episodes')!=='Released');
+    }
+  }
   if(owner){if(tab==='Podcast Episodes')rr=rr.filter(r=>(r.fields['Audio editor']||'').split(/[/,;]/).map(s=>s.trim()).includes(owner)||(r.fields['Point person']||'').split(/[/,;]/).map(s=>s.trim()).includes(owner)||r.fields['Audio editor']===owner||r.fields['Point person']===owner);else if(tab==='Schema review')rr=rr.filter(r=>(r.fields['Video owner']||'').trim()===owner||(r.fields['Infographic owner']||'').trim()===owner);}
   if(skill)rr=rr.filter(r=>r.fields[skill]==='Yes');
   if(dateFrom)rr=rr.filter(r=>recordDate(r)&&recordDate(r)>=dateFrom);
@@ -1463,7 +1521,7 @@ function filtered(){
   if(filter==='Local edits')rr=rr.filter(r=>workspace.edits[r.id]||r.id.startsWith('local:'));
   if(filter==='Pinned')rr=rr.filter(r=>workspace.favorites.includes(r.id));
   if(filter==='Upcoming'&&(tab!=='Morning Report'||mrScheduleRangeMode!=='week'))rr=rr.filter(r=>recordDate(r)&&recordDate(r)>=today());
-  if(filter==='This Week')rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&d<=7});
+  if(filter==='This Week'&&(tab!=='Morning Report'||mrScheduleRangeMode!=='week'))rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&d<=7});
   if(filter==='Needs Volunteers')rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&mrGaps(r).length>0});
   if(filter==='My Sessions'){const user=typeof Identity!=='undefined'?Identity.getCurrentUser():null;const profile=user||(workspace.reporterName?{name:workspace.reporterName}:null);rr=rr.filter(r=>profile&&isUserAssignedToSession(r,profile));}
   if(filter==='Staffing gaps')rr=rr.filter(r=>mrGaps(r).length>0);
@@ -1476,7 +1534,7 @@ function filtered(){
   return rr;
 }
 function renderFilters(rr, t, filters, field, options, viewSwitcher) {
-  const count=[filter!=='All',facet,owner,skill,sessionType,sessionFacilitator,dateFrom,dateTo,sort!==(t==='CPS Academy VMRs'?'date':'source'),gapsOnly,showAll,yearFilter!=='all'].filter(Boolean).length;
+  const count=[filter!=='All',facet,owner,skill,sessionType,sessionFacilitator,dateFrom,dateTo,sort!==(t==='CPS Academy VMRs'?'date':'source'),gapsOnly,showAll,yearFilter!=='all',Boolean(tab==='Podcast Episodes'&&podcastSeriesFilter),Boolean(tab==='Podcast Episodes'&&podcastPeriodFilter!=='all')].filter(Boolean).length;
   return `<div class="filter-toolbar filter-bar schedule-filter-bar roster-toolbar">
     <details class="schedule-secondary-filters" ${scheduleFiltersOpen || (typeof window!=='undefined' && window.innerWidth>760) ? 'open' : ''}>
       <summary>Filters (Active: ${count})</summary>
@@ -1506,9 +1564,10 @@ function renderWeekNavigator(rrTotal) {
   const unresolvedRecords = allSplit.filter(r => !recordDate(r));
   const unresolvedCount = unresolvedRecords.length;
 
+  const hasCustomDates = Boolean(dateFrom || dateTo);
   let content = '';
 
-  if (mrScheduleRangeMode === 'unresolved') {
+  if (mrScheduleRangeMode === 'unresolved' && !hasCustomDates) {
     content = `
       <div class="week-nav-bar week-nav-unresolved-bar">
         <div class="week-nav-summary">
@@ -1522,7 +1581,7 @@ function renderWeekNavigator(rrTotal) {
           <button type="button" class="button secondary small" data-schedule-scope="week">← Return to Week view</button>
         </div>
       </div>`;
-  } else if (mrScheduleRangeMode === 'all') {
+  } else if (mrScheduleRangeMode === 'all' && !hasCustomDates) {
     content = `
       <div class="week-nav-bar week-nav-all-bar">
         <div class="week-nav-summary">
@@ -1530,7 +1589,7 @@ function renderWeekNavigator(rrTotal) {
             <h3 class="week-nav-title">All History Archive</h3>
             <span class="week-convention-badge">2020 – 2026</span>
           </div>
-          <p class="week-convention-note muted"><small>Convention: Monday to Sunday (UTC source dates) · Showing full historical schedule (${rrTotal.length} sessions matching filters)</small></p>
+          <p class="week-convention-note muted"><small>Convention: Monday–Sunday, using workbook dates · Showing full historical schedule (${rrTotal.length} sessions matching filters)</small></p>
         </div>
         <div class="week-nav-actions">
           <button type="button" class="button secondary small" data-schedule-scope="week">← Return to Week view (${isCurrentWeek ? 'This week' : 'Week of ' + weekBounds.start})</button>
@@ -1546,6 +1605,11 @@ function renderWeekNavigator(rrTotal) {
         <button type="button" class="text-button small" data-schedule-scope="unresolved" aria-label="View unresolved source dates">View unresolved →</button>
       </div>` : '';
 
+    const hasCustomDates = Boolean(dateFrom || dateTo);
+    const customDateLabel = (dateFrom && dateTo) ? `${dateFrom} to ${dateTo}` : (dateFrom ? `From ${dateFrom}` : `Through ${dateTo}`);
+    const navHeadingTitle = hasCustomDates ? `Custom range: ${customDateLabel}` : currentWeekLabel;
+    const sessionCountLabel = hasCustomDates ? `<strong>${rrTotal.length}</strong> matching session${rrTotal.length===1?'':'s'} in selected range` : `<strong>${rrTotal.length}</strong> matching session${rrTotal.length===1?'':'s'} in this week`;
+
     content = `
       <div class="week-nav-bar">
         <div class="week-nav-controls">
@@ -1555,14 +1619,14 @@ function renderWeekNavigator(rrTotal) {
         </div>
         <div class="week-nav-center">
           <div class="week-nav-heading">
-            <h3 class="week-nav-title" id="week-nav-title">${esc(currentWeekLabel)}</h3>
-            <span class="week-convention-badge" title="Week bounds are calculated from Monday 00:00 UTC to Sunday 23:59:59 UTC using parsed source dates">Mon–Sun (UTC)</span>
+            <h3 class="week-nav-title" id="week-nav-title">${esc(navHeadingTitle)}</h3>
+            <span class="week-convention-badge" title="Week bounds are calculated from Monday to Sunday using workbook dates">Monday–Sunday, using workbook dates</span>
           </div>
           <div class="week-nav-meta">
-            <span class="week-session-count" id="week-session-count"><strong>${rrTotal.length}</strong> matching session${rrTotal.length===1?'':'s'} in this week</span>
+            <span class="week-session-count" id="week-session-count">${sessionCountLabel}</span>
             ${unresolvedNotice}
           </div>
-          <p class="week-convention-note muted"><small>Convention: Monday to Sunday (UTC source dates) · No ambiguous timezone conversions</small></p>
+          <p class="week-convention-note muted"><small>Convention: Monday–Sunday, using workbook dates · ${hasCustomDates ? 'Showing sessions matching custom date filter' : 'No ambiguous timezone conversions'}</small></p>
         </div>
         <div class="week-nav-jump">
           <label class="week-jump-label" for="week-jump-date">
@@ -1593,8 +1657,9 @@ function bindWeekNavigatorEvents() {
       if (scope === 'all') filter = 'All history';
       else if (scope === 'unresolved') filter = 'Unresolved dates';
       else if (scope === 'week') {
-        filter = 'Upcoming';
         if (!mrScheduleWeekStart) mrScheduleWeekStart = getDefaultScheduleWeekStart();
+        const defWeek = getDefaultScheduleWeekStart();
+        filter = mrScheduleWeekStart < defWeek ? 'All' : 'Upcoming';
       }
       saveSectionState('Morning Report');
       render();
@@ -1609,6 +1674,12 @@ function bindWeekNavigatorEvents() {
         mrScheduleRangeMode = 'week';
         dateFrom = '';
         dateTo = '';
+        const defWeek = getDefaultScheduleWeekStart();
+        if (filter === 'This Week' && b.start !== defWeek) {
+          filter = b.start < defWeek ? 'All' : 'Upcoming';
+        } else if (b.start < defWeek && filter === 'Upcoming') {
+          filter = 'All';
+        }
         saveSectionState('Morning Report');
         render();
       }
@@ -1625,6 +1696,12 @@ function bindWeekNavigatorEvents() {
         mrScheduleRangeMode = 'week';
         dateFrom = '';
         dateTo = '';
+        const defWeek = getDefaultScheduleWeekStart();
+        if (filter === 'This Week' && b.start !== defWeek) {
+          filter = b.start < defWeek ? 'All' : 'Upcoming';
+        } else if (b.start < defWeek && filter === 'Upcoming') {
+          filter = 'All';
+        }
         saveSectionState('Morning Report');
         render();
       }
@@ -1636,7 +1713,7 @@ function listing(){
   let rr=filtered();
   const isHistorical=Boolean(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab]);
   const config=isHistorical?HISTORICAL_SUMMARY_CONFIG[tab]:null;
-  const defaultPageSize=isHistorical?config.pageSize:12;
+  const defaultPageSize=isHistorical?config.pageSize:(tab==='Schema review'?Math.max(25,rr.length):12);
   const pageSize=showAll?rr.length:defaultPageSize;
   const totalPages=Math.max(1,Math.ceil(rr.length/pageSize));
   page=showAll?0:Math.min(page,totalPages-1);
@@ -1648,7 +1725,7 @@ function listing(){
   const options=field?[...new Set(records().map(r=>r.fields[field]).filter(Boolean))].sort():[];
   const filters=['All',...(['Morning Report','CPS Academy VMRs'].includes(tab)?['Upcoming','This Week','Needs Volunteers','My Sessions','Staffing gaps','Missing facilitator']:[]),...(tab==='Morning Report'?['All history','Unresolved dates']:[]),...(db[tab].columns.includes('Recording')?['Has recording']:[]),'Pinned','Needs review','Local edits'];
 
-  const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Matrix</button><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Agenda</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:['Podcast Episodes','Schema review'].includes(tab)?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;
+  const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Matrix</button><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Agenda</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:tab==='Podcast Episodes'?`<div class="segmented"><button class="${mode==='queue'?'active':''}" data-set-view="queue">Queue</button><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button></div>`:tab==='Schema review'?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;
 
   const paginationTop = isHistorical && !showAll && totalPages > 1 ? `
     <div class="toolbar pagination-header pagination-top" aria-label="Pagination top">
@@ -1664,7 +1741,7 @@ function listing(){
       </div>
     </div>` : '';
 
-  const paginationBottom = showAll || (mode==='matrix'&&tab==='Morning Report') || (mode==='agenda'&&tab==='Morning Report') || (mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)) ? '' : (
+  const paginationBottom = showAll || (mode==='matrix'&&tab==='Morning Report') || (mode==='agenda'&&tab==='Morning Report') || (mode==='queue'&&tab==='Podcast Episodes') || (mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)) || (tab==='Schema review') ? '' : (
     isHistorical ? `
     <div class="toolbar pagination pagination-bottom" aria-label="Pagination bottom">
       <button type="button" class="button secondary" id="prev" ${page===0?'disabled':''} data-page-nav="-1">Previous</button>
@@ -1695,8 +1772,9 @@ function listing(){
     ) : (
       (mode==='matrix'&&tab==='Morning Report'?matrixView(rr)
       :(mode==='agenda'&&tab==='Morning Report'?agendaView(rr)
+      :(mode==='queue'&&tab==='Podcast Episodes'?podcastQueueView(rr)
       :(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)?workflowBoard(rr,tab)
-      :(mode==='cards'?`<section class="hub-grid">${current.map(r=>card(r)).join('')}</section>`:table(current)))))
+      :(mode==='cards'?`<section class="hub-grid">${current.map(r=>card(r)).join('')}</section>`:table(current))))))
     )
   ) : '<section class="empty-state panel"><h2>No matching records</h2><p>Clear the filters or try a broader search.</p><button class="button secondary" data-clear-filters>Clear filters</button></section>';
 
@@ -1723,7 +1801,11 @@ function listing(){
       if(filter==='All history'||filter==='All')mrScheduleRangeMode='all';
       else if(filter==='Unresolved dates'||filter==='Unresolved source dates')mrScheduleRangeMode='unresolved';
       else if(filter==='This Week'){mrScheduleRangeMode='week';mrScheduleWeekStart=getDefaultScheduleWeekStart();}
-      else if(filter==='Upcoming')mrScheduleRangeMode='week';
+      else if(filter==='Upcoming'){
+        mrScheduleRangeMode='week';
+        const defWeek = getDefaultScheduleWeekStart();
+        if(mrScheduleWeekStart && mrScheduleWeekStart < defWeek) mrScheduleWeekStart = defWeek;
+      }
     }
     page=0;render();
   };
@@ -1731,7 +1813,7 @@ function listing(){
   $('#sort').onchange=e=>{sort=e.target.value;render()};
   if($('#show-all-toggle'))$('#show-all-toggle').onchange=e=>{showAll=e.target.checked;page=0;render()};
   $('#clear').onclick=()=>{
-    query='';filter='All';facet='';owner='';sessionType='';sessionFacilitator='';gapsOnly=false;sectionQuery='';skill='';dateFrom='';dateTo='';yearFilter='all';sort=tab==='CPS Academy VMRs'?'date':'source';page=0;showAll=false;$('#global-search').value='';
+    query='';filter='All';facet='';owner='';sessionType='';sessionFacilitator='';gapsOnly=false;sectionQuery='';skill='';dateFrom='';dateTo='';yearFilter='all';sort=tab==='CPS Academy VMRs'?'date':'source';page=0;showAll=false;podcastSeriesFilter='';podcastPeriodFilter='all';$('#global-search').value='';
     if(tab==='Morning Report'){mrScheduleRangeMode='week';mrScheduleWeekStart=getDefaultScheduleWeekStart();}
     render();
   };
@@ -1769,7 +1851,7 @@ function listing(){
       focusAccessibleResultsHeading();
     };
   });
-  if(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab))bindBoardEvents(tab);
+  if(['queue','board'].includes(mode)&&['Podcast Episodes','Schema review'].includes(tab))bindBoardEvents(tab);
 }
 function crcDrawer(){const retired=records('CRC - retired');const c=getClassificationCounts(retired,'CRC - retired');return `<details class="panel legacy-drawer" style="margin-top:24px"><summary style="cursor:pointer;padding:16px 20px;font-weight:700;display:flex;align-items:center;justify-content:space-between;user-select:none"><span>📁 Archived / Legacy Mentorship (${c.namedEntries} cases in 15 rounds)</span><span class="muted" style="font-size:12px;font-weight:normal">Expand archive records ↓</span></summary><div style="padding:16px 20px;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><p class="muted" style="margin:0">Historical mentorship rounds preserved from original workbook (${c.namedEntries} cases, 15 round headings, ${c.placeholders} placeholders). Active cases remain front-and-center above.</p><button class="button secondary small" data-go="CRC - retired">Full Archive View →</button></div><div class="hub-grid">${retired.slice(0,9).map(r=>card(r,'CRC - retired')).join('')}</div><div style="margin-top:16px;text-align:center"><button class="button secondary small" data-go="CRC - retired">Browse all ${retired.length} archived records →</button></div></div></details>`}
 function table(rr){
@@ -2155,6 +2237,7 @@ function getCohortBadgeClass(cohort) {
   if (cohort === 'Core team') return 'core';
   if (cohort === 'Leaders') return 'leaders';
   if (cohort === 'Marked inactive in source') return 'inactive';
+  if (cohort === 'Local / unassigned') return 'local';
   return 'default';
 }
 
@@ -2241,6 +2324,7 @@ function membersView(){
   for (const def of MEMBER_COHORT_DEFS) {
     cohortCounts[def.key] = substantiveMembers.filter(x => x.classification.cohort === def.key).length;
   }
+  const unassignedMembers = substantiveMembers.filter(x => x.classification.cohort === 'Local / unassigned');
 
   const indexHtml = `<nav class="member-index-nav" aria-label="Members directory overview">
     <div class="member-index-label">Overview:</div>
@@ -2255,6 +2339,12 @@ function membersView(){
           <span class="member-index-count">${cohortCounts[def.key] || 0}</span>
         </button>
       `).join('')}
+      ${unassignedMembers.length > 0 ? `
+        <button type="button" class="member-index-chip local-chip ${memberCohortFilter==='Local / unassigned'?'active':''}" data-filter-cohort="Local / unassigned">
+          <span class="member-index-name">Local / unassigned</span>
+          <span class="member-index-count">${unassignedMembers.length}</span>
+        </button>
+      ` : ''}
       <button type="button" class="member-index-chip structural-chip ${memberShowStructural?'active':''}" id="toggle-structural-btn" title="Inspect 6 structural entries (headings & repeated headers) preserved from source workbook">
         <span class="member-index-name">Source headings</span>
         <span class="member-index-count">${structuralEntries.length}</span>
@@ -2274,6 +2364,7 @@ function membersView(){
         <select class="select member-select" id="member-cohort-select" aria-label="Filter by cohort">
           <option value="all" ${memberCohortFilter==='all'?'selected':''}>All cohorts (${totalNamedMembers})</option>
           ${MEMBER_COHORT_DEFS.map(def => `<option value="${esc(def.key)}" ${memberCohortFilter===def.key?'selected':''}>${esc(def.name)} (${cohortCounts[def.key]||0})</option>`).join('')}
+          ${unassignedMembers.length > 0 ? `<option value="Local / unassigned" ${memberCohortFilter==='Local / unassigned'?'selected':''}>Local / unassigned (${unassignedMembers.length})</option>` : ''}
         </select>
       </label>
       <label class="member-select-label">
@@ -2409,13 +2500,22 @@ function membersView(){
     });
 
     const mappedCohortKeys = new Set(MEMBER_COHORT_DEFS.map(d => d.key));
-    const otherItems = visibleMembers.filter(x => !mappedCohortKeys.has(x.classification.cohort));
+    const unassignedItems = visibleMembers.filter(x => x.classification.cohort === 'Local / unassigned');
+    if (unassignedItems.length > 0 || unassignedMembers.length > 0) {
+      cohortSections.push({
+        def: { id: 'unassigned', name: 'Local / unassigned', key: 'Local / unassigned', headingId: null, description: 'Locally created member drafts pending cohort assignment' },
+        headingRecord: null,
+        items: unassignedItems,
+        totalCohortCount: unassignedMembers.length
+      });
+    }
+    const otherItems = visibleMembers.filter(x => !mappedCohortKeys.has(x.classification.cohort) && x.classification.cohort !== 'Local / unassigned');
     if (otherItems.length > 0) {
       cohortSections.push({
         def: { id: 'other', name: 'Other members', key: 'other', headingId: null, description: 'Other member entries' },
         headingRecord: null,
         items: otherItems,
-        totalCohortCount: substantiveMembers.filter(x => !mappedCohortKeys.has(x.classification.cohort)).length
+        totalCohortCount: substantiveMembers.filter(x => !mappedCohortKeys.has(x.classification.cohort) && x.classification.cohort !== 'Local / unassigned').length
       });
     }
 
@@ -3402,6 +3502,12 @@ function orgStructureView(){
   const groupsData=ORG_GROUPS.map(g=>{
     const headingRecord=g.headingId?recordMap.get(g.headingId):null;
     const items=g.recordIds.map(id=>recordMap.get(id)).filter(Boolean);
+    if(headingRecord){
+      const c = typeof classifyRecord==='function'?classifyRecord(headingRecord,'OrgStructure'):null;
+      if(c && c.category===RECORD_CATEGORY.NAMED_ENTRY && !items.some(it=>it.id===headingRecord.id)){
+        items.unshift(headingRecord);
+      }
+    }
     return {id:g.id,name:g.name,headingRecord,items};
   });
 
@@ -3800,6 +3906,63 @@ function residencyProgramsView() {
     `;
   }).join('');
 
+  const unassignedSessions = visibleSessions.filter(x => x.classification.month === 'Local / unassigned');
+  let unassignedHtml = '';
+  if (unassignedSessions.length > 0) {
+    unassignedHtml = `
+      <details class="panel residency-month-accordion" id="residency-month-unassigned" open data-month="Local / unassigned">
+        <summary class="residency-month-summary">
+          <div class="residency-month-summary-left">
+            <span class="residency-month-name"><strong>Local / unassigned drafts</strong></span>
+            <span class="tag tag-session-count">${unassignedSessions.length} session${unassignedSessions.length === 1 ? '' : 's'}</span>
+          </div>
+          <span class="muted residency-month-toggle-label">Details</span>
+        </summary>
+        <div class="residency-month-body">
+          <div class="residency-sessions-list">
+            ${unassignedSessions.map(x => {
+              const r = x.record;
+              const f = r.fields || {};
+              const isPinned = workspace.favorites.includes(r.id);
+              return `
+                <article class="panel residency-session-card" data-record-id="${esc(r.id)}">
+                  <div class="residency-session-header">
+                    <div>
+                      <span class="tag tag-session">Local / unassigned</span>
+                      <span class="tag local-chip">Local draft</span>
+                      <h3 class="residency-session-title">${esc(f['Residency Programs'] || 'Local Residency Session')}</h3>
+                    </div>
+                  </div>
+                  <div class="residency-roles-trio">
+                    <div class="role-trio-item">
+                      <small class="muted">Resident / Attending Discussant</small>
+                      <strong>${esc(f['Resident/attending discussant'] || 'Not entered')}</strong>
+                    </div>
+                    <div class="role-trio-item">
+                      <small class="muted">Junior Member</small>
+                      <strong>${esc(f['Junior Member'] || 'Not entered')}</strong>
+                    </div>
+                    <div class="role-trio-item">
+                      <small class="muted">Facilitator</small>
+                      <strong>${esc(f.Facilitator || 'Not entered')}</strong>
+                    </div>
+                  </div>
+                  <div class="residency-session-footer">
+                    <div class="card-actions">
+                      <button type="button" class="button primary small" data-open="${esc(r.id)}" data-area="Residency Programs" data-action="view">Open details</button>
+                      <button type="button" class="icon-button star ${isPinned ? 'is-starred' : ''}" data-star="${esc(r.id)}" aria-label="${isPinned ? 'Unpin' : 'Pin'} record">${isPinned ? '★' : '☆'}</button>
+                    </div>
+                    <small class="muted">${esc(source(r))}</small>
+                  </div>
+                </article>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
   let contentHtml = '';
   if (isFiltering && visibleSessions.length === 0) {
     contentHtml = `
@@ -3813,6 +3976,7 @@ function residencyProgramsView() {
     contentHtml = `
       <div class="residency-months-container">
         ${monthSectionsHtml}
+        ${unassignedHtml}
       </div>
     `;
   }
@@ -3977,7 +4141,7 @@ function crcRetiredView() {
             <option value="complete" ${crcStatusFilter === 'complete' ? 'selected' : ''}>Case complete</option>
             <option value="presented" ${crcStatusFilter === 'presented' ? 'selected' : ''}>Presented</option>
             <option value="contacted" ${crcStatusFilter === 'contacted' ? 'selected' : ''}>Contacted</option>
-            <option value="open" ${crcStatusFilter === 'open' ? 'selected' : ''}>In progress / unrecorded</option>
+            <option value="open" ${crcStatusFilter === 'open' ? 'selected' : ''}>Progress not recorded</option>
           </select>
         </label>
         <label class="crc-select-label">
@@ -4058,7 +4222,7 @@ function crcRetiredView() {
             ${isComplete ? chip('Case complete', 'ready-chip') : ''}
             ${isPresented ? chip('Presented', 'ready-chip') : ''}
             ${isContacted ? chip('Contacted', 'ready-chip') : ''}
-            ${!isComplete && !isPresented && !isContacted ? '<span class="status-neutral muted">In progress / unrecorded</span>' : ''}
+            ${!isComplete && !isPresented && !isContacted ? '<span class="status-neutral muted">Progress not recorded</span>' : ''}
           </div>
         </td>
         <td class="td-actions">
@@ -4103,7 +4267,7 @@ function crcRetiredView() {
           ${isComplete ? chip('Case complete', 'ready-chip') : ''}
           ${isPresented ? chip('Presented', 'ready-chip') : ''}
           ${isContacted ? chip('Contacted', 'ready-chip') : ''}
-          ${!isComplete && !isPresented && !isContacted ? '<span class="status-neutral muted">In progress / unrecorded</span>' : ''}
+          ${!isComplete && !isPresented && !isContacted ? '<span class="status-neutral muted">Progress not recorded</span>' : ''}
         </div>
         <div class="card-actions" style="margin-top: 10px;">
           <button type="button" class="button primary small" data-open="${esc(r.id)}" data-area="CRC - retired">Open details</button>
@@ -5529,10 +5693,23 @@ function extraFilters(){
     const recYears=getRecognizedYearsForSection(tab);
     html+=`<label>Year<select class="select" id="year-filter"><option value="all">All years</option>${recYears.map(y=>`<option value="${esc(y)}" ${yearFilter===y?'selected':''}>${esc(y)}</option>`).join('')}<option value="unresolved" ${yearFilter==='unresolved'?'selected':''}>Unresolved / undated</option></select></label>`;
   }
-  if(tab==='Podcast Episodes'){const owners=[...new Set(records('Podcast Episodes').flatMap(r=>[r.fields['Point person'],r.fields['Audio editor']].flatMap(v=>(v||'').split(/[/,;]/).map(s=>s.trim())).filter(Boolean)))].sort();html+=`<label>Owner<select class="select" id="owner-filter"><option value="">All owners</option>${owners.map(o=>`<option value="${esc(o)}" ${owner===o?'selected':''}>${esc(o)}</option>`).join('')}</select></label>`;}else if(tab==='Schema review'){const owners=[...new Set(records('Schema review').flatMap(r=>[r.fields['Video owner'],r.fields['Infographic owner']].map(s=>(s||'').trim()).filter(Boolean)))].sort();html+=`<label>Owner<select class="select" id="owner-filter"><option value="">All owners</option>${owners.map(o=>`<option value="${esc(o)}" ${owner===o?'selected':''}>${esc(o)}</option>`).join('')}</select></label>`;}if(tab==='Research @CPSolvers')html+=`<label>Research skill<select class="select" id="skill"><option value="">Any skill</option>${['Research writing','Data analytics','Cross-sectional studies','Systematic reviews','Qualitative studies','Case reports'].map(k=>`<option ${skill===k?'selected':''}>${esc(k)}</option>`).join('')}</select></label>`;if(records().some(r=>dateValue(r)))html+=`<label>From<input class="select" type="date" id="date-from" value="${esc(dateFrom)}"></label><label>To<input class="select" type="date" id="date-to" value="${esc(dateTo)}"></label>`;return html
+  if(tab==='Podcast Episodes'){
+    const owners=[...new Set(records('Podcast Episodes').flatMap(r=>[r.fields['Point person'],r.fields['Audio editor']].flatMap(v=>(v||'').split(/[/,;]/).map(s=>s.trim())).filter(Boolean)))].sort();
+    html+=`<label>Series<select class="select" id="podcast-series-filter"><option value="">All series</option>${PODCAST_SERIES_LABELS.map(s=>`<option value="${esc(s)}" ${podcastSeriesFilter===s?'selected':''}>${esc(s)}</option>`).join('')}<option value="Other" ${podcastSeriesFilter==='Other'?'selected':''}>Other / Special</option></select></label>`;
+    html+=`<label>Period<select class="select" id="podcast-period-filter"><option value="all" ${podcastPeriodFilter==='all'?'selected':''}>All episodes</option><option value="active" ${podcastPeriodFilter==='active'?'selected':''}>Active &amp; upcoming queue</option><option value="upcoming" ${podcastPeriodFilter==='upcoming'?'selected':''}>Upcoming / scheduled</option><option value="undated" ${podcastPeriodFilter==='undated'?'selected':''}>Undated items</option><option value="past" ${podcastPeriodFilter==='past'?'selected':''}>Past-date history</option></select></label>`;
+    html+=`<label>Owner<select class="select" id="owner-filter"><option value="">All owners</option>${owners.map(o=>`<option value="${esc(o)}" ${owner===o?'selected':''}>${esc(o)}</option>`).join('')}</select></label>`;
+  }else if(tab==='Schema review'){
+    const owners=[...new Set(records('Schema review').flatMap(r=>[r.fields['Video owner'],r.fields['Infographic owner']].map(s=>(s||'').trim()).filter(Boolean)))].sort();
+    html+=`<label>Owner<select class="select" id="owner-filter"><option value="">All owners</option>${owners.map(o=>`<option value="${esc(o)}" ${owner===o?'selected':''}>${esc(o)}</option>`).join('')}</select></label>`;
+  }
+  if(tab==='Research @CPSolvers')html+=`<label>Research skill<select class="select" id="skill"><option value="">Any skill</option>${['Research writing','Data analytics','Cross-sectional studies','Systematic reviews','Qualitative studies','Case reports'].map(k=>`<option ${skill===k?'selected':''}>${esc(k)}</option>`).join('')}</select></label>`;
+  if(records().some(r=>dateValue(r)))html+=`<label>From<input class="select" type="date" id="date-from" value="${esc(dateFrom)}"></label><label>To<input class="select" type="date" id="date-to" value="${esc(dateTo)}"></label>`;
+  return html
 }
 function bindExtraFilters(){
   bindCompoundSessionFilters();
+  if($('#podcast-series-filter'))$('#podcast-series-filter').onchange=e=>{podcastSeriesFilter=e.target.value;page=0;render()};
+  if($('#podcast-period-filter'))$('#podcast-period-filter').onchange=e=>{podcastPeriodFilter=e.target.value;page=0;render()};
   if($('#year-filter'))$('#year-filter').onchange=e=>{yearFilter=e.target.value;page=0;render()};
   if($('#owner-filter'))$('#owner-filter').onchange=e=>{owner=e.target.value;page=0;render()};if($('#skill'))$('#skill').onchange=e=>{skill=e.target.value;page=0;render()};for(const id of ['date-from','date-to'])if($('#'+id))$('#'+id).onchange=e=>{if(id==='date-from')dateFrom=e.target.value;else dateTo=e.target.value;page=0;render()}}
 function staffingTools(){return `<section class="staffing-tools"><h3>Quick staffing entry</h3><p>Choose a role and enter a name. This fills the form; use Save changes to keep it.</p><label>Role<select id="staff-role" class="select">${['Facilitator','Presenter','Scribe','Teaching Points','Active participant 1','Active participant 2','Active participant 3','Active participant 4','Chat support','Available team'].map(k=>`<option>${k}</option>`).join('')}</select></label><label>Name<input id="staff-name" placeholder="Name or team" autocomplete="off"></label><button type="button" class="button secondary" id="assign-name">Fill assignment</button><p id="staff-message" role="status"></p></section>`}
@@ -5763,10 +5940,130 @@ function agendaView(rr){
  }).join('')}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
 }
 function agendaCard(r,isUnresolved=false){return `<article class="agenda-card"><div class="agenda-card-date"><strong>${esc(recordDate(r)||dateValue(r)||'Date TBD')}</strong></div><div class="agenda-card-body"><div class="agenda-card-top"><span class="tag">${esc(r.fields.Type||'Morning Report')}</span><span class="muted agenda-times">${esc(SessionCore.formatSessionTime(r))}</span></div>${staffingGrid(r)}</div><div class="agenda-card-actions">${sessionNotice(r)}${calendarButton(r,'Morning Report',{compact:true})}<button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" data-star="${esc(r.id)}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record">${workspace.favorites.includes(r.id)?'★':'☆'}</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></article>`;}
+function getPodcastSeries(title){
+  if(!title)return '';
+  const t=String(title).trim();
+  if(/^ARM\b/i.test(t))return 'ARM';
+  if(/^#?Endneurophobia\b/i.test(t))return '#Endneurophobia';
+  if(/^WDx\b/i.test(t))return 'WDx';
+  if(/^HDx\b/i.test(t))return 'HDx';
+  if(/^SLS\b/i.test(t))return 'SLS';
+  if(/^Schema\b/i.test(t))return 'Schema';
+  if(/^RR\b/i.test(t)||/\bRapid Reasoning\b/i.test(t))return 'RR';
+  if(/^(?:The\s+)?Consult\s+Q(?:uestion)?\b|^TCQ\b/i.test(t))return 'Consult Question';
+  if(/\bClinical Unknown\b/i.test(t))return 'Clinical Unknown';
+  if(/^Subspecialty VMR\b/i.test(t))return 'Subspecialty VMR';
+  if(/^Queer Rounds\b/i.test(t))return 'Queer Rounds';
+  if(/^ID love\b/i.test(t))return 'ID love';
+  return '';
+}
+function getPodcastPeriod(r,refDate=today()){
+  const rel=r.fields['Release date'];
+  if(!rel||!iso(rel))return 'undated';
+  return rel<=refDate?'past':'upcoming';
+}
 function recordStage(r,t){const f=r.fields;if(t==='Schema review'){const st=(f.Status||'').trim();if(!st)return 'Draft / Needs review';const lower=st.toLowerCase();if(lower==='uploaded')return 'Uploaded';if(lower==='in review')return 'In review';if(lower==='ready')return 'Ready';if(lower==='recorded')return 'Recorded';if(lower==='assigned')return 'Assigned';return st;}if(t==='Podcast Episodes'){const custom=(f.Status||'').trim();if(custom)return custom;const rel=f['Release date'];if(rel&&iso(rel)&&rel<=today())return 'Released';if(!f['Audio editor'])return 'Needs Audio Editor';if(!f['Point person'])return 'Needs Point Person';return 'In Editing';}return f.Status||'Active';}
 function boardStages(rr,t){if(t==='Schema review'){const base=['Draft / Needs review','Assigned','In review','Ready','Uploaded'],custom=[...new Set(rr.map(r=>recordStage(r,t)))].filter(s=>!base.includes(s));return[...base.slice(0,base.length-1),...custom,base[base.length-1]];}if(t==='Podcast Episodes'){const base=['Needs Audio Editor','Needs Point Person','In Editing','Released'],custom=[...new Set(rr.map(r=>recordStage(r,t)))].filter(s=>!base.includes(s));return[...base.slice(0,base.length-1),...custom,base[base.length-1]];}return[...new Set(rr.map(r=>recordStage(r,t)))];}
-function workflowCard(r,t,stages,stageIndex){const f=r.fields,stage=stages[stageIndex],prevStage=stageIndex>0?stages[stageIndex-1]:null,nextStage=stageIndex<stages.length-1?stages[stageIndex+1]:null;let metaHtml='';if(t==='Schema review'){metaHtml=`<p class="work-card-line"><small>Video:</small> <strong>${esc(f['Video owner']||'Unassigned')}</strong></p><p class="work-card-line"><small>Infographic:</small> <strong>${esc(f['Infographic owner']||'Unassigned')}</strong></p>${f['Review deadline (source)']?`<p class="work-card-line"><small>Deadline:</small> <span>${esc(f['Review deadline (source)'])}</span></p>`:''}`;}else if(t==='Podcast Episodes'){metaHtml=`<p class="work-card-line"><small>Editor:</small> <strong>${esc(f['Audio editor']||'None')}</strong></p><p class="work-card-line"><small>Point person:</small> <strong>${esc(f['Point person']||'Unassigned')}</strong></p>${f['Release date']?`<p class="work-card-line"><small>Release:</small> <span>${esc(f['Release date'])}</span></p>`:''}`;}let quickBtn='';if(t==='Schema review'){if(stage!=='Uploaded'){quickBtn=`<button type="button" class="button primary small" data-move-id="${esc(r.id)}" data-target-stage="Uploaded">✓ Uploaded</button>`;}else{quickBtn=`<button type="button" class="button secondary small" data-move-id="${esc(r.id)}" data-target-stage="Draft / Needs review">↺ Draft</button>`;}}else if(t==='Podcast Episodes'){if(stage==='Needs Audio Editor'){quickBtn=`<button type="button" class="button primary small quick-editor-btn" data-record-id="${esc(r.id)}">＋ Editor</button>`;}else if(stage==='In Editing'){quickBtn=`<button type="button" class="button primary small" data-move-id="${esc(r.id)}" data-target-stage="Released">✓ Released</button>`;}else if(stage==='Released'){quickBtn=`<button type="button" class="button secondary small" data-move-id="${esc(r.id)}" data-target-stage="Needs Audio Editor">↺ Needs Editor</button>`;}}return `<article class="work-card" draggable="true" data-drag-id="${esc(r.id)}"><div class="work-card-head"><span class="tag">${esc(stage)}</span><div class="record-markers">${r.flags.length?chip('Verify','review-chip'):''}${workspace.edits[r.id]?chip('Local','local-chip'):''}</div></div><h3>${esc(title(r,t))}</h3><div class="work-card-meta">${metaHtml}</div><div class="work-card-foot"><div class="work-card-actions">${prevStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(prevStage)}" title="Move left to ${esc(prevStage)}" aria-label="Move left to ${esc(prevStage)}">← ${esc(prevStage)}</button>`:''}${nextStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(nextStage)}" title="Move right to ${esc(nextStage)}" aria-label="Move right to ${esc(nextStage)}">${esc(nextStage)} →</button>`:''}${quickBtn}<button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="${esc(t)}">Details</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${workspace.favorites.includes(r.id)?'★':'☆'}</button></div></div></article>`;}
-function workflowBoard(rr,t){const stages=boardStages(rr,t);const byStage={};stages.forEach(s=>byStage[s]=[]);rr.forEach(r=>{const s=recordStage(r,t);if(!byStage[s])byStage[s]=[];byStage[s].push(r);});return `<section class="pipeline-auto">${stages.map((st,idx)=>{const list=byStage[st]||[];return `<div class="lane" data-lane-stage="${esc(st)}"><div class="lane-head"><span>${esc(st)}</span><span class="lane-count">${list.length}</span></div><div class="lane-items">${list.map(r=>workflowCard(r,t,stages,idx)).join('')||'<div class="empty-state" style="padding:20px 8px;font-size:11px">No records in this stage</div>'}</div></div>`;}).join('')}</section>`;}
+function workflowCard(r,t,stages,stageIndex){
+  const f=r.fields,stage=stages[stageIndex],prevStage=stageIndex>0?stages[stageIndex-1]:null,nextStage=stageIndex<stages.length-1?stages[stageIndex+1]:null;
+  const isMobile=typeof window!=='undefined'&&(window.innerWidth||0)<=760;
+  let metaHtml='';
+  if(t==='Schema review'){
+    metaHtml=`<p class="work-card-line"><small>Video:</small> <strong>${esc(f['Video owner']||'Unassigned')}</strong></p><p class="work-card-line"><small>Infographic:</small> <strong>${esc(f['Infographic owner']||'Unassigned')}</strong></p>${f['Review deadline (source)']?`<p class="work-card-line"><small>Deadline:</small> <span>${esc(f['Review deadline (source)'])}</span></p>`:''}<p class="work-card-line"><small>Status / Uploaded:</small> <span>${esc(f.Status||'Draft')} · Uploaded: ${esc(f.Uploaded||'No')}</span></p>`;
+  }else if(t==='Podcast Episodes'){
+    const series=getPodcastSeries(f.Episode);
+    const period=getPodcastPeriod(r);
+    const periodLabel=period==='past'?'Past-date history':period==='upcoming'?'Upcoming / scheduled':'Undated';
+    metaHtml=`${series?`<p class="work-card-line"><small>Series:</small> <span class="tag series-tag">${esc(series)}</span></p>`:''}<p class="work-card-line"><small>Editor:</small> <strong>${esc(f['Audio editor']||'None')}</strong></p><p class="work-card-line"><small>Point person:</small> <strong>${esc(f['Point person']||'Unassigned')}</strong></p><p class="work-card-line"><small>Release:</small> <span>${esc(f['Release date']||'Undated')}</span> <small class="muted">(${esc(periodLabel)})</small></p>${isMobile?`<details class="work-card-more"><summary>More fields</summary><div class="work-card-expanded"><p><strong>Week:</strong> ${esc(f.Week||'—')}</p><p><strong>Source row:</strong> ${esc(source(r))}</p>${f.Status?`<p><strong>Custom status:</strong> ${esc(f.Status)}</p>`:''}</div></details>`:''}`;
+  }
+  let quickBtn='';
+  if(t==='Schema review'){
+    if(stage!=='Uploaded'){quickBtn=`<button type="button" class="button primary small" data-move-id="${esc(r.id)}" data-target-stage="Uploaded">✓ Uploaded</button>`;}
+    else{quickBtn=`<button type="button" class="button secondary small" data-move-id="${esc(r.id)}" data-target-stage="Draft / Needs review">↺ Draft</button>`;}
+  }else if(t==='Podcast Episodes'){
+    if(stage==='Needs Audio Editor'){quickBtn=`<button type="button" class="button primary small quick-editor-btn" data-record-id="${esc(r.id)}">＋ Editor</button>`;}
+    else if(stage==='In Editing'){quickBtn=`<button type="button" class="button primary small" data-move-id="${esc(r.id)}" data-target-stage="Released">✓ Released</button>`;}
+    else if(stage==='Released'){quickBtn=`<button type="button" class="button secondary small" data-move-id="${esc(r.id)}" data-target-stage="Needs Audio Editor">↺ Needs Editor</button>`;}
+  }
+  return `<article class="work-card" draggable="true" data-drag-id="${esc(r.id)}"><div class="work-card-head"><span class="tag">${esc(stage)}</span><div class="record-markers">${r.flags.length?chip('Verify','review-chip'):''}${workspace.edits[r.id]?chip('Local','local-chip'):''}</div></div><h3>${esc(title(r,t))}</h3><div class="work-card-meta">${metaHtml}</div><div class="work-card-foot"><div class="work-card-actions">${prevStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(prevStage)}" title="Move left to ${esc(prevStage)}" aria-label="Move left to ${esc(prevStage)}">← ${esc(prevStage)}</button>`:''}${nextStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(nextStage)}" title="Move right to ${esc(nextStage)}" aria-label="Move right to ${esc(nextStage)}">${esc(nextStage)} →</button>`:''}${quickBtn}<button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="${esc(t)}">Details</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${workspace.favorites.includes(r.id)?'★':'☆'}</button></div></div></article>`;
+}
+function workflowBoard(rr,t){
+  const isMobile=typeof window!=='undefined'&&(window.innerWidth||0)<=760;
+  const stages=boardStages(rr,t);
+  const byStage={};
+  stages.forEach(s=>byStage[s]=[]);
+  rr.forEach(r=>{const s=recordStage(r,t);if(!byStage[s])byStage[s]=[];byStage[s].push(r);});
+
+  if(isMobile){
+    return `<section class="pipeline-mobile">${stages.map((st,idx)=>{
+      const list=byStage[st]||[];
+      const isHistory=(t==='Podcast Episodes'&&st==='Released');
+      const isOpen=!isHistory||list.length<=5;
+      const displayStage=(t==='Podcast Episodes'&&st==='Released')?'Past-date history':st;
+      return `<details class="panel lane-accordion" data-lane-stage="${esc(st)}" ${isOpen?'open':''}><summary class="lane-head"><span>${esc(displayStage)}</span><span class="lane-count count-badge badge">${list.length}</span></summary><div class="lane-items">${list.map(r=>workflowCard(r,t,stages,idx)).join('')||'<div class="empty-state" style="padding:16px 8px;font-size:12px">No records in this stage</div>'}</div></details>`;
+    }).join('')}</section>`;
+  }
+
+  return `<section class="pipeline-auto">${stages.map((st,idx)=>{
+    const list=byStage[st]||[];
+    const displayStage=(t==='Podcast Episodes'&&st==='Released')?'Past-date history':st;
+    return `<div class="lane" data-lane-stage="${esc(st)}"><div class="lane-head"><span>${esc(displayStage)}</span><span class="lane-count count-badge">${list.length}</span></div><div class="lane-items">${list.map(r=>workflowCard(r,t,stages,idx)).join('')||'<div class="empty-state" style="padding:20px 8px;font-size:11px">No records in this stage</div>'}</div></div>`;
+  }).join('')}</section>`;
+}
+function podcastQueueView(rr){
+  const isMobile=typeof window!=='undefined'&&(window.innerWidth||0)<=760;
+  const stages=boardStages(records('Podcast Episodes'),'Podcast Episodes');
+  const now=today();
+
+  const upcomingList=rr.filter(r=>getPodcastPeriod(r,now)==='upcoming');
+  const undatedList=rr.filter(r=>getPodcastPeriod(r,now)==='undated');
+  const pastList=rr.filter(r=>getPodcastPeriod(r,now)==='past');
+
+  function renderQueueItem(r){
+    const f=r.fields;
+    const stage=recordStage(r,'Podcast Episodes');
+    const stageIdx=stages.indexOf(stage);
+    const prevStage=stageIdx>0?stages[stageIdx-1]:null;
+    const nextStage=stageIdx>=0&&stageIdx<stages.length-1?stages[stageIdx+1]:null;
+    const series=getPodcastSeries(f.Episode);
+    const period=getPodcastPeriod(r,now);
+    const periodBadge=period==='past'?'Past-date history':period==='upcoming'?'Scheduled':'Undated';
+    const isStarred=workspace.favorites.includes(r.id);
+
+    let quickBtn='';
+    if(stage==='Needs Audio Editor'){
+      quickBtn=`<button type="button" class="button primary small quick-editor-btn" data-record-id="${esc(r.id)}">＋ Editor</button>`;
+    }else if(stage==='In Editing'){
+      quickBtn=`<button type="button" class="button primary small" data-move-id="${esc(r.id)}" data-target-stage="Released">✓ Released</button>`;
+    }else if(stage==='Released'){
+      quickBtn=`<button type="button" class="button secondary small" data-move-id="${esc(r.id)}" data-target-stage="Needs Audio Editor">↺ Needs Editor</button>`;
+    }
+
+    const moveBtns=`${prevStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(prevStage)}" title="Move left to ${esc(prevStage)}" aria-label="Move left to ${esc(prevStage)}">← ${esc(prevStage)}</button>`:''}${nextStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(nextStage)}" title="Move right to ${esc(nextStage)}" aria-label="Move right to ${esc(nextStage)}">${esc(nextStage)} →</button>`:''}${quickBtn}`;
+
+    return `<article class="queue-item panel" data-record-id="${esc(r.id)}"><div class="queue-item-main"><div class="queue-item-head"><span class="tag stage-tag">${esc(stage)}</span>${series?`<span class="tag series-tag">${esc(series)}</span>`:''}<span class="tag period-tag ${period==='past'?'period-past':''}">${esc(periodBadge)}</span><div class="record-markers">${r.flags.length?chip('Verify','review-chip'):''}${workspace.edits[r.id]?chip('Local','local-chip'):''}</div></div><h3 class="queue-item-title">${esc(title(r,'Podcast Episodes'))}</h3><div class="queue-item-meta"><span class="meta-item"><strong>Release:</strong> ${esc(f['Release date']||'Undated')}</span><span class="meta-item"><strong>Point person:</strong> ${esc(f['Point person']||'Unassigned')}</span><span class="meta-item"><strong>Audio editor:</strong> ${esc(f['Audio editor']||'None')}</span></div>${isMobile?`<details class="work-card-more"><summary>More fields</summary><div class="work-card-expanded"><p><strong>Week:</strong> ${esc(f.Week||'—')}</p><p><strong>Source row:</strong> ${esc(source(r))}</p>${f.Status?`<p><strong>Custom status:</strong> ${esc(f.Status)}</p>`:''}</div></details>`:''}</div><div class="queue-item-actions">${moveBtns}<button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="Podcast Episodes">Details</button><button class="icon-button star ${isStarred?'is-starred':''}" aria-label="${isStarred?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${isStarred?'★':'☆'}</button></div></article>`;
+  }
+
+  if(podcastPeriodFilter==='upcoming'){
+    return `<section class="podcast-queue"><div class="queue-group panel"><div class="queue-group-head"><h3>Upcoming &amp; Scheduled Queue (${upcomingList.length})</h3><span class="muted">Episodes with scheduled release dates</span></div><div class="queue-items-list">${upcomingList.length?upcomingList.map(renderQueueItem).join(''):'<div class="empty-state" style="padding:16px;">No upcoming episodes found for this filter</div>'}</div></div></section>`;
+  }
+  if(podcastPeriodFilter==='undated'){
+    return `<section class="podcast-queue"><div class="queue-group panel"><div class="queue-group-head"><h3>Undated Episodes (${undatedList.length})</h3><span class="muted">Episodes without a recognized source release date</span></div><div class="queue-items-list">${undatedList.length?undatedList.map(renderQueueItem).join(''):'<div class="empty-state" style="padding:16px;">No undated episodes found for this filter</div>'}</div></div></section>`;
+  }
+  if(podcastPeriodFilter==='past'){
+    return `<section class="podcast-queue"><div class="queue-group panel"><div class="queue-group-head"><h3>Past-Date History (${pastList.length})</h3><span class="muted">Historical episodes by source release date</span></div><div class="queue-items-list">${pastList.length?pastList.map(renderQueueItem).join(''):'<div class="empty-state" style="padding:16px;">No past episodes found for this filter</div>'}</div></div></section>`;
+  }
+
+  const activeUnreleased=pastList.filter(r=>recordStage(r,'Podcast Episodes')!=='Released');
+  const pastReleased=pastList.filter(r=>recordStage(r,'Podcast Episodes')==='Released');
+
+  const upcomingGroup=`<div class="queue-group panel"><div class="queue-group-head"><h3>Upcoming &amp; Scheduled Queue (${upcomingList.length})</h3><span class="muted">Episodes with future release dates</span></div><div class="queue-items-list">${upcomingList.length?upcomingList.map(renderQueueItem).join(''):'<div class="empty-state" style="padding:16px;">No scheduled upcoming episodes</div>'}</div></div>`;
+  const activeWorkGroup=activeUnreleased.length?`<div class="queue-group panel"><div class="queue-group-head"><h3>In Progress (${activeUnreleased.length})</h3><span class="muted">Past-date items needing editor or point person</span></div><div class="queue-items-list">${activeUnreleased.map(renderQueueItem).join('')}</div></div>`:'';
+  const undatedGroup=`<div class="queue-group panel"><div class="queue-group-head"><h3>Undated Episodes (${undatedList.length})</h3><span class="muted">Unscheduled episodes retained in their own group</span></div><div class="queue-items-list">${undatedList.length?undatedList.map(renderQueueItem).join(''):'<div class="empty-state" style="padding:16px;">No undated episodes</div>'}</div></div>`;
+  const pastGroup=`<details class="queue-group panel past-history-panel" ${podcastPeriodFilter==='past'||(rr.length<=15)?'open':''}><summary class="queue-group-summary"><div><h3 style="display:inline-block;margin:0 8px 0 0;">Past-Date History (${pastReleased.length})</h3><span class="badge">${pastReleased.length} released</span></div><span class="muted">Click to toggle past-date history</span></summary><div class="queue-items-list" style="margin-top:12px;">${pastReleased.map(renderQueueItem).join('')}</div></details>`;
+
+  return `<section class="podcast-queue">${upcomingGroup}${activeWorkGroup}${undatedGroup}${pastGroup}</section>`;
+}
 function applyStageChange(id,t,targetStage){const r=records(t).find(x=>x.id===id);if(!r)return;const updates={};if(t==='Schema review'){if(targetStage==='Uploaded'){updates.Status='uploaded';updates.Uploaded='Yes';}else if(targetStage==='Draft / Needs review'){updates.Status='';updates.Uploaded='';}else if(targetStage==='In review'){updates.Status='in review';}else if(targetStage==='Ready'){updates.Status='ready';}else if(targetStage==='Assigned'){updates.Status='assigned';}else{updates.Status=targetStage;}}else if(t==='Podcast Episodes'){if(targetStage==='Needs Audio Editor'){updates['Audio editor']='';}else if(targetStage==='Needs Point Person'){updates['Point person']='';}else if(targetStage==='In Editing'){if(!r.fields['Audio editor'])updates['Audio editor']='Zakariyya';}else if(targetStage==='Released'){updates['Release date']=today();}else if(db[t].columns.includes('Status')){updates.Status=targetStage;}}if(Object.keys(updates).length){if(mutate(w=>{w.edits[id]={...(w.edits[id]||{}),...updates};log(w,`Moved to ${targetStage}`,r,t);})){render();toast(`Moved to ${targetStage}`);}}}
 function quickAssignEditor(id){const r=records('Podcast Episodes').find(x=>x.id===id);if(!r)return;const val=prompt('Enter Audio Editor name:',r.fields['Audio editor']||'Zakariyya');if(val!==null&&val.trim()){if(mutate(w=>{w.edits[id]={...(w.edits[id]||{}),'Audio editor':val.trim()};log(w,'Assigned Audio Editor',r,'Podcast Episodes');})){render();toast(`Audio editor assigned: ${val.trim()}`);}}}
 function bindBoardEvents(t){document.querySelectorAll('[data-drag-id]').forEach(el=>{el.ondragstart=e=>e.dataTransfer.setData('text/plain',el.dataset.dragId);});document.querySelectorAll('[data-lane-stage]').forEach(lane=>{lane.ondragover=e=>{e.preventDefault();lane.classList.add('drag-over');};lane.ondragleave=()=>lane.classList.remove('drag-over');lane.ondrop=e=>{e.preventDefault();lane.classList.remove('drag-over');const id=e.dataTransfer.getData('text/plain');if(id)applyStageChange(id,t,lane.dataset.laneStage);};});document.querySelectorAll('[data-move-id]').forEach(b=>{b.onclick=()=>applyStageChange(b.dataset.moveId,t,b.dataset.targetStage);});document.querySelectorAll('.quick-editor-btn').forEach(b=>{b.onclick=()=>quickAssignEditor(b.dataset.recordId);});}
@@ -5831,4 +6128,10 @@ if(typeof globalThis!=='undefined'){
   globalThis.RESIDENCY_MONTHS=RESIDENCY_MONTHS;
   globalThis.residencyProgramsView=residencyProgramsView;
   globalThis.crcRetiredView=crcRetiredView;
+  globalThis.PODCAST_SERIES_LABELS=PODCAST_SERIES_LABELS;
+  globalThis.getPodcastSeries=getPodcastSeries;
+  globalThis.getPodcastPeriod=getPodcastPeriod;
+  globalThis.podcastQueueView=podcastQueueView;
+  globalThis.recordStage=recordStage;
+  globalThis.boardStages=boardStages;
 }
