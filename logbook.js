@@ -4,7 +4,7 @@
  * CPS Academy Portal - Personal Assignment Logbook Module
  *
  * Provides clinical procedure logbook metrics and verification for a single
- * authenticated CPS Academy member.
+ * local test profile for a CPS Academy member.
  * Zero gamification, zero streaks, zero rankings, zero inferred attendance.
  */
 (function (root, factory) {

@@ -62,7 +62,7 @@
         <div class="profile">
           <div class="avatar avatar-z" id="profile-avatar">ZG</div>
           <div><strong id="profile-name">Zakariyya</strong><span id="profile-role">VMR Leadership</span><span id="profile-identity-badge" class="tag small local-profile-tag" style="display:none;margin-top:2px;">Local test profile</span></div>
-          <button class="icon-button" id="profile-options-btn" aria-label="Account and developer preferences">⚙</button>
+          <button class="icon-button" id="profile-options-btn" aria-label="Local profile and developer preferences">⚙</button>
         </div>
       </aside>
 
@@ -264,10 +264,10 @@
           Your Name or Email <small class="muted">(Optional)</small>
           <input id="issue-reporter" class="input" placeholder="e.g., Alex or alex@example.com" />
         </label>
-        <p class="form-note">Saved in your workspace. We automatically include device details to help diagnose the issue.</p>
+        <p class="form-note">Saved locally on this device. Reports are stored in your browser workspace and are not sent to an external server.</p>
         <div class="dialog-actions">
           <button class="button secondary" value="cancel">Cancel</button>
-          <button type="submit" class="button primary" id="submit-issue-btn" value="default">Send report</button>
+          <button type="submit" class="button primary" id="submit-issue-btn" value="default">Save report locally</button>
         </div>
       </form>
     </dialog>
@@ -280,22 +280,12 @@
         </div>
         <div class="pref-item">
           <div class="pref-meta">
-            <strong>Admin Profile (@admin)</strong>
-            <p class="muted">Enable Super admin permissions and access to the Issue Triage dashboard.</p>
-          </div>
-          <label class="toggle-switch">
-            <input type="checkbox" id="admin-toggle" aria-label="Enable local admin profile" />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="pref-item">
-          <div class="pref-meta">
             <strong>Local Test Profile</strong>
             <p class="muted" id="mock-profile-status">Local mock identity for testing claiming and logbooks.</p>
           </div>
           <div style="display:flex;gap:6px;">
             <button type="button" class="button secondary small" id="activate-mock-profile-btn">Set Dev Profile</button>
-            <button type="button" class="button secondary small" id="clear-mock-profile-btn">Sign Out</button>
+            <button type="button" class="button secondary small" id="clear-mock-profile-btn">Clear Local Profile</button>
           </div>
         </div>
         <div class="pref-item" style="border-top:1px solid var(--line);padding-top:12px;">
@@ -327,7 +317,17 @@
           </div>
           <button type="button" class="button secondary small" id="nav-logbook-btn">Open Logbook</button>
         </div>
-        <p class="form-note">Controls local testing permissions for this browser instance.</p>
+        <div class="pref-item" style="border-top:1px solid var(--line);padding-top:12px;">
+          <div class="pref-meta">
+            <strong>Advanced Developer &amp; Admin: Super Admin (@admin)</strong>
+            <p class="muted">Enable local Super admin permissions and access to the Issue Triage dashboard.</p>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="admin-toggle" aria-label="Enable local admin profile" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <p class="form-note">Controls local testing permissions for this browser instance. No external account or server sync.</p>
         <div class="dialog-actions">
           <button class="button primary" value="cancel">Done</button>
         </div>

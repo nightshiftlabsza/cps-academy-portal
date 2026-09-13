@@ -762,3 +762,79 @@ test('Temporal urgency badge and Zoom launch link formatting adhere to clinical 
   assert.equal(sandbox.sessionZoomUrl(withoutZoom), '');
 });
 
+test('backupAgeText returns "Never requested" when lastBackup is absent or invalid, and formats relative age', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {
+    workspace: { lastBackup: null },
+    Date,
+    Math
+  };
+  vm.runInNewContext(appCode.slice(appCode.indexOf('function backupAgeText'), appCode.indexOf('function sessionZoomUrl')), sandbox);
+
+  assert.equal(sandbox.backupAgeText(), 'Never requested');
+  sandbox.workspace.lastBackup = undefined;
+  assert.equal(sandbox.backupAgeText(), 'Never requested');
+  sandbox.workspace.lastBackup = 'invalid-date';
+  assert.equal(sandbox.backupAgeText(), 'Never requested');
+
+  sandbox.workspace.lastBackup = new Date().toISOString();
+  assert.equal(sandbox.backupAgeText(), '< 1h ago');
+  sandbox.workspace.lastBackup = new Date(Date.now() - 3 * 3600000).toISOString();
+  assert.equal(sandbox.backupAgeText(), '3h ago');
+  sandbox.workspace.lastBackup = new Date(Date.now() - 48 * 3600000).toISOString();
+  assert.equal(sandbox.backupAgeText(), '2d ago');
+});
+
+test('Home backup card displays accurate local change counts and avoids "pending backup"', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const createCardHarness = (edits = {}, added = [], lastBackup = null) => {
+    const ctx = {
+      workspace: { edits, added, favorites: [], history: [], lastBackup },
+      Date,
+      Math,
+      esc: s => String(s ?? '')
+    };
+    const helper = `
+      ${appCode.slice(appCode.indexOf('function backupAgeText'), appCode.indexOf('function sessionZoomUrl'))}
+      function renderCard() {
+        const editCount = Object.keys(workspace.edits).length + workspace.added.length;
+        ${appCode.slice(appCode.indexOf('const backupCard=`<article class="panel op-card">'), appCode.indexOf('const linksCard=`'))}
+        return backupCard;
+      }
+    `;
+    vm.runInNewContext(helper, ctx);
+    return ctx.renderCard();
+  };
+
+  // Clean state
+  const clean = createCardHarness();
+  assert(clean.includes('0 local changes retained on this device'));
+  assert(clean.includes('Last backup export requested: Never requested'));
+  assert(!clean.includes('pending backup'));
+
+  // Edits retained before export
+  const withEdits = createCardHarness({ 'MR:1': { Facilitator: 'Test' } }, [{ id: 'local:draft1' }]);
+  assert(withEdits.includes('2 local changes retained on this device'));
+  assert(withEdits.includes('Last backup export requested: Never requested'));
+  assert(!withEdits.includes('pending backup'));
+
+  // Edits retained after export requested
+  const afterExport = createCardHarness({ 'MR:1': { Facilitator: 'Test' } }, [{ id: 'local:draft1' }], new Date().toISOString());
+  assert(afterExport.includes('2 local changes retained on this device'), 'Edits remain retained after export');
+  assert(afterExport.includes('Last backup export requested: < 1h ago'));
+  assert(!afterExport.includes('pending backup'), 'Must never claim pending backup');
+  assert(!afterExport.includes('All changes backed up'), 'Must not make unverified claims about filesystem storage');
+});
+
+test('Workspace, Logbook and Issue reporting copy accurately reflects local profile and attendance distinction', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  assert(!appCode.includes('Clinical procedure logbook for a single authenticated'), 'Logbook must not claim member authentication');
+  assert(!appCode.includes('Reverse-chronological history of verified workbook engagements'), 'Engagements must not be termed verified attendance');
+  assert(appCode.includes('assignments are not verified attendance'), 'Must preserve distinction between assignments and verified attendance');
+  assert(appCode.includes('Local changes &amp; portable backups'), 'Workspace card must accurately describe local changes');
+  assert(appCode.includes('bound to the supported snapshot'), 'Workspace card must note snapshot binding');
+  assert(!appCode.includes("the team will look into it"), 'Must not imply issue was transmitted to a remote team');
+  assert(appCode.includes('Issue report saved locally to your device workspace.'), 'Must explicitly state report was saved locally');
+});
+
+
