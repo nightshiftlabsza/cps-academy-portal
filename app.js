@@ -302,7 +302,7 @@ function formatResultsCount(filteredList, t, allList) {
       return `Unresolved source dates · ${filteredList.length} session${filteredList.length===1?'':'s'} requiring date review · ${allList.length} total records`;
     }
     if (mrScheduleRangeMode === 'all') {
-      return `All history (2020 – 2026) · ${filteredList.length} session${filteredList.length===1?'':'s'} · ${allList.length} total records`;
+      return `All history (2020 – 2026) · ${filteredList.length} matches · ${allList.length} total records`;
     }
     const currentWeekStart = mrScheduleWeekStart || getDefaultScheduleWeekStart();
     const bounds = typeof SessionCore !== 'undefined' && SessionCore.getWeekBounds ? SessionCore.getWeekBounds(currentWeekStart) : null;
