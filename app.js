@@ -358,9 +358,9 @@ function formatResultsCount(filteredList, t, allList) {
   }
   if (t === 'CRC - retired') {
     if (isFiltered) {
-      return `Showing ${filteredCounts.namedEntries} cases (${filteredCounts.namedMentees} named mentees, ${filteredCounts.mentorOnly} mentor-only; ${filteredCounts.sourceHeadings} round headings, ${filteredCounts.placeholders} placeholders) · ${totalCounts.namedEntries} cases (${totalCounts.namedMentees} named mentees, ${totalCounts.mentorOnly} mentor-only) · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
+      return `Showing ${filteredCounts.namedEntries} cases (${filteredCounts.namedMentees} named mentee rows and ${filteredCounts.mentorOnly} unnamed records; ${filteredCounts.sourceHeadings} round headings, ${filteredCounts.placeholders} placeholders) · ${totalCounts.namedEntries} cases (${totalCounts.namedMentees} named mentee rows and ${totalCounts.mentorOnly} unnamed records) · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
     }
-    return `${totalCounts.namedEntries} cases (${totalCounts.namedMentees} named mentees, ${totalCounts.mentorOnly} mentor-only) · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
+    return `${totalCounts.namedEntries} historical records: ${totalCounts.namedMentees} named mentee rows and ${totalCounts.mentorOnly} unnamed records · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
   }
   return `${filteredList.length} matches · ${allList.length} records`;
 }
@@ -1478,14 +1478,16 @@ function filtered(){
   if(tab==='Morning Report'){
     if(filter==='Unresolved dates'||filter==='Unresolved source dates'||mrScheduleRangeMode==='unresolved'){
       mrScheduleRangeMode='unresolved';
-    }else if(filter==='All history'||(filter==='All'&&mrScheduleRangeMode==='all')){
+    }else if(filter==='All history'){
+      // Only explicit "All history" selection expands to the full history scope.
+      // A plain filter='All' (used for past-week navigation) must NOT expand scope.
       if(!dateFrom&&!dateTo)mrScheduleRangeMode='all';
     }else if(filter==='This Week'){
       mrScheduleRangeMode='week';
       if(!mrScheduleWeekStart)mrScheduleWeekStart=getDefaultScheduleWeekStart();
-    }else if(filter==='All'){
-      if(!dateFrom&&!dateTo)mrScheduleRangeMode='all';
     }
+    // filter==='All' with mrScheduleRangeMode==='week' means "no extra filter on a bounded week" --
+    // do NOT override mrScheduleRangeMode here.
     if(!dateFrom&&!dateTo){
       if(mrScheduleRangeMode==='unresolved'){
         rr=rr.filter(r=>!recordDate(r));
@@ -1798,6 +1800,8 @@ function listing(){
   $('#filter').onchange=e=>{
     filter=e.target.value;
     if(tab==='Morning Report'){
+      // When the user explicitly picks a filter from the dropdown, update the range mode accordingly.
+      // 'All history' always expands scope. Plain 'All' also expands scope when explicitly chosen.
       if(filter==='All history'||filter==='All')mrScheduleRangeMode='all';
       else if(filter==='Unresolved dates'||filter==='Unresolved source dates')mrScheduleRangeMode='unresolved';
       else if(filter==='This Week'){mrScheduleRangeMode='week';mrScheduleWeekStart=getDefaultScheduleWeekStart();}
@@ -5985,7 +5989,10 @@ function workflowCard(r,t,stages,stageIndex){
     else if(stage==='In Editing'){quickBtn=`<button type="button" class="button primary small" data-move-id="${esc(r.id)}" data-target-stage="Released">✓ Released</button>`;}
     else if(stage==='Released'){quickBtn=`<button type="button" class="button secondary small" data-move-id="${esc(r.id)}" data-target-stage="Needs Audio Editor">↺ Needs Editor</button>`;}
   }
-  return `<article class="work-card" draggable="true" data-drag-id="${esc(r.id)}"><div class="work-card-head"><span class="tag">${esc(stage)}</span><div class="record-markers">${r.flags.length?chip('Verify','review-chip'):''}${workspace.edits[r.id]?chip('Local','local-chip'):''}</div></div><h3>${esc(title(r,t))}</h3><div class="work-card-meta">${metaHtml}</div><div class="work-card-foot"><div class="work-card-actions">${prevStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(prevStage)}" title="Move left to ${esc(prevStage)}" aria-label="Move left to ${esc(prevStage)}">← ${esc(prevStage)}</button>`:''}${nextStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(nextStage)}" title="Move right to ${esc(nextStage)}" aria-label="Move right to ${esc(nextStage)}">${esc(nextStage)} →</button>`:''}${quickBtn}<button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="${esc(t)}">Details</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${workspace.favorites.includes(r.id)?'★':'☆'}</button></div></div></article>`;
+  // For Podcast Episodes with a date-inferred 'Released' stage, show a neutral label in the visible tag.
+  // The underlying stage value (used for data-lane-stage and move actions) remains 'Released'.
+  const displayStageTag=(t==='Podcast Episodes'&&stage==='Released')?'Past-date history':stage;
+  return `<article class="work-card" draggable="true" data-drag-id="${esc(r.id)}"><div class="work-card-head"><span class="tag">${esc(displayStageTag)}</span><div class="record-markers">${r.flags.length?chip('Verify','review-chip'):''}${workspace.edits[r.id]?chip('Local','local-chip'):''}</div></div><h3>${esc(title(r,t))}</h3><div class="work-card-meta">${metaHtml}</div><div class="work-card-foot"><div class="work-card-actions">${prevStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(prevStage)}" title="Move left to ${esc(prevStage)}" aria-label="Move left to ${esc(prevStage)}">← ${esc(prevStage)}</button>`:''}${nextStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(nextStage)}" title="Move right to ${esc(nextStage)}" aria-label="Move right to ${esc(nextStage)}">${esc(nextStage)} →</button>`:''}${quickBtn}<button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="${esc(t)}">Details</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${workspace.favorites.includes(r.id)?'★':'☆'}</button></div></div></article>`;
 }
 function workflowBoard(rr,t){
   const isMobile=typeof window!=='undefined'&&(window.innerWidth||0)<=760;
@@ -6060,7 +6067,7 @@ function podcastQueueView(rr){
   const upcomingGroup=`<div class="queue-group panel"><div class="queue-group-head"><h3>Upcoming &amp; Scheduled Queue (${upcomingList.length})</h3><span class="muted">Episodes with future release dates</span></div><div class="queue-items-list">${upcomingList.length?upcomingList.map(renderQueueItem).join(''):'<div class="empty-state" style="padding:16px;">No scheduled upcoming episodes</div>'}</div></div>`;
   const activeWorkGroup=activeUnreleased.length?`<div class="queue-group panel"><div class="queue-group-head"><h3>In Progress (${activeUnreleased.length})</h3><span class="muted">Past-date items needing editor or point person</span></div><div class="queue-items-list">${activeUnreleased.map(renderQueueItem).join('')}</div></div>`:'';
   const undatedGroup=`<div class="queue-group panel"><div class="queue-group-head"><h3>Undated Episodes (${undatedList.length})</h3><span class="muted">Unscheduled episodes retained in their own group</span></div><div class="queue-items-list">${undatedList.length?undatedList.map(renderQueueItem).join(''):'<div class="empty-state" style="padding:16px;">No undated episodes</div>'}</div></div>`;
-  const pastGroup=`<details class="queue-group panel past-history-panel" ${podcastPeriodFilter==='past'||(rr.length<=15)?'open':''}><summary class="queue-group-summary"><div><h3 style="display:inline-block;margin:0 8px 0 0;">Past-Date History (${pastReleased.length})</h3><span class="badge">${pastReleased.length} released</span></div><span class="muted">Click to toggle past-date history</span></summary><div class="queue-items-list" style="margin-top:12px;">${pastReleased.map(renderQueueItem).join('')}</div></details>`;
+  const pastGroup=`<details class="queue-group panel past-history-panel" ${podcastPeriodFilter==='past'||(rr.length<=15)?'open':''}><summary class="queue-group-summary"><div><h3 style="display:inline-block;margin:0 8px 0 0;">Past-Date History (${pastReleased.length})</h3><span class="badge" title="Source release date reached or passed — publication not verified">${pastReleased.length} source date reached</span></div><span class="muted">Click to toggle past-date history</span></summary><div class="queue-items-list" style="margin-top:12px;">${pastReleased.map(renderQueueItem).join('')}</div></details>`;
 
   return `<section class="podcast-queue">${upcomingGroup}${activeWorkGroup}${undatedGroup}${pastGroup}</section>`;
 }

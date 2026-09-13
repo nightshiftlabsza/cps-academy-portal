@@ -289,7 +289,7 @@ test('Defect 6: New drafts with row: null remain "Local / unassigned" in Members
   assert.equal(resClass.month, 'Local / unassigned', 'Residency draft must have Local / unassigned month, not October');
 });
 
-test('Defect 7: Retired CRC counts distinguish named mentee rows (357) from mentor-only (43)', () => {
+test('Defect 7: Retired CRC counts distinguish named mentee rows (357) from unnamed records (43)', () => {
   const h = createFullHarness({ currentTab: 'CRC - retired' });
   const crcRecords = h.records('CRC - retired');
   assert.equal(crcRecords.length, 417, 'Total CRC records must be exactly 417');
@@ -298,12 +298,15 @@ test('Defect 7: Retired CRC counts distinguish named mentee rows (357) from ment
   assert.equal(counts.total, 417, 'Total records must be 417');
   assert.equal(counts.namedEntries, 400, 'Total cases must be 400');
   assert.equal(counts.namedMentees, 357, 'Must have exactly 357 named mentees');
-  assert.equal(counts.mentorOnly, 43, 'Must have exactly 43 mentor-only cases');
+  assert.equal(counts.mentorOnly, 43, 'Must have exactly 43 unnamed records (not all are mentor-only; some record Contacted or contact info)');
   assert.equal(counts.sourceHeadings, 15, 'Must have exactly 15 round headings');
   assert.equal(counts.placeholders, 2, 'Must have exactly 2 template placeholders');
 
   const summary = h.formatResultsCount(crcRecords, 'CRC - retired', crcRecords);
-  assert.ok(summary.includes('400 cases (357 named mentees, 43 mentor-only)'), `Summary must distinguish mentees and mentor-only: ${summary}`);
+  // The 43 unnamed records include rows with only a mentor, rows also recording Contacted, and one with contact info --
+  // so the label must be 'unnamed records', not 'mentor-only'.
+  assert.ok(summary.includes('400 historical records: 357 named mentee rows and 43 unnamed records'), `Summary must use source-derived 'unnamed records' label: ${summary}`);
+  assert.ok(!summary.includes('mentor-only'), `Summary must not use inaccurate 'mentor-only' label: ${summary}`);
 });
 
 test('Defect 8: Unchecked status boxes and filter option say "Progress not recorded"', () => {
@@ -339,4 +342,100 @@ test('Defect 10: Retain reconciled member cohort counts (148 named rows: 14 Part
   assert.equal(counts.cohortCounts['Core team'], 54, 'Core team cohort must be 54');
   assert.equal(counts.cohortCounts['Leaders'], 36, 'Leaders cohort must be 36');
   assert.equal(counts.cohortCounts['Marked inactive in source'], 44, 'Inactive cohort must be 44');
+});
+
+// ─── Issue 1 regression: historical week jump must stay bounded ───────────────
+
+test('Issue 1a: Jump to 2020-09-14 shows only bounded week (Sept 14–20, 2020), not all history', () => {
+  const h = createFullHarness({ currentTab: 'Morning Report' });
+
+  // Simulate the week-jump input: set mrScheduleWeekStart to the week containing 2020-09-14
+  const targetDate = '2020-09-14';
+  const bounds = h.SessionCore.getWeekBounds(targetDate);
+  assert.ok(bounds, 'getWeekBounds must return bounds for 2020-09-14');
+  assert.equal(bounds.start, '2020-09-14', 'Week start must be Monday 2020-09-14');
+  assert.equal(bounds.end, '2020-09-20', 'Week end must be Sunday 2020-09-20');
+
+  h.setMrScheduleWeekStart(bounds.start);
+  h.setMrScheduleRangeMode('week');
+  // Past-week navigation uses filter='All' as a neutral no-extra-filter value.
+  // This must NOT expand scope to all history.
+  h.setFilter('All');
+
+  const filtered = h.filtered();
+
+  // mrScheduleRangeMode must remain 'week', not 'all'
+  // We verify indirectly: all returned sessions must fall within the bounded week.
+  for (const r of filtered) {
+    const d = h.SessionCore.parseDate(r.fields.Date);
+    if (d) {
+      assert.ok(d >= bounds.start && d <= bounds.end,
+        `Session date ${d} is outside bounded week ${bounds.start}–${bounds.end} — scope leaked to all history`);
+    }
+  }
+
+  // Must not be 2,546 records (all-history leak)
+  assert.ok(filtered.length < 100,
+    `Expected ~6 sessions for Sept 14–20 2020, got ${filtered.length} — likely all-history leak`);
+
+  // Must have at least 1 session in the snapshot for that week
+  const datedInWeek = filtered.filter(r => {
+    const d = h.SessionCore.parseDate(r.fields.Date);
+    return d && d >= bounds.start && d <= bounds.end;
+  });
+  assert.ok(datedInWeek.length >= 1,
+    `Must find at least 1 session in Sept 14–20 2020, found ${datedInWeek.length}`);
+});
+
+test('Issue 1b: Navigating Previous week across the current-week boundary stays in week mode', () => {
+  const h = createFullHarness({ currentTab: 'Morning Report' });
+
+  const defWeek = h.getDefaultScheduleWeekStart();
+  const prevWeek = h.SessionCore.addWeeks(defWeek, -1);
+
+  h.setMrScheduleWeekStart(prevWeek);
+  h.setMrScheduleRangeMode('week');
+  // Past-week navigation sets filter='All' — this must not leak to all-history scope
+  h.setFilter('All');
+
+  const filtered = h.filtered();
+
+  // All sessions must be within the previous week bounds
+  const bounds = h.SessionCore.getWeekBounds(prevWeek);
+  for (const r of filtered) {
+    const d = h.SessionCore.parseDate(r.fields.Date);
+    if (d) {
+      assert.ok(d >= bounds.start && d <= bounds.end,
+        `Session ${d} is outside previous week ${bounds.start}–${bounds.end}`);
+    }
+  }
+
+  // Must not return thousands of records (all-history scope leak)
+  assert.ok(filtered.length < 500,
+    `Previous week must be bounded, not all history (got ${filtered.length} records)`);
+});
+
+test('Issue 1c: filter="All" with mrScheduleRangeMode="week" stays bounded; mrScheduleRangeMode="all" expands scope', () => {
+  const h = createFullHarness({ currentTab: 'Morning Report' });
+
+  // Start in week mode for a past week (simulating week-navigation)
+  const pastWeek = '2022-01-10';
+  const bounds = h.SessionCore.getWeekBounds(pastWeek);
+  h.setMrScheduleWeekStart(bounds.start);
+  h.setMrScheduleRangeMode('week');
+  // Week navigation sets filter='All' as a neutral value — filtered() must NOT override mode
+  h.setFilter('All');
+
+  const weekFiltered = h.filtered();
+  // Must be a small bounded set, not thousands
+  assert.ok(weekFiltered.length < 500,
+    `filter='All' with mrScheduleRangeMode='week' must remain bounded (got ${weekFiltered.length})`);
+
+  // Explicit user action: set mrScheduleRangeMode='all' (as would happen via onchange handler)
+  h.setMrScheduleRangeMode('all');
+  h.setFilter('All history');
+  const allFiltered = h.filtered();
+  // Must now cover the full snapshot (2020–2026 = 2500+)
+  assert.ok(allFiltered.length > 2500,
+    `mrScheduleRangeMode='all' with filter='All history' must return full history scope (got ${allFiltered.length})`);
 });
