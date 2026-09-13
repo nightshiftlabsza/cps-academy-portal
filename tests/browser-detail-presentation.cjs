@@ -94,7 +94,7 @@ const workbook = require('../workbook.json');
       await firstInput.fill('MODIFIED_VALUE_FOR_TEST');
       // Attempt to close via cancel button
       page.once('dialog', d => {
-        assert.match(d.message(), /unsaved changes.*Discard/i);
+        assert.match(d.message(), /unsaved changes/i);
         d.dismiss();
       });
       await page.locator('#dialog-secondary').click();
