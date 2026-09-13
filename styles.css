@@ -457,6 +457,8 @@ kbd { position: absolute; right: 10px; padding: 3px 7px; border: 1px solid var(-
   .card-grid, .link-grid { grid-template-columns: repeat(2, 1fr); }
   .leadership-strip { grid-template-columns: repeat(2, 1fr); }
   .pipeline { grid-template-columns: repeat(2, 1fr); }
+  .queue-item { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .queue-item-actions { width: 100%; justify-content: flex-start; border-top: 1px solid var(--border-subtle); padding-top: 8px; }
 }
 
 @media (max-width: 760px) {

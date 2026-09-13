@@ -1084,6 +1084,27 @@ function card(r,t=tab,inSearch=false){const f=r.fields;let body='',tag='';
     body = `<p><strong>Mentor:</strong> ${esc(f['CPSOLVERS MENTOR']||'Unassigned')}</p><p class="muted">${f['DATE OF PRESENTATION']?`Presented: ${esc(f['DATE OF PRESENTATION'])}`:''}${f['CONTACT INFO']?` · ${esc(f['CONTACT INFO'])}`:''}</p><div class="record-markers">${f['CASE COMPLETE?']==='1'?chip('Case complete','ready-chip'):''}${f['PRESENTED?']==='1'?chip('Presented','ready-chip'):''}</div>`;
   }
  }
+  else if(t==='Leader of the Week'){
+    tag='Leader of the Week';
+    const datesParsed=parseLeaderDateRange(f.Dates||'');
+    const datesNotice=datesParsed.isYearless?` <small class="muted">(Year not specified)</small>`:'';
+    body=`<p class="card-line"><small>Week</small><span>${esc(f.Week||'Not entered')}</span></p>`+
+         `<p class="card-line"><small>Dates</small><span>${esc(f.Dates||'Not entered')}${datesNotice}</span></p>`+
+         (f.Comments?`<p class="card-line"><small>Comments</small><span>${esc(f.Comments)}</span></p>`:'');
+  }
+  else if(t==='Podcast Episodes'){
+    const isInferred=isPodcastStageInferred(r);
+    const st=recordStage(r,'Podcast Episodes');
+    tag=formatPodcastStageBadge(st,isInferred);
+    const series=getPodcastSeries(f.Episode);
+    const relDate=f['Release date'];
+    const dateNotice=(relDate&&iso(relDate)&&validDate(relDate)&&relDate<=today())?` <small class="muted">(Release date passed)</small>`:(!relDate?` <small class="muted">(Undated)</small>`:'');
+    body=(series?`<p class="card-line"><small>Series</small><span class="tag series-tag">${esc(series)}</span></p>`:'')+
+         `<p class="card-line"><small>Release date</small><span>${esc(relDate||'Undated')}${dateNotice}</span></p>`+
+         `<p class="card-line"><small>Point person</small><strong>${esc(f['Point person']||'Unassigned')}</strong></p>`+
+         `<p class="card-line"><small>Audio editor</small><strong>${esc(f['Audio editor']||'None')}</strong></p>`+
+         (f.Status?`<p class="card-line"><small>Recorded status</small><span>${esc(f.Status)}</span></p>`:'');
+  }
  else{tag=f.Status||f.Role||f.Type||t;const fields=db[t].columns.filter(c=>c!==titles[t]&&!/email|contact|link|meeting|remarks/i.test(c)).slice(0,3);body=fields.map(k=>`<p class="card-line"><small>${esc(k)}</small><span>${esc(f[k]||'Not entered')}</span></p>`).join('')}
 
  let localMarker = '';
@@ -1097,7 +1118,46 @@ function card(r,t=tab,inSearch=false){const f=r.fields;let body='',tag='';
  const unknownMarker = (c && c.category === RECORD_CATEGORY.UNKNOWN) ? chip('Unknown format (needs review)', 'review-chip') : '';
 
  return `<article class="hub-card">${inSearch&&tag!==sectionLabel(t)?chip(sectionLabel(t)):''}${chip(tag)}<h2>${esc(title(r,t))}</h2>${body}${inSearch?`<div class="search-snippets" data-snippet-target="${esc(r.id)}"></div>`:''}${sessionNotice(r)}<div class="record-markers">${r.flags.length?chip('Verify source details','review-chip'):''}${localMarker}${unknownMarker}</div><footer><div class="card-actions">${actionButtons(r,t)}</div><small class="muted">${esc(source(r))}</small></footer></article>`}
-function currentLeader(){const list=records('Leader of the Week');const now=today();for(const r of list){const raw=r.fields.Dates||'';const m=raw.match(/^(\d{1,2})\s*\/\s*(\d{1,2})\s*-\s*(\d{1,2})\s*\/\s*(\d{1,2})$/);if(m){const sm=m[1].padStart(2,'0'),sd=m[2].padStart(2,'0'),em=m[3].padStart(2,'0'),ed=m[4].padStart(2,'0');const curYear=new Date().getFullYear();const sYear=sm==='12'&&em==='01'?String(curYear-1):String(curYear),eYear=String(curYear);const start=`${sYear}-${sm}-${sd}`,end=`${eYear}-${em}-${ed}`;if(now>=start&&now<=end)return r;}const isoM=raw.match(/^(\d{4}-\d{2}-\d{2})\s*(?:-|to)\s*(\d{4}-\d{2}-\d{2})$/);if(isoM&&now>=isoM[1]&&now<=isoM[2])return r;}return null;}
+function parseLeaderDateRange(raw){
+  if(!raw||typeof raw!=='string')return {hasDates:false,isExplicit:false,isYearless:false,isInvalid:false,start:'',end:'',raw:''};
+  const str=raw.trim();
+  const isoM=str.match(/^(\d{4}-\d{2}-\d{2})\s*(?:-|–|to)\s*(\d{4}-\d{2}-\d{2})$/);
+  if(isoM){
+    const s=isoM[1],e=isoM[2];
+    if(iso(s)&&iso(e)&&validDate(s)&&validDate(e)&&s<=e){
+      return {hasDates:true,isExplicit:true,isYearless:false,isInvalid:false,start:s,end:e,raw:str};
+    }
+    return {hasDates:true,isExplicit:false,isYearless:false,isInvalid:true,start:'',end:'',raw:str};
+  }
+  const usM=str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(?:-|–|to)\s*(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(usM){
+    const s=`${usM[3]}-${usM[1].padStart(2,'0')}-${usM[2].padStart(2,'0')}`;
+    const e=`${usM[6]}-${usM[4].padStart(2,'0')}-${usM[5].padStart(2,'0')}`;
+    if(iso(s)&&iso(e)&&validDate(s)&&validDate(e)&&s<=e){
+      return {hasDates:true,isExplicit:true,isYearless:false,isInvalid:false,start:s,end:e,raw:str};
+    }
+    return {hasDates:true,isExplicit:false,isYearless:false,isInvalid:true,start:'',end:'',raw:str};
+  }
+  const ylM=str.match(/^(\d{1,2})\s*\/\s*(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*\/\s*(\d{1,2})$/);
+  if(ylM){
+    const sm=parseInt(ylM[1],10),sd=parseInt(ylM[2],10),em=parseInt(ylM[3],10),ed=parseInt(ylM[4],10);
+    if(sm>=1&&sm<=12&&sd>=1&&sd<=31&&em>=1&&em<=12&&ed>=1&&ed<=31){
+      return {hasDates:true,isExplicit:false,isYearless:true,isInvalid:false,start:'',end:'',raw:str};
+    }
+    return {hasDates:true,isExplicit:false,isYearless:false,isInvalid:true,start:'',end:'',raw:str};
+  }
+  return {hasDates:Boolean(str),isExplicit:false,isYearless:false,isInvalid:false,start:'',end:'',raw:str};
+}
+function currentLeader(refDate=today()){
+  const list=records('Leader of the Week');
+  for(const r of list){
+    const parsed=parseLeaderDateRange(r.fields.Dates||'');
+    if(parsed.isExplicit&&parsed.start&&parsed.end){
+      if(refDate>=parsed.start&&refDate<=parsed.end)return r;
+    }
+  }
+  return null;
+}
 function sessionCountdown(isoDate){const d1=new Date(today()+'T00:00:00Z'),d2=new Date(isoDate+'T00:00:00Z');const diff=Math.round((d2-d1)/86400000);if(diff===0)return'Today';if(diff===1)return'Tomorrow';if(diff>1)return`In ${diff} days`;return'Concluded';}
 function backupAgeText(){if(!workspace.lastBackup)return'Never downloaded';const diffHours=Math.floor((Date.now()-new Date(workspace.lastBackup).getTime())/3600000);if(diffHours<1)return'< 1h ago';if(diffHours<24)return`${diffHours}h ago`;return`${Math.floor(diffHours/24)}d ago`;}
 
@@ -1509,7 +1569,7 @@ function filtered(){
       if(podcastPeriodFilter==='upcoming')rr=rr.filter(r=>getPodcastPeriod(r)==='upcoming');
       else if(podcastPeriodFilter==='past')rr=rr.filter(r=>getPodcastPeriod(r)==='past');
       else if(podcastPeriodFilter==='undated')rr=rr.filter(r=>getPodcastPeriod(r)==='undated');
-      else if(podcastPeriodFilter==='active')rr=rr.filter(r=>getPodcastPeriod(r)==='upcoming'||getPodcastPeriod(r)==='undated'||recordStage(r,'Podcast Episodes')!=='Released');
+      else if(podcastPeriodFilter==='active')rr=rr.filter(r=>getPodcastPeriod(r)==='upcoming'||getPodcastPeriod(r)==='undated'||(recordStage(r,'Podcast Episodes')!=='Release date passed'&&recordStage(r,'Podcast Episodes')!=='Released'));
     }
   }
   if(owner){if(tab==='Podcast Episodes')rr=rr.filter(r=>(r.fields['Audio editor']||'').split(/[/,;]/).map(s=>s.trim()).includes(owner)||(r.fields['Point person']||'').split(/[/,;]/).map(s=>s.trim()).includes(owner)||r.fields['Audio editor']===owner||r.fields['Point person']===owner);else if(tab==='Schema review')rr=rr.filter(r=>(r.fields['Video owner']||'').trim()===owner||(r.fields['Infographic owner']||'').trim()===owner);}
@@ -1861,10 +1921,34 @@ function crcDrawer(){const retired=records('CRC - retired');const c=getClassific
 function table(rr){
  if(window.innerWidth<=760){
   const cols=db[tab].columns.filter(c=>c!==titles[tab]);
-  const fields=(r,keys)=>keys.map(c=>`<div><dt>${esc(c)}</dt><dd>${esc(r.fields[c]||'—')}</dd></div>`).join('');
-  return `<section class="mobile-record-list">${rr.map(r=>{const c=typeof getRecordClassification==='function'?getRecordClassification(r,tab):null;const tagBadge=c&&c.category!==RECORD_CATEGORY.NAMED_ENTRY?`<span class="tag tag-heading" style="margin-bottom:6px;display:inline-block;">${esc(c.label||c.category)}</span>`:(c&&c.cohort?`<span class="tag tag-cohort" style="margin-bottom:6px;display:inline-block;">${esc(c.cohort)}</span>`:'');return `<article class="panel mobile-record">${tagBadge}<h2>${esc(title(r,tab))}</h2><dl>${fields(r,cols.slice(0,3))}</dl>${cols.length>3?`<details><summary>All fields (${cols.length-3} more)</summary><dl>${fields(r,cols.slice(3))}</dl></details>`:''}${sessionNotice(r)}${(!c || c.isSubstantive) && ['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs'].includes(tab)?`<p class="session-time">${esc(SessionCore.formatSessionTime(r))}</p>`:''}<div class="card-links">${urls(r,'Recording').map(u=>anchor(u,'Watch recording')).join('')}${urls(r,'Link').map(u=>anchor(u,'Open resource')).join('')}</div><div class="card-actions">${actionButtons(r,tab)}</div><small class="muted">${esc(source(r))}</small></article>`;}).join('')}</section>`;
- }
- const cols=[titles[tab],...db[tab].columns.filter(c=>c!==titles[tab])];return `<section class="panel table-panel"><table class="data-table"><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}<th>Action</th></tr></thead><tbody>${rr.map(r=>{const c=typeof getRecordClassification==='function'?getRecordClassification(r,tab):null;return `<tr>${cols.map(c=>`<td data-label="${esc(c)}">${esc(r.fields[c]||'—')}</td>`).join('')}<td>${sessionNotice(r)}${(!c || c.isSubstantive) && ['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs'].includes(tab)?`<p class="session-time">${esc(SessionCore.formatSessionTime(r))}</p>`:''}${actionButtons(r,tab)}</td></tr>`;}).join('')}</tbody></table></section>`}
+   const fields=(r,keys)=>keys.map(c=>{
+     if(tab==='Leader of the Week'&&c==='Dates'){
+       const parsed=parseLeaderDateRange(r.fields.Dates||'');
+       const notice=parsed.isYearless?' <span class="muted" style="font-size:11px;">(Year not specified)</span>':'';
+       return `<div><dt>${esc(c)}</dt><dd>${esc(r.fields[c]||'—')}${notice}</dd></div>`;
+     }
+     if(tab==='Podcast Episodes'&&c==='Release date'){
+       const relDate=r.fields['Release date'];
+       const notice=(relDate&&iso(relDate)&&validDate(relDate)&&relDate<=today())?' <span class="muted" style="font-size:11px;">(Release date passed)</span>':(!relDate?' <span class="muted" style="font-size:11px;">(Undated)</span>':'');
+       return `<div><dt>${esc(c)}</dt><dd>${esc(relDate||'—')}${notice}</dd></div>`;
+     }
+     return `<div><dt>${esc(c)}</dt><dd>${esc(r.fields[c]||'—')}</dd></div>`;
+   }).join('');
+   return `<section class="mobile-record-list">${rr.map(r=>{const c=typeof getRecordClassification==='function'?getRecordClassification(r,tab):null;const tagBadge=(tab==='Podcast Episodes')?`<span class="tag stage-tag" style="margin-bottom:6px;display:inline-block;">${esc(formatPodcastStageBadge(recordStage(r,'Podcast Episodes'),isPodcastStageInferred(r)))}</span>`:(c&&c.category!==RECORD_CATEGORY.NAMED_ENTRY?`<span class="tag tag-heading" style="margin-bottom:6px;display:inline-block;">${esc(c.label||c.category)}</span>`:(c&&c.cohort?`<span class="tag tag-cohort" style="margin-bottom:6px;display:inline-block;">${esc(c.cohort)}</span>`:''));return `<article class="panel mobile-record">${tagBadge}<h2>${esc(title(r,tab))}</h2><dl>${fields(r,cols.slice(0,3))}</dl>${cols.length>3?`<details><summary>All fields (${cols.length-3} more)</summary><dl>${fields(r,cols.slice(3))}</dl></details>`:''}${sessionNotice(r)}${(!c || c.isSubstantive) && ['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs'].includes(tab)?`<p class="session-time">${esc(SessionCore.formatSessionTime(r))}</p>`:''}<div class="card-links">${urls(r,'Recording').map(u=>anchor(u,'Watch recording')).join('')}${urls(r,'Link').map(u=>anchor(u,'Open resource')).join('')}</div><div class="card-actions">${actionButtons(r,tab)}</div><small class="muted">${esc(source(r))}</small></article>`;}).join('')}</section>`;
+  }
+  const cols=[titles[tab],...db[tab].columns.filter(c=>c!==titles[tab])];return `<section class="panel table-panel"><table class="data-table"><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}<th>Action</th></tr></thead><tbody>${rr.map(r=>{const c=typeof getRecordClassification==='function'?getRecordClassification(r,tab):null;return `<tr>${cols.map(c=>{
+    if(tab==='Leader of the Week'&&c==='Dates'){
+      const parsed=parseLeaderDateRange(r.fields.Dates||'');
+      const notice=parsed.isYearless?' <span class="muted" style="font-size:11px;">(Year not specified)</span>':'';
+      return `<td data-label="${esc(c)}">${esc(r.fields[c]||'—')}${notice}</td>`;
+    }
+    if(tab==='Podcast Episodes'&&c==='Release date'){
+      const relDate=r.fields['Release date'];
+      const notice=(relDate&&iso(relDate)&&validDate(relDate)&&relDate<=today())?' <span class="muted" style="font-size:11px;">(Release date passed)</span>':(!relDate?' <span class="muted" style="font-size:11px;">(Undated)</span>':'');
+      return `<td data-label="${esc(c)}">${esc(relDate||'—')}${notice}</td>`;
+    }
+    return `<td data-label="${esc(c)}">${esc(r.fields[c]||'—')}</td>`;
+  }).join('')}<td>${sessionNotice(r)}${(!c || c.isSubstantive) && ['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs'].includes(tab)?`<p class="session-time">${esc(SessionCore.formatSessionTime(r))}</p>`:''}${actionButtons(r,tab)}</td></tr>`;}).join('')}</tbody></table></section>`}
 function sopBanner(t){
   if(t==='Schema review'){
     return `<details class="panel sop-banner" ${window.innerWidth>760?'open':''}><summary>📋 Operational Guidelines &amp; Production Timeline</summary><div class="sop-content"><div class="sop-grid"><div><strong>Team Leads</strong><p>Umbish &amp; Sawsan · Core Team: Tansu, Masah, Oumaima, Rahul, Ibrahim, Parisa, Zakariyya, Simmy, Daniel, Anmolpreet</p></div><div><strong>Weekly Timeline</strong><p>• <strong>Friday:</strong> Submit draft video for review to <code>sawsansweilmeen2001@gmail.com</code> / <code>umbish21@gmail.com</code>.<br>• <strong>Monday:</strong> Upload final video &amp; infographic (Sawsan).</p></div><div><strong>Video Requirements</strong><p>• 2–3 min max (split longer schemas).<br>• Appear on camera directly (visually engaging; avoid voice-over only).<br>• Link to a CPS Episode with practical examples.<br><a class="button secondary small" href="https://clinicalproblemsolving.com/reasoning-content/" target="_blank" rel="noopener noreferrer">Reasoning Content ↗</a></p></div></div></div></details>`;
@@ -5128,7 +5212,8 @@ function viewDetailDialog(r, area){
   :'';
  const calBtnHtml=calendarButton(r,area);
 
- const cols=db[area]?.columns||Object.keys(r.fields||{});
+ const rawCols=db[area]?.columns||Object.keys(r.fields||{});
+ const cols=(area==='Podcast Episodes'&&r.fields?.Status&&!rawCols.includes('Status'))?[...rawCols,'Status']:rawCols;
  const fieldsHtml=cols.map(col=>{
   const rawVal=r.fields[col];
   const val=rawVal!==undefined&&rawVal!==null?String(rawVal).trim():'';
@@ -5143,7 +5228,18 @@ function viewDetailDialog(r, area){
    }).join(' ');
    valueContent=`<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">${val&&!val.startsWith('http')?`<span style="display:block;margin-bottom:4px;overflow-wrap:anywhere;">${esc(val)}</span>`:''}${linkBtns}</div>`;
   }else if(val){
-   valueContent=`<span class="detail-val-text">${esc(val)}</span>`;
+   if(area==='Leader of the Week'&&col==='Dates'){
+    const parsed=parseLeaderDateRange(val);
+    const notice=parsed.isYearless?' <span class="muted" style="font-size:11px;">(Year not specified)</span>':'';
+    valueContent=`<span class="detail-val-text">${esc(val)}</span>${notice}`;
+   }else if(area==='Podcast Episodes'&&col==='Release date'){
+    const notice=(val&&iso(val)&&validDate(val)&&val<=today())?' <span class="muted" style="font-size:11px;">(Release date passed · unconfirmed publication)</span>':(!val?' <span class="muted" style="font-size:11px;">(Undated)</span>':'');
+    valueContent=`<span class="detail-val-text">${esc(val)}</span>${notice}`;
+   }else if(area==='Podcast Episodes'&&col==='Status'){
+    valueContent=`<span class="detail-val-text">${esc(val)}</span> <span class="muted" style="font-size:11px;">(Explicit recorded status)</span>`;
+   }else{
+    valueContent=`<span class="detail-val-text">${esc(val)}</span>`;
+   }
   }else{
    valueContent=`<span class="muted">—</span>`;
   }
@@ -5151,9 +5247,11 @@ function viewDetailDialog(r, area){
   return `<div class="detail-field-item ${isMultiline?'full-width':''}"><dt class="detail-field-name">${esc(col)}</dt><dd class="detail-field-value">${valueContent}</dd></div>`;
  }).join('');
 
+ const podcastStageChip=(area==='Podcast Episodes')?`<span class="tag stage-tag">${esc(formatPodcastStageBadge(recordStage(r,'Podcast Episodes'),isPodcastStageInferred(r)))}</span>`:'';
  $('#dialog-content').innerHTML=`
   <div class="detail-meta-bar">
    <span class="tag">${esc(area)}</span>
+   ${podcastStageChip}
    <span class="muted" style="font-size:11px;">Identity: <code>${esc(r.id)}</code>${r.row?` · row ${esc(r.row)}`:''}</span>
    ${classChip}
    ${localChip}
@@ -5966,8 +6064,52 @@ function getPodcastPeriod(r,refDate=today()){
   if(!rel||!iso(rel))return 'undated';
   return rel<=refDate?'past':'upcoming';
 }
-function recordStage(r,t){const f=r.fields;if(t==='Schema review'){const st=(f.Status||'').trim();if(!st)return 'Draft / Needs review';const lower=st.toLowerCase();if(lower==='uploaded')return 'Uploaded';if(lower==='in review')return 'In review';if(lower==='ready')return 'Ready';if(lower==='recorded')return 'Recorded';if(lower==='assigned')return 'Assigned';return st;}if(t==='Podcast Episodes'){const custom=(f.Status||'').trim();if(custom)return custom;const rel=f['Release date'];if(rel&&iso(rel)&&rel<=today())return 'Released';if(!f['Audio editor'])return 'Needs Audio Editor';if(!f['Point person'])return 'Needs Point Person';return 'In Editing';}return f.Status||'Active';}
-function boardStages(rr,t){if(t==='Schema review'){const base=['Draft / Needs review','Assigned','In review','Ready','Uploaded'],custom=[...new Set(rr.map(r=>recordStage(r,t)))].filter(s=>!base.includes(s));return[...base.slice(0,base.length-1),...custom,base[base.length-1]];}if(t==='Podcast Episodes'){const base=['Needs Audio Editor','Needs Point Person','In Editing','Released'],custom=[...new Set(rr.map(r=>recordStage(r,t)))].filter(s=>!base.includes(s));return[...base.slice(0,base.length-1),...custom,base[base.length-1]];}return[...new Set(rr.map(r=>recordStage(r,t)))];}
+function isPodcastStageInferred(r){
+  const f=r?.fields||{};
+  return !((f.Status||'').trim());
+}
+function formatPodcastStageBadge(stage,isInferred){
+  if(isInferred&&['Needs Audio Editor','Needs Point Person','In Editing'].includes(stage)){
+    return `${stage} (suggested)`;
+  }
+  return stage;
+}
+function recordStage(r,t,refDate=today()){
+  const f=r.fields;
+  if(t==='Schema review'){
+    const st=(f.Status||'').trim();
+    if(!st)return 'Draft / Needs review';
+    const lower=st.toLowerCase();
+    if(lower==='uploaded')return 'Uploaded';
+    if(lower==='in review')return 'In review';
+    if(lower==='ready')return 'Ready';
+    if(lower==='recorded')return 'Recorded';
+    if(lower==='assigned')return 'Assigned';
+    return st;
+  }
+  if(t==='Podcast Episodes'){
+    const custom=(f.Status||'').trim();
+    if(custom)return custom;
+    const rel=(f['Release date']||'').trim();
+    const isValid=(typeof validDate==='function')?Boolean(validDate(rel)):(iso(rel)&&!isNaN(new Date(rel+'T12:00:00Z').getTime())&&new Date(rel+'T12:00:00Z').toISOString().slice(0,10)===rel);
+    if(rel&&iso(rel)&&isValid&&rel<=refDate)return 'Release date passed';
+    if(!f['Audio editor'])return 'Needs Audio Editor';
+    if(!f['Point person'])return 'Needs Point Person';
+    return 'In Editing';
+  }
+  return f.Status||'Active';
+}
+function boardStages(rr,t){
+  if(t==='Schema review'){
+    const base=['Draft / Needs review','Assigned','In review','Ready','Uploaded'],custom=[...new Set(rr.map(r=>recordStage(r,t)))].filter(s=>!base.includes(s));
+    return[...base.slice(0,base.length-1),...custom,base[base.length-1]];
+  }
+  if(t==='Podcast Episodes'){
+    const base=['Needs Audio Editor','Needs Point Person','In Editing','Release date passed'],custom=[...new Set(rr.map(r=>recordStage(r,t)))].filter(s=>!base.includes(s));
+    return[...base.slice(0,base.length-1),...custom,base[base.length-1]];
+  }
+  return[...new Set(rr.map(r=>recordStage(r,t)))];
+}
 function workflowCard(r,t,stages,stageIndex){
   const f=r.fields,stage=stages[stageIndex],prevStage=stageIndex>0?stages[stageIndex-1]:null,nextStage=stageIndex<stages.length-1?stages[stageIndex+1]:null;
   const isMobile=typeof window!=='undefined'&&(window.innerWidth||0)<=760;
@@ -5986,12 +6128,11 @@ function workflowCard(r,t,stages,stageIndex){
     else{quickBtn=`<button type="button" class="button secondary small" data-move-id="${esc(r.id)}" data-target-stage="Draft / Needs review">↺ Draft</button>`;}
   }else if(t==='Podcast Episodes'){
     if(stage==='Needs Audio Editor'){quickBtn=`<button type="button" class="button primary small quick-editor-btn" data-record-id="${esc(r.id)}">＋ Editor</button>`;}
-    else if(stage==='In Editing'){quickBtn=`<button type="button" class="button primary small" data-move-id="${esc(r.id)}" data-target-stage="Released">✓ Released</button>`;}
-    else if(stage==='Released'){quickBtn=`<button type="button" class="button secondary small" data-move-id="${esc(r.id)}" data-target-stage="Needs Audio Editor">↺ Needs Editor</button>`;}
+    else if(stage==='In Editing'){quickBtn=`<button type="button" class="button primary small" data-move-id="${esc(r.id)}" data-target-stage="Release date passed">✓ Release date passed</button>`;}
+    else if(stage==='Release date passed'||stage==='Released'){quickBtn=`<button type="button" class="button secondary small" data-move-id="${esc(r.id)}" data-target-stage="Needs Audio Editor">↺ Needs Editor</button>`;}
   }
-  // For Podcast Episodes with a date-inferred 'Released' stage, show a neutral label in the visible tag.
-  // The underlying stage value (used for data-lane-stage and move actions) remains 'Released'.
-  const displayStageTag=(t==='Podcast Episodes'&&stage==='Released')?'Past-date history':stage;
+  const isInferred=(t==='Podcast Episodes')?isPodcastStageInferred(r):false;
+  const displayStageTag=(t==='Podcast Episodes')?formatPodcastStageBadge(stage,isInferred):stage;
   return `<article class="work-card" draggable="true" data-drag-id="${esc(r.id)}"><div class="work-card-head"><span class="tag">${esc(displayStageTag)}</span><div class="record-markers">${r.flags.length?chip('Verify','review-chip'):''}${workspace.edits[r.id]?chip('Local','local-chip'):''}</div></div><h3>${esc(title(r,t))}</h3><div class="work-card-meta">${metaHtml}</div><div class="work-card-foot"><div class="work-card-actions">${prevStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(prevStage)}" title="Move left to ${esc(prevStage)}" aria-label="Move left to ${esc(prevStage)}">← ${esc(prevStage)}</button>`:''}${nextStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(nextStage)}" title="Move right to ${esc(nextStage)}" aria-label="Move right to ${esc(nextStage)}">${esc(nextStage)} →</button>`:''}${quickBtn}<button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="${esc(t)}">Details</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${workspace.favorites.includes(r.id)?'★':'☆'}</button></div></div></article>`;
 }
 function workflowBoard(rr,t){
@@ -6004,17 +6145,18 @@ function workflowBoard(rr,t){
   if(isMobile){
     return `<section class="pipeline-mobile">${stages.map((st,idx)=>{
       const list=byStage[st]||[];
-      const isHistory=(t==='Podcast Episodes'&&st==='Released');
+      const isHistory=(t==='Podcast Episodes'&&(st==='Release date passed'||st==='Released'));
       const isOpen=!isHistory||list.length<=5;
-      const displayStage=(t==='Podcast Episodes'&&st==='Released')?'Past-date history':st;
-      return `<details class="panel lane-accordion" data-lane-stage="${esc(st)}" ${isOpen?'open':''}><summary class="lane-head"><span>${esc(displayStage)}</span><span class="lane-count count-badge badge">${list.length}</span></summary><div class="lane-items">${list.map(r=>workflowCard(r,t,stages,idx)).join('')||'<div class="empty-state" style="padding:16px 8px;font-size:12px">No records in this stage</div>'}</div></details>`;
+      const displayStage=(t==='Podcast Episodes'&&isHistory)?'Release date passed':(t==='Podcast Episodes'?formatPodcastStageBadge(st,true):st);
+      return `<details class="panel lane-accordion" data-lane-stage="${esc(st)}" ${isOpen?'open':''}><summary class="lane-head"><span>${esc(displayStage)}</span>${isHistory?'<span class="muted lane-sub" style="font-size:11px;margin-left:6px;">Past-date history</span>':''}<span class="lane-count count-badge badge">${list.length}</span></summary><div class="lane-items">${list.map(r=>workflowCard(r,t,stages,idx)).join('')||'<div class="empty-state" style="padding:16px 8px;font-size:12px">No records in this stage</div>'}</div></details>`;
     }).join('')}</section>`;
   }
 
   return `<section class="pipeline-auto">${stages.map((st,idx)=>{
     const list=byStage[st]||[];
-    const displayStage=(t==='Podcast Episodes'&&st==='Released')?'Past-date history':st;
-    return `<div class="lane" data-lane-stage="${esc(st)}"><div class="lane-head"><span>${esc(displayStage)}</span><span class="lane-count count-badge">${list.length}</span></div><div class="lane-items">${list.map(r=>workflowCard(r,t,stages,idx)).join('')||'<div class="empty-state" style="padding:20px 8px;font-size:11px">No records in this stage</div>'}</div></div>`;
+    const isHistory=(t==='Podcast Episodes'&&(st==='Release date passed'||st==='Released'));
+    const displayStage=(t==='Podcast Episodes'&&isHistory)?'Release date passed':(t==='Podcast Episodes'?formatPodcastStageBadge(st,true):st);
+    return `<div class="lane" data-lane-stage="${esc(st)}"><div class="lane-head"><span>${esc(displayStage)}</span>${isHistory?'<span class="muted lane-sub" style="font-size:11px;margin-left:6px;">Past-date history</span>':''}<span class="lane-count count-badge">${list.length}</span></div><div class="lane-items">${list.map(r=>workflowCard(r,t,stages,idx)).join('')||'<div class="empty-state" style="padding:20px 8px;font-size:11px">No records in this stage</div>'}</div></div>`;
   }).join('')}</section>`;
 }
 function podcastQueueView(rr){
@@ -6028,7 +6170,9 @@ function podcastQueueView(rr){
 
   function renderQueueItem(r){
     const f=r.fields;
-    const stage=recordStage(r,'Podcast Episodes');
+    const stage=recordStage(r,'Podcast Episodes',now);
+    const isInferred=isPodcastStageInferred(r);
+    const stageBadge=formatPodcastStageBadge(stage,isInferred);
     const stageIdx=stages.indexOf(stage);
     const prevStage=stageIdx>0?stages[stageIdx-1]:null;
     const nextStage=stageIdx>=0&&stageIdx<stages.length-1?stages[stageIdx+1]:null;
@@ -6041,14 +6185,14 @@ function podcastQueueView(rr){
     if(stage==='Needs Audio Editor'){
       quickBtn=`<button type="button" class="button primary small quick-editor-btn" data-record-id="${esc(r.id)}">＋ Editor</button>`;
     }else if(stage==='In Editing'){
-      quickBtn=`<button type="button" class="button primary small" data-move-id="${esc(r.id)}" data-target-stage="Released">✓ Released</button>`;
-    }else if(stage==='Released'){
+      quickBtn=`<button type="button" class="button primary small" data-move-id="${esc(r.id)}" data-target-stage="Release date passed">✓ Release date passed</button>`;
+    }else if(stage==='Release date passed'||stage==='Released'){
       quickBtn=`<button type="button" class="button secondary small" data-move-id="${esc(r.id)}" data-target-stage="Needs Audio Editor">↺ Needs Editor</button>`;
     }
 
     const moveBtns=`${prevStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(prevStage)}" title="Move left to ${esc(prevStage)}" aria-label="Move left to ${esc(prevStage)}">← ${esc(prevStage)}</button>`:''}${nextStage?`<button type="button" class="button secondary small stage-nav-btn" data-move-id="${esc(r.id)}" data-target-stage="${esc(nextStage)}" title="Move right to ${esc(nextStage)}" aria-label="Move right to ${esc(nextStage)}">${esc(nextStage)} →</button>`:''}${quickBtn}`;
 
-    return `<article class="queue-item panel" data-record-id="${esc(r.id)}"><div class="queue-item-main"><div class="queue-item-head"><span class="tag stage-tag">${esc(stage)}</span>${series?`<span class="tag series-tag">${esc(series)}</span>`:''}<span class="tag period-tag ${period==='past'?'period-past':''}">${esc(periodBadge)}</span><div class="record-markers">${r.flags.length?chip('Verify','review-chip'):''}${workspace.edits[r.id]?chip('Local','local-chip'):''}</div></div><h3 class="queue-item-title">${esc(title(r,'Podcast Episodes'))}</h3><div class="queue-item-meta"><span class="meta-item"><strong>Release:</strong> ${esc(f['Release date']||'Undated')}</span><span class="meta-item"><strong>Point person:</strong> ${esc(f['Point person']||'Unassigned')}</span><span class="meta-item"><strong>Audio editor:</strong> ${esc(f['Audio editor']||'None')}</span></div>${isMobile?`<details class="work-card-more"><summary>More fields</summary><div class="work-card-expanded"><p><strong>Week:</strong> ${esc(f.Week||'—')}</p><p><strong>Source row:</strong> ${esc(source(r))}</p>${f.Status?`<p><strong>Custom status:</strong> ${esc(f.Status)}</p>`:''}</div></details>`:''}</div><div class="queue-item-actions">${moveBtns}<button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="Podcast Episodes">Details</button><button class="icon-button star ${isStarred?'is-starred':''}" aria-label="${isStarred?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${isStarred?'★':'☆'}</button></div></article>`;
+    return `<article class="queue-item panel" data-record-id="${esc(r.id)}"><div class="queue-item-main"><div class="queue-item-head"><span class="tag stage-tag">${esc(stageBadge)}</span>${series?`<span class="tag series-tag">${esc(series)}</span>`:''}<span class="tag period-tag ${period==='past'?'period-past':''}">${esc(periodBadge)}</span><div class="record-markers">${r.flags.length?chip('Verify','review-chip'):''}${workspace.edits[r.id]?chip('Local','local-chip'):''}</div></div><h3 class="queue-item-title">${esc(title(r,'Podcast Episodes'))}</h3><div class="queue-item-meta"><span class="meta-item"><strong>Release:</strong> ${esc(f['Release date']||'Undated')}</span><span class="meta-item"><strong>Point person:</strong> ${esc(f['Point person']||'Unassigned')}</span><span class="meta-item"><strong>Audio editor:</strong> ${esc(f['Audio editor']||'None')}</span></div>${isMobile?`<details class="work-card-more"><summary>More fields</summary><div class="work-card-expanded"><p><strong>Week:</strong> ${esc(f.Week||'—')}</p><p><strong>Source row:</strong> ${esc(source(r))}</p>${f.Status?`<p><strong>Custom status:</strong> ${esc(f.Status)}</p>`:''}</div></details>`:''}</div><div class="queue-item-actions">${moveBtns}<button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="Podcast Episodes">Details</button><button class="icon-button star ${isStarred?'is-starred':''}" aria-label="${isStarred?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${isStarred?'★':'☆'}</button></div></article>`;
   }
 
   if(podcastPeriodFilter==='upcoming'){
@@ -6061,8 +6205,8 @@ function podcastQueueView(rr){
     return `<section class="podcast-queue"><div class="queue-group panel"><div class="queue-group-head"><h3>Past-Date History (${pastList.length})</h3><span class="muted">Historical episodes by source release date</span></div><div class="queue-items-list">${pastList.length?pastList.map(renderQueueItem).join(''):'<div class="empty-state" style="padding:16px;">No past episodes found for this filter</div>'}</div></div></section>`;
   }
 
-  const activeUnreleased=pastList.filter(r=>recordStage(r,'Podcast Episodes')!=='Released');
-  const pastReleased=pastList.filter(r=>recordStage(r,'Podcast Episodes')==='Released');
+  const activeUnreleased=pastList.filter(r=>recordStage(r,'Podcast Episodes',now)!=='Release date passed'&&recordStage(r,'Podcast Episodes',now)!=='Released');
+  const pastReleased=pastList.filter(r=>recordStage(r,'Podcast Episodes',now)==='Release date passed'||recordStage(r,'Podcast Episodes',now)==='Released');
 
   const upcomingGroup=`<div class="queue-group panel"><div class="queue-group-head"><h3>Upcoming &amp; Scheduled Queue (${upcomingList.length})</h3><span class="muted">Episodes with future release dates</span></div><div class="queue-items-list">${upcomingList.length?upcomingList.map(renderQueueItem).join(''):'<div class="empty-state" style="padding:16px;">No scheduled upcoming episodes</div>'}</div></div>`;
   const activeWorkGroup=activeUnreleased.length?`<div class="queue-group panel"><div class="queue-group-head"><h3>In Progress (${activeUnreleased.length})</h3><span class="muted">Past-date items needing editor or point person</span></div><div class="queue-items-list">${activeUnreleased.map(renderQueueItem).join('')}</div></div>`:'';
@@ -6071,7 +6215,7 @@ function podcastQueueView(rr){
 
   return `<section class="podcast-queue">${upcomingGroup}${activeWorkGroup}${undatedGroup}${pastGroup}</section>`;
 }
-function applyStageChange(id,t,targetStage){const r=records(t).find(x=>x.id===id);if(!r)return;const updates={};if(t==='Schema review'){if(targetStage==='Uploaded'){updates.Status='uploaded';updates.Uploaded='Yes';}else if(targetStage==='Draft / Needs review'){updates.Status='';updates.Uploaded='';}else if(targetStage==='In review'){updates.Status='in review';}else if(targetStage==='Ready'){updates.Status='ready';}else if(targetStage==='Assigned'){updates.Status='assigned';}else{updates.Status=targetStage;}}else if(t==='Podcast Episodes'){if(targetStage==='Needs Audio Editor'){updates['Audio editor']='';}else if(targetStage==='Needs Point Person'){updates['Point person']='';}else if(targetStage==='In Editing'){if(!r.fields['Audio editor'])updates['Audio editor']='Zakariyya';}else if(targetStage==='Released'){updates['Release date']=today();}else if(db[t].columns.includes('Status')){updates.Status=targetStage;}}if(Object.keys(updates).length){if(mutate(w=>{w.edits[id]={...(w.edits[id]||{}),...updates};log(w,`Moved to ${targetStage}`,r,t);})){render();toast(`Moved to ${targetStage}`);}}}
+function applyStageChange(id,t,targetStage){const r=records(t).find(x=>x.id===id);if(!r)return;const updates={};if(t==='Schema review'){if(targetStage==='Uploaded'){updates.Status='uploaded';updates.Uploaded='Yes';}else if(targetStage==='Draft / Needs review'){updates.Status='';updates.Uploaded='';}else if(targetStage==='In review'){updates.Status='in review';}else if(targetStage==='Ready'){updates.Status='ready';}else if(targetStage==='Assigned'){updates.Status='assigned';}else{updates.Status=targetStage;}}else if(t==='Podcast Episodes'){if(targetStage==='Needs Audio Editor'){updates['Audio editor']='';}else if(targetStage==='Needs Point Person'){updates['Point person']='';}else if(targetStage==='In Editing'){if(!r.fields['Audio editor'])updates['Audio editor']='Zakariyya';}else if(targetStage==='Release date passed'||targetStage==='Released'){updates['Release date']=today();}else if(db[t].columns.includes('Status')){updates.Status=targetStage;}}if(Object.keys(updates).length){if(mutate(w=>{w.edits[id]={...(w.edits[id]||{}),...updates};log(w,`Moved to ${targetStage}`,r,t);})){render();toast(`Moved to ${targetStage}`);}}}
 function quickAssignEditor(id){const r=records('Podcast Episodes').find(x=>x.id===id);if(!r)return;const val=prompt('Enter Audio Editor name:',r.fields['Audio editor']||'Zakariyya');if(val!==null&&val.trim()){if(mutate(w=>{w.edits[id]={...(w.edits[id]||{}),'Audio editor':val.trim()};log(w,'Assigned Audio Editor',r,'Podcast Episodes');})){render();toast(`Audio editor assigned: ${val.trim()}`);}}}
 function bindBoardEvents(t){document.querySelectorAll('[data-drag-id]').forEach(el=>{el.ondragstart=e=>e.dataTransfer.setData('text/plain',el.dataset.dragId);});document.querySelectorAll('[data-lane-stage]').forEach(lane=>{lane.ondragover=e=>{e.preventDefault();lane.classList.add('drag-over');};lane.ondragleave=()=>lane.classList.remove('drag-over');lane.ondrop=e=>{e.preventDefault();lane.classList.remove('drag-over');const id=e.dataTransfer.getData('text/plain');if(id)applyStageChange(id,t,lane.dataset.laneStage);};});document.querySelectorAll('[data-move-id]').forEach(b=>{b.onclick=()=>applyStageChange(b.dataset.moveId,t,b.dataset.targetStage);});document.querySelectorAll('.quick-editor-btn').forEach(b=>{b.onclick=()=>quickAssignEditor(b.dataset.recordId);});}
 
@@ -6141,4 +6285,8 @@ if(typeof globalThis!=='undefined'){
   globalThis.podcastQueueView=podcastQueueView;
   globalThis.recordStage=recordStage;
   globalThis.boardStages=boardStages;
+  globalThis.parseLeaderDateRange=parseLeaderDateRange;
+  globalThis.currentLeader=currentLeader;
+  globalThis.isPodcastStageInferred=isPodcastStageInferred;
+  globalThis.formatPodcastStageBadge=formatPodcastStageBadge;
 }

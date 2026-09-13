@@ -10,22 +10,26 @@ test('local server serves assets but hides repository and original workbook',asy
  const {createServer}=require('../scripts/serve.cjs');const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));
  try{const base=`http://127.0.0.1:${server.address().port}`;for(const url of ['/','/app.js','/session-core.js','/styles.css','/workbook.json'])assert.equal((await fetch(base+url)).status,200);for(const url of ['/.git/config','/.env','/README.md','/upload/file.xlsx','/%2e%2e/package.json','/historical-contributions.json','/data/logbook-identities.json'])assert.equal((await fetch(base+url)).status,404)}finally{await new Promise(r=>server.close(r))}
 });
-test('Leader of the Week source dates establish current leader or null when out of range',()=>{
+test('Leader of the Week yearless snapshot records do not designate current leader without explicit year',()=>{
+ const appCode=fs.readFileSync(path.join(root,'app.js'),'utf8');
  const data=JSON.parse(fs.readFileSync(path.join(root,'workbook.json'),'utf8'));
- const leaders=data['Leader of the Week'].records;
- function getLeaderForDate(dateStr){
-  for(const r of leaders){
-   const m=(r.fields.Dates||'').match(/^(\d{1,2})\/(\d{1,2})\s*-\s*(\d{1,2})\/(\d{1,2})$/);
-   if(m){
-    const sYear=m[1]==='12'&&m[3]==='01'?'2025':'2026';
-    const start=`${sYear}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`,end=`2026-${m[3].padStart(2,'0')}-${m[4].padStart(2,'0')}`;
-    if(dateStr>=start&&dateStr<=end)return r;
-   }
-  }
-  return null;
- }
-  assert.equal(getLeaderForDate('2026-09-07')?.fields.Member,'Ravi');
-  assert.equal(getLeaderForDate('2026-10-15'),null);
+ const sandbox={
+   db: data,
+   records: t=>data[t]?.records||[],
+   iso: v=>/^\d{4}-\d{2}-\d{2}$/.test(v),
+   validDate: s=>{const d=new Date(s+'T12:00:00Z');return Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==s?'':s;},
+   today: ()=>'2026-09-07'
+ };
+ vm.runInNewContext(appCode.slice(appCode.indexOf('function parseLeaderDateRange'), appCode.indexOf('function sessionCountdown')), sandbox);
+ // All snapshot records are yearless, so currentLeader must be null for any reference date
+ assert.equal(sandbox.currentLeader('2026-09-07'), null, 'Yearless dates must not claim active leader');
+ assert.equal(sandbox.currentLeader('2026-09-13'), null, 'Yearless dates must not claim active leader');
+ // An explicit range correctly matches
+ const explicitList=[{ fields: { Dates: '2026-09-07 - 2026-09-13', Member: 'Ravi' } }];
+ sandbox.records=()=>explicitList;
+ assert.equal(sandbox.currentLeader('2026-09-07')?.fields.Member, 'Ravi', 'Explicit range matches start');
+ assert.equal(sandbox.currentLeader('2026-09-10')?.fields.Member, 'Ravi', 'Explicit range matches midpoint');
+ assert.equal(sandbox.currentLeader('2026-09-14'), null, 'Explicit range returns null when out of range');
 });
 
 test('app.js parses cleanly and contains workflow board functions', () => {
@@ -81,7 +85,7 @@ test('Podcast Episodes stage derivation accurately classifies editor readiness a
   assert.equal(sandbox.recordStage(inEditing, 'Podcast Episodes'), 'In Editing');
 
   const released = { fields: { 'Audio editor': 'Sumeet', 'Point person': '', 'Release date': '2020-11-19' } };
-  assert.equal(sandbox.recordStage(released, 'Podcast Episodes'), 'Released');
+  assert.equal(sandbox.recordStage(released, 'Podcast Episodes'), 'Release date passed');
 
   const customStatus = { fields: { Status: 'Recording in progress', 'Audio editor': '', 'Point person': '' } };
   assert.equal(sandbox.recordStage(customStatus, 'Podcast Episodes'), 'Recording in progress');
@@ -89,7 +93,7 @@ test('Podcast Episodes stage derivation accurately classifies editor readiness a
   const stages = sandbox.boardStages([needsEditor, inEditing, released, customStatus], 'Podcast Episodes');
   assert(stages.includes('Needs Audio Editor'));
   assert(stages.includes('In Editing'));
-  assert(stages.includes('Released'));
+  assert(stages.includes('Release date passed'));
   assert(stages.includes('Recording in progress'), 'Custom podcast status must be visible');
 });
 
