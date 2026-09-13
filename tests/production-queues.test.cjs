@@ -185,6 +185,9 @@ test('Podcast Queue View: displays upcoming queue, undated queue, and past-date 
   assert.ok(html.includes('Undated Episodes (6)'), 'Undated episodes group with count present');
   assert.ok(html.includes('Past-Date History'), 'Past-date history group present');
   assert.ok(!html.includes('Published History'), 'Neutral label used without asserting publication');
+  // The badge must be neutral — source date reached, not asserting confirmed publication
+  assert.ok(html.includes('source date reached'), 'Past-history badge uses neutral "source date reached" label');
+  assert.ok(!html.match(/\d+ released(?!"|')/), 'Past-history badge must not say "N released" (implies confirmed publication)');
   assert.ok(html.includes('Point person:'), 'Point person field displayed');
   assert.ok(html.includes('Audio editor:'), 'Audio editor field displayed');
   assert.ok(html.includes('stage-nav-btn'), 'Accessible stage navigation buttons rendered');
