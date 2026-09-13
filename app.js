@@ -1430,9 +1430,16 @@ function filtered(){
   let rr=records().filter(r=>Object.values(r.fields).join(' ').toLowerCase().includes((sectionQuery||query).toLowerCase()));
   if(['Morning Report','CPS Academy VMRs'].includes(tab))rr=rr.filter(r=>SessionCore.matchesFacets(r,{type:sessionType,facilitator:sessionFacilitator,gapsOnly},mrGaps));
   if(tab==='Morning Report'){
-    if(filter==='All history'||filter==='All')mrScheduleRangeMode='all';
-    else if(filter==='Unresolved dates'||filter==='Unresolved source dates')mrScheduleRangeMode='unresolved';
-    else if(filter==='This Week'){mrScheduleRangeMode='week';mrScheduleWeekStart=getDefaultScheduleWeekStart();}
+    if(filter==='Unresolved dates'||filter==='Unresolved source dates'||mrScheduleRangeMode==='unresolved'){
+      mrScheduleRangeMode='unresolved';
+    }else if(filter==='All history'||(filter==='All'&&mrScheduleRangeMode==='all')){
+      mrScheduleRangeMode='all';
+    }else if(filter==='This Week'){
+      mrScheduleRangeMode='week';
+      mrScheduleWeekStart=getDefaultScheduleWeekStart();
+    }else if(filter==='All'){
+      mrScheduleRangeMode='all';
+    }
     if(!dateFrom&&!dateTo){
       if(mrScheduleRangeMode==='unresolved'){
         rr=rr.filter(r=>!recordDate(r));
@@ -1583,8 +1590,12 @@ function bindWeekNavigatorEvents() {
     btn.onclick = () => {
       const scope = btn.dataset.scheduleScope;
       mrScheduleRangeMode = scope;
-      if (scope === 'all' || scope === 'unresolved') filter = 'All';
-      else if (scope === 'week' && !mrScheduleWeekStart) mrScheduleWeekStart = getDefaultScheduleWeekStart();
+      if (scope === 'all') filter = 'All history';
+      else if (scope === 'unresolved') filter = 'Unresolved dates';
+      else if (scope === 'week') {
+        filter = 'Upcoming';
+        if (!mrScheduleWeekStart) mrScheduleWeekStart = getDefaultScheduleWeekStart();
+      }
       saveSectionState('Morning Report');
       render();
     };
@@ -1635,7 +1646,7 @@ function listing(){
 
   const field=['Morning Report','CPS Academy VMRs'].includes(tab)?'':facets[tab];
   const options=field?[...new Set(records().map(r=>r.fields[field]).filter(Boolean))].sort():[];
-  const filters=['All',...(['Morning Report','CPS Academy VMRs'].includes(tab)?['Upcoming','This Week','Needs Volunteers','My Sessions','Staffing gaps','Missing facilitator']:[]),...(db[tab].columns.includes('Recording')?['Has recording']:[]),'Pinned','Needs review','Local edits'];
+  const filters=['All',...(['Morning Report','CPS Academy VMRs'].includes(tab)?['Upcoming','This Week','Needs Volunteers','My Sessions','Staffing gaps','Missing facilitator']:[]),...(tab==='Morning Report'?['All history','Unresolved dates']:[]),...(db[tab].columns.includes('Recording')?['Has recording']:[]),'Pinned','Needs review','Local edits'];
 
   const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Matrix</button><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Agenda</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:['Podcast Episodes','Schema review'].includes(tab)?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;
 
@@ -1695,6 +1706,7 @@ function listing(){
     areaPicker() +
     `<div class="toolbar area-tabs">${groups[Object.keys(groups).find(g=>groups[g].includes(tab))].map(t=>`<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>` +
     renderFilters(rr, tab, filters, field, options, viewSwitcher) +
+    (tab==='Morning Report'?renderWeekNavigator(rr):'') +
     `<p class="muted results-count" id="results-count-announcer" aria-live="polite">${formatResultsCount(rr,tab,records())}${yearFilter!=='all'?(yearFilter==='unresolved'?' · Unresolved / undated records':' · Year '+yearFilter):''}${sort==='date'?' · Unresolved dates follow recognised dates':''}${dateFrom||dateTo?' · Records with unresolved dates are excluded from this range':''}</p>` +
     resultsHeading +
     paginationTop +
@@ -1703,12 +1715,26 @@ function listing(){
     (tab==='CRC'&&db['CRC - retired']?crcDrawer():'');
 
   bindExtraFilters();
+  if(tab==='Morning Report')bindWeekNavigatorEvents();
   if($('#area-picker'))$('#area-picker').onchange=e=>navigate(e.target.value);
-  $('#filter').onchange=e=>{filter=e.target.value;page=0;render()};
+  $('#filter').onchange=e=>{
+    filter=e.target.value;
+    if(tab==='Morning Report'){
+      if(filter==='All history'||filter==='All')mrScheduleRangeMode='all';
+      else if(filter==='Unresolved dates'||filter==='Unresolved source dates')mrScheduleRangeMode='unresolved';
+      else if(filter==='This Week'){mrScheduleRangeMode='week';mrScheduleWeekStart=getDefaultScheduleWeekStart();}
+      else if(filter==='Upcoming')mrScheduleRangeMode='week';
+    }
+    page=0;render();
+  };
   if($('#facet'))$('#facet').onchange=e=>{facet=e.target.value;page=0;render()};
   $('#sort').onchange=e=>{sort=e.target.value;render()};
   if($('#show-all-toggle'))$('#show-all-toggle').onchange=e=>{showAll=e.target.checked;page=0;render()};
-  $('#clear').onclick=()=>{query='';filter='All';facet='';owner='';sessionType='';sessionFacilitator='';gapsOnly=false;sectionQuery='';skill='';dateFrom='';dateTo='';yearFilter='all';sort=tab==='CPS Academy VMRs'?'date':'source';page=0;showAll=false;$('#global-search').value='';render()};
+  $('#clear').onclick=()=>{
+    query='';filter='All';facet='';owner='';sessionType='';sessionFacilitator='';gapsOnly=false;sectionQuery='';skill='';dateFrom='';dateTo='';yearFilter='all';sort=tab==='CPS Academy VMRs'?'date':'source';page=0;showAll=false;$('#global-search').value='';
+    if(tab==='Morning Report'){mrScheduleRangeMode='week';mrScheduleWeekStart=getDefaultScheduleWeekStart();}
+    render();
+  };
   if($('#view'))$('#view').onclick=()=>{
     if(isHistorical){
       const isMobile = typeof window !== 'undefined' && window.innerWidth <= 760;
@@ -5440,15 +5466,57 @@ if(typeof Identity!=='undefined'){
     if(tab==='profile/logbook'||tab==='Workspace'||tab==='Home')render();
   });
 }
+function parseScheduleHash(hashStr){
+  if(!hashStr||!hashStr.startsWith('Morning Report'))return null;
+  const parts=hashStr.split('/');
+  if(parts.length>1){
+    const sub=parts[1];
+    if(sub==='history'||sub==='all')return{mode:'all'};
+    if(sub==='unresolved')return{mode:'unresolved'};
+    if(sub==='week'&&parts[2]){
+      const b=typeof SessionCore!=='undefined'&&SessionCore.getWeekBounds?SessionCore.getWeekBounds(parts[2]):null;
+      return{mode:'week',start:b?b.start:parts[2]};
+    }
+  }
+  return null;
+}
 window.addEventListener('hashchange',()=>{
   let t=decodeURIComponent(location.hash.slice(1));
   if(t.startsWith('/'))t=t.slice(1);
   if(t==='admin/issues'){if(!isAdmin()){toast('Admin access required.');navigate('Home');return}tab='admin/issues';render();window.scrollTo(0,0);return}
   if(t==='profile/logbook'){tab='profile/logbook';render();window.scrollTo(0,0);return}
+  const mrParsed=parseScheduleHash(t);
+  if(mrParsed){
+    mrScheduleRangeMode=mrParsed.mode;
+    if(mrParsed.mode==='week'){
+      if(mrParsed.start)mrScheduleWeekStart=mrParsed.start;
+      filter='Upcoming';
+    }else if(mrParsed.mode==='all'){
+      filter='All history';
+    }else if(mrParsed.mode==='unresolved'){
+      filter='Unresolved dates';
+    }
+    t='Morning Report';
+  }
   if(t!==tab&&(db[t]||['Home','Workspace'].includes(t)))navigate(t);
+  else if(t==='Morning Report'&&mrParsed)render();
 });
 const loadWb = (typeof OfflineManager !== 'undefined' && OfflineManager.loadWorkbook) ? OfflineManager.loadWorkbook : () => fetch('workbook.json').then(r => { if (!r.ok) throw Error(); return r.json(); });
-loadWb().then(data=>{db=data;for(const[t,grp]of Object.entries(db))for(const r of grp.records)r._search=buildSearchIndex(r,t);let hash=decodeURIComponent(location.hash.slice(1));if(hash.startsWith('/'))hash=hash.slice(1);if(hash==='admin/issues'){if(isAdmin())tab='admin/issues';else tab='Home';}else if(hash==='profile/logbook'){tab='profile/logbook';}else if(db[hash]||['Home','Workspace'].includes(hash))tab=hash;if(tab==='Morning Report')mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'agenda':'matrix';else if(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab])mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'cards':'table';sort=tab==='CPS Academy VMRs'?'date':'source';filter=tab==='Morning Report'?'Upcoming':'All';render();if(storageIssue)toast('Browser storage could not be read. Export changes before leaving.')}).catch(()=>{
+loadWb().then(data=>{db=data;for(const[t,grp]of Object.entries(db))for(const r of grp.records)r._search=buildSearchIndex(r,t);let hash=decodeURIComponent(location.hash.slice(1));if(hash.startsWith('/'))hash=hash.slice(1);if(hash==='admin/issues'){if(isAdmin())tab='admin/issues';else tab='Home';}else if(hash==='profile/logbook'){tab='profile/logbook';}else if(db[hash]||['Home','Workspace'].includes(hash))tab=hash;
+const mrParsed=parseScheduleHash(hash);
+if(mrParsed){
+  mrScheduleRangeMode=mrParsed.mode;
+  if(mrParsed.mode==='week'){
+    if(mrParsed.start)mrScheduleWeekStart=mrParsed.start;
+    filter='Upcoming';
+  }else if(mrParsed.mode==='all'){
+    filter='All history';
+  }else if(mrParsed.mode==='unresolved'){
+    filter='Unresolved dates';
+  }
+  tab='Morning Report';
+}
+if(tab==='Morning Report')mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'agenda':'matrix';else if(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab])mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'cards':'table';sort=tab==='CPS Academy VMRs'?'date':'source';if(!mrParsed)filter=tab==='Morning Report'?'Upcoming':'All';render();if(storageIssue)toast('Browser storage could not be read. Export changes before leaving.')}).catch(()=>{
   $('#page').innerHTML='<div class="empty-state"><h1>Could not load the workbook</h1><p>You appear to be offline without a cached copy, or the network request failed.</p><div style="margin-top:16px;"><button class="button primary" onclick="location.reload()">Retry connection</button></div></div>';
 });
 
@@ -5667,7 +5735,33 @@ function matrixView(rr){
  const windowToggleHtml = flatItems.length > threshold ? `<div class="window-toggle-bar"><span>Showing virtualized window (<strong>${flatItems.length}</strong> total items)</span><button type="button" class="button secondary small window-toggle-btn" id="matrix-window-toggle-btn">Show all for Find (Ctrl+F)</button></div>` : '';
  return `<section class="matrix-view">${scheduleSummary(rr)}${windowToggleHtml}<div class="matrix-card"><div class="matrix-container"><table class="matrix-table"><thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows||'<tr><td colspan="7">No dated sessions match these filters.</td></tr>'}</tbody></table></div></div>${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates</h2>${unresolved.map(r=>agendaCard(r,true)).join('')}</section>`:''}</section>`;
 }
-function agendaView(rr){const {weeks,unresolved}=scheduleGroups(rr);return `<section class="agenda-view">${scheduleSummary(rr)}${weeks.map(w=>`<section class="agenda-week panel"><div class="agenda-week-head"><h3>${esc(weekLabel(w.start,w.end))}</h3><span>${w.records.length} sessions</span></div><div class="agenda-session-list">${w.records.map(r=>agendaCard(r)).join('')}</div></section>`).join('')}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates</h2>${unresolved.map(r=>agendaCard(r,true)).join('')}</section>`:''}</section>`;}
+function agendaView(rr){
+ const {weeks,unresolved}=scheduleGroups(rr);
+ if(mrScheduleRangeMode==='unresolved'){
+   const unres = rr.filter(r=>!recordDate(r));
+   return `<section class="agenda-view">${scheduleSummary(rr)}<section class="panel unresolved-panel"><h2>Unresolved source dates (${unres.length})</h2><p class="muted">These records have spreadsheet errors, TBD values, or unrecognised date strings in the source workbook. They are excluded from calendar weeks until reviewed.</p><div class="agenda-session-list">${unres.map(r=>agendaCard(r,true)).join('')}</div></section></section>`;
+ }
+ if(!weeks.length&&!unresolved.length){
+   const currentWeekStart = mrScheduleWeekStart || getDefaultScheduleWeekStart();
+   const bounds = typeof SessionCore !== 'undefined' && SessionCore.getWeekBounds ? SessionCore.getWeekBounds(currentWeekStart) : null;
+   const wLbl = bounds ? weekLabel(bounds.start, bounds.end) : `Week of ${currentWeekStart}`;
+   return `<section class="agenda-view">${scheduleSummary(rr)}<section class="agenda-week panel empty-agenda-week"><div class="empty-state"><h3>No sessions scheduled for ${esc(wLbl)}</h3><p class="muted">No Morning Report sessions match your active filters for this week.</p><div class="card-actions" style="justify-content:center;gap:8px;margin-top:12px;"><button type="button" class="button secondary small" data-week-jump="${esc(getDefaultScheduleWeekStart())}">Jump to This week</button><button type="button" class="button secondary small" data-schedule-scope="all">View All history</button></div></div></section></section>`;
+ }
+ return `<section class="agenda-view">${scheduleSummary(rr)}${weeks.map(w=>{
+   const dayGroups=new Map();
+   for(const r of w.records){
+     const d=recordDate(r)||'Date TBD';
+     if(!dayGroups.has(d))dayGroups.set(d,[]);
+     dayGroups.get(d).push(r);
+   }
+   const dayGroupsHtml=[...dayGroups.entries()].map(([dateStr,dayRecs])=>{
+     const dObj=new Date(dateStr+'T12:00:00Z');
+     const dayLabel=Number.isNaN(dObj.getTime())?dateStr:dObj.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric',timeZone:'UTC'});
+     return `<div class="agenda-day-group"><div class="agenda-day-head"><h4>${esc(dayLabel)}</h4><span class="badge">${dayRecs.length} session${dayRecs.length===1?'':'s'}</span></div><div class="agenda-session-list">${dayRecs.map(r=>agendaCard(r)).join('')}</div></div>`;
+   }).join('');
+   return `<section class="agenda-week panel"><div class="agenda-week-head"><h3>${esc(weekLabel(w.start,w.end))}</h3><span>${w.records.length} sessions</span></div>${dayGroupsHtml}</section>`;
+ }).join('')}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
+}
 function agendaCard(r,isUnresolved=false){return `<article class="agenda-card"><div class="agenda-card-date"><strong>${esc(recordDate(r)||dateValue(r)||'Date TBD')}</strong></div><div class="agenda-card-body"><div class="agenda-card-top"><span class="tag">${esc(r.fields.Type||'Morning Report')}</span><span class="muted agenda-times">${esc(SessionCore.formatSessionTime(r))}</span></div>${staffingGrid(r)}</div><div class="agenda-card-actions">${sessionNotice(r)}${calendarButton(r,'Morning Report',{compact:true})}<button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" data-star="${esc(r.id)}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record">${workspace.favorites.includes(r.id)?'★':'☆'}</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></article>`;}
 function recordStage(r,t){const f=r.fields;if(t==='Schema review'){const st=(f.Status||'').trim();if(!st)return 'Draft / Needs review';const lower=st.toLowerCase();if(lower==='uploaded')return 'Uploaded';if(lower==='in review')return 'In review';if(lower==='ready')return 'Ready';if(lower==='recorded')return 'Recorded';if(lower==='assigned')return 'Assigned';return st;}if(t==='Podcast Episodes'){const custom=(f.Status||'').trim();if(custom)return custom;const rel=f['Release date'];if(rel&&iso(rel)&&rel<=today())return 'Released';if(!f['Audio editor'])return 'Needs Audio Editor';if(!f['Point person'])return 'Needs Point Person';return 'In Editing';}return f.Status||'Active';}
 function boardStages(rr,t){if(t==='Schema review'){const base=['Draft / Needs review','Assigned','In review','Ready','Uploaded'],custom=[...new Set(rr.map(r=>recordStage(r,t)))].filter(s=>!base.includes(s));return[...base.slice(0,base.length-1),...custom,base[base.length-1]];}if(t==='Podcast Episodes'){const base=['Needs Audio Editor','Needs Point Person','In Editing','Released'],custom=[...new Set(rr.map(r=>recordStage(r,t)))].filter(s=>!base.includes(s));return[...base.slice(0,base.length-1),...custom,base[base.length-1]];}return[...new Set(rr.map(r=>recordStage(r,t)))];}
