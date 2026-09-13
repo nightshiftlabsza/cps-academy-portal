@@ -232,7 +232,8 @@ test('Page clamping when record count drops', () => {
   h.clampPageForSection('CPS Academy VMRs', 5);
   // Total CPS Academy VMRs records in workbook is > 12, so check clamp bounds
   const total = h.testDb['CPS Academy VMRs'].records.length;
-  const maxPage = Math.max(0, Math.ceil(total / 12) - 1);
+  const pageSize = h.HISTORICAL_SUMMARY_CONFIG?.['CPS Academy VMRs']?.pageSize || 12;
+  const maxPage = Math.max(0, Math.ceil(total / pageSize) - 1);
   const vars = h.getStateVariables();
   assert.ok(vars.page <= maxPage, `Page ${vars.page} must be clamped to maxPage ${maxPage}`);
   assert.ok(vars.page >= 0, 'Page must be >= 0');

@@ -144,6 +144,17 @@
     return matches.length === 1 ? matches[0] : null;
   }
   function addDays(date, days) { return new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10); }
+  function getWeekBounds(value) {
+    const dStr = parseDate(value);
+    if (!dStr) return null;
+    const d = new Date(`${dStr}T12:00:00Z`);
+    const day = d.getUTCDay();
+    const diffToMon = day === 0 ? -6 : 1 - day;
+    const start = addDays(dStr, diffToMon);
+    const end = addDays(start, 6);
+    return { start, end, convention: 'Monday to Sunday (UTC source date)' };
+  }
+  function addWeeks(isoDate, deltaWeeks) { return addDays(isoDate, deltaWeeks * 7); }
   function clockLabel(c) { return `${c.hour % 12 || 12}:${String(c.minute).padStart(2, '0')}${c.second ? ':' + String(c.second).padStart(2, '0') : ''} ${c.hour < 12 ? 'AM' : 'PM'}`; }
   function sourceTimeLabel(fields) {
     return TIME_FIELDS.map((key, i) => fields[key] ? `${text(fields[key]).trim()}${/\b(?:PST|PDT|EST|EDT|PT|ET)\b/i.test(fields[key]) ? '' : i === 0 ? ' PT' : ' ET'}` : '').filter(Boolean).join(' / ') || text(fields['Date / time (source)']) || 'Time TBD';
@@ -358,6 +369,8 @@
     matchesFacets,
     invalidateRecord,
     clearCaches,
-    getCacheStats
+    getCacheStats,
+    getWeekBounds,
+    addWeeks
   });
 });

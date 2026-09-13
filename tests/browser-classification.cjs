@@ -98,15 +98,17 @@ const { chromium } = require('playwright-core');
     const editBtn = p.locator('[data-open="CRC - retired:418"]');
     await editBtn.click();
     await p.locator('#detail-dialog[open]').waitFor();
+    const editOnDevice = p.locator('#edit-record-btn');
+    if (await editOnDevice.count() > 0) await editOnDevice.click();
 
     // Fill Mentee field and save
     const menteeInput = p.locator('#dialog-content [data-field="MENTEE"]');
     await menteeInput.fill('Dr. Jane Specialist');
     await p.locator('#dialog-primary').click();
 
-    // Card should now display dynamic promotion badge
-    await p.locator('.hub-card:has-text("Dr. Jane Specialist")').waitFor();
-    const promotedCard = p.locator('.hub-card:has-text("Dr. Jane Specialist")');
+    // Card or row should now display dynamic promotion badge
+    await p.locator(':is(.hub-card, .crc-case-row, .crc-mobile-card):has-text("Dr. Jane Specialist")').waitFor();
+    const promotedCard = p.locator(':is(.hub-card, .crc-case-row, .crc-mobile-card):has-text("Dr. Jane Specialist")');
     const promotedBadge = await promotedCard.locator('.local-chip:has-text("Locally edited from placeholder")').count();
     assert.equal(promotedBadge, 1, 'Promoted card must display locally edited from placeholder chip');
 

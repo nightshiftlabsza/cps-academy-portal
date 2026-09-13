@@ -150,6 +150,19 @@ function getMemberCohortByRow(row) {
   return 'Members';
 }
 
+function getResidencyMonthByRecord(record) {
+  if (!record) return 'October';
+  if (RESIDENCY_MONTH_HEADINGS.has(record.id)) {
+    return RESIDENCY_MONTH_HEADINGS.get(record.id).month;
+  }
+  const r = record.row;
+  if (r < 8) return 'October';
+  if (r < 13) return 'November';
+  if (r < 17) return 'December';
+  if (r < 21) return 'January';
+  return 'February';
+}
+
 function classifyRecord(record, t = (record?.tab || (typeof tab !== 'undefined' ? tab : '')), edits = null) {
   if (!record || typeof record !== 'object' || !record.id || !record.fields || typeof record.fields !== 'object') {
     return { category: RECORD_CATEGORY.UNKNOWN, isStructural: false, isSubstantive: false, label: 'Invalid record', reviewNotice: 'Record data is null or invalid' };
@@ -181,6 +194,7 @@ function classifyRecord(record, t = (record?.tab || (typeof tab !== 'undefined' 
   }
 
   if (effectiveTab === 'Residency Programs') {
+    const month = getResidencyMonthByRecord(record);
     if (RESIDENCY_MONTH_HEADINGS.has(record.id)) {
       const meta = RESIDENCY_MONTH_HEADINGS.get(record.id);
       const prog = (fields['Residency Programs'] || '').trim();
@@ -193,10 +207,10 @@ function classifyRecord(record, t = (record?.tab || (typeof tab !== 'undefined' 
       return { category: RECORD_CATEGORY.SOURCE_HEADING, month: meta.month, role: 'month_heading', label: meta.label, isStructural: true, isSubstantive: false, hasLocalEdits, wasHeading: false, reviewNotice: null };
     }
     const prog = (fields['Residency Programs'] || '').trim();
-    if (!prog && !fields.Facilitator && !fields['Resident/attending discussant']) {
-      return { category: RECORD_CATEGORY.PLACEHOLDER, month: 'October', role: 'empty_session', label: 'Empty session row', isStructural: true, isSubstantive: false, hasLocalEdits, wasPlaceholder: false, reviewNotice: 'All session fields are empty' };
+    if (!prog && !fields.Facilitator && !fields['Resident/attending discussant'] && !fields['Junior Member']) {
+      return { category: RECORD_CATEGORY.PLACEHOLDER, month, role: 'empty_session', label: 'Empty session row', isStructural: true, isSubstantive: false, hasLocalEdits, wasPlaceholder: false, reviewNotice: 'All session fields are empty' };
     }
-    return { category: RECORD_CATEGORY.NAMED_ENTRY, month: 'October', role: 'session', label: prog || 'Residency Session', isStructural: false, isSubstantive: true, hasLocalEdits, wasPlaceholder: false, reviewNotice: null };
+    return { category: RECORD_CATEGORY.NAMED_ENTRY, month, role: 'session', label: prog || 'Residency Session', isStructural: false, isSubstantive: true, hasLocalEdits, wasPlaceholder: false, reviewNotice: null };
   }
 
   if (effectiveTab === 'CRC - retired') {
@@ -283,6 +297,18 @@ function formatResultsCount(filteredList, t, allList) {
   const totalCounts = getClassificationCounts(allList, t);
   const isFiltered = filteredList.length !== allList.length;
   const filteredCounts = isFiltered ? getClassificationCounts(filteredList, t) : totalCounts;
+  if (t === 'Morning Report') {
+    if (mrScheduleRangeMode === 'unresolved') {
+      return `Unresolved source dates · ${filteredList.length} session${filteredList.length===1?'':'s'} requiring date review · ${allList.length} total records`;
+    }
+    if (mrScheduleRangeMode === 'all') {
+      return `All history (2020 – 2026) · ${filteredList.length} session${filteredList.length===1?'':'s'} · ${allList.length} total records`;
+    }
+    const currentWeekStart = mrScheduleWeekStart || getDefaultScheduleWeekStart();
+    const bounds = typeof SessionCore !== 'undefined' && SessionCore.getWeekBounds ? SessionCore.getWeekBounds(currentWeekStart) : null;
+    const label = bounds ? weekLabel(bounds.start, bounds.end) : `Week of ${currentWeekStart}`;
+    return `${label} (Mon–Sun) · ${filteredList.length} matches · ${allList.length} total in schedule`;
+  }
   if (t === 'Members') {
     if (isFiltered) {
       return `Showing ${filteredCounts.namedEntries} named rows (${filteredCounts.sourceHeadings} structural entries) · ${totalCounts.namedEntries} named member rows (4 cohorts) · ${totalCounts.sourceHeadings} structural entries · ${totalCounts.total} total records`;
@@ -339,8 +365,84 @@ function recordSearchText(r,t){
 }
 function searchMatches(r,t,terms){const txt=recordSearchText(r,t);return terms.every(term=>txt.includes(term))}
 let skill='',dateFrom='',dateTo='',owner='',sessionType='',sessionFacilitator='',gapsOnly=false,sectionQuery='';
+let yearFilter='all';
+let mrScheduleWeekStart='',mrScheduleRangeMode='week';
+function getDefaultScheduleWeekStart(){
+  const t=typeof today==='function'?today():'2026-09-08';
+  const b=typeof SessionCore!=='undefined'&&SessionCore.getWeekBounds?SessionCore.getWeekBounds(t):null;
+  return b?b.start:'2026-09-07';
+}
 let db={},tab='Home',query='',searchPage=0,filter='All',facet='',sort='source',page=0,mode='cards',showAll=false,selected=null,editingTab='',quickClaimRecord=null,quickClaimRole='',issueFilter='All',issueSectionFilter='',workspace={edits:{},added:[],favorites:[],history:[],recent:[],issues:[],isAdmin:false,role:'VMR Leadership'},storageIssue=false;
 let memberSearchQuery='',memberCohortFilter='all',memberCountryFilter='all',memberSort='source',memberExpandedCohorts=new Set(['participants','core','leaders','inactive','other']),memberExpandedDetails=new Set(),memberShowStructural=false;
+let residencySearchQuery='',residencyShowSource=false,residencyExpandedMonths=new Set(['October','November','December','January','February']);
+let crcSearchQuery='',crcRoundFilter='all',crcStatusFilter='all',crcCountryFilter='all',crcShowSource=false,crcPage=0;
+
+// ==========================================
+// Declarative Section-Specific Summary Configuration (Prompt 8)
+// ==========================================
+const HISTORICAL_SUMMARY_CONFIG = {
+  'CPS Academy VMRs': {
+    route: 'CPS Academy VMRs',
+    title: 'Academy archive',
+    label: 'Academy Archive',
+    pageSize: 25,
+    columns: [
+      { id: 'date', label: 'Source date', width: '200px' },
+      { id: 'topic_title', label: 'Topic & Title' },
+      { id: 'facilitator', label: 'Facilitator', width: '160px' },
+      { id: 'recording', label: 'Recording', width: '160px', align: 'center' }
+    ],
+    essentialKeys: ['Date / time (source)', 'Topic', 'Session title', 'Facilitator'],
+    secondaryKeys: ['Meeting info', 'Public flag (source)', 'Bonus learning'],
+    hasDirectRecording: true
+  },
+  'Special VMRs': {
+    route: 'Special VMRs',
+    title: 'Special VMRs',
+    label: 'Special VMRs',
+    pageSize: 25,
+    columns: [
+      { id: 'date_time', label: 'Source date / time', width: '200px' },
+      { id: 'details', label: 'Details' },
+      { id: 'person_in_charge', label: 'Person in charge', width: '160px' },
+      { id: 'facilitator', label: 'Facilitator', width: '160px' }
+    ],
+    essentialKeys: ['Date', 'Pacific time (source)', 'Eastern time (source)', 'Details', 'Person in charge', 'Facilitator'],
+    secondaryKeys: ['Type'],
+    hasDirectRecording: false
+  },
+  'Student Forum': {
+    route: 'Student Forum',
+    title: 'Student Forum',
+    label: 'Student Forum',
+    pageSize: 25,
+    columns: [
+      { id: 'date_time', label: 'Source date / time', width: '200px' },
+      { id: 'topic', label: 'Topic' },
+      { id: 'expert', label: 'Expert', width: '150px' },
+      { id: 'person_in_charge', label: 'Person in charge', width: '150px' },
+      { id: 'recording', label: 'Recording', width: '160px', align: 'center' }
+    ],
+    essentialKeys: ['Date', 'Pacific time (source)', 'Eastern time (source)', 'Topic', 'Expert', 'Person in charge'],
+    secondaryKeys: ['Type', 'Meeting info'],
+    hasDirectRecording: true
+  },
+  'CRC': {
+    route: 'CRC',
+    title: 'Clinical Reasoning Cases',
+    label: 'Clinical Reasoning Cases',
+    pageSize: 25,
+    columns: [
+      { id: 'presenter', label: 'Presenter', width: '200px' },
+      { id: 'mentor', label: 'Mentor', width: '180px' },
+      { id: 'status', label: 'Status', width: '150px' },
+      { id: 'vmr_date', label: 'VMR date', width: '140px' }
+    ],
+    essentialKeys: ['Presenter', 'Mentor', 'Status', 'VMR date'],
+    secondaryKeys: ['Email', 'Country', 'Remarks'],
+    hasDirectRecording: false
+  }
+};
 
 // ==========================================
 // Transient Browsing State Management (Prompt 6)
@@ -429,7 +531,10 @@ function saveSectionState(t) {
     sort: sort || 'source',
     mode: mode || 'cards',
     page: page || 0,
+    yearFilter: yearFilter || 'all',
     showAll: Boolean(showAll),
+    mrScheduleWeekStart: mrScheduleWeekStart || '',
+    mrScheduleRangeMode: mrScheduleRangeMode || 'week',
     // Section-specific:
     memberSearchQuery: typeof memberSearchQuery !== 'undefined' ? memberSearchQuery : '',
     memberCohortFilter: typeof memberCohortFilter !== 'undefined' ? memberCohortFilter : 'all',
@@ -450,7 +555,16 @@ function saveSectionState(t) {
     linksFilter: typeof linksFilter !== 'undefined' ? linksFilter : 'all',
     linksCategoryFilter: typeof linksCategoryFilter !== 'undefined' ? linksCategoryFilter : 'all',
     conferenceSearchQuery: typeof conferenceSearchQuery !== 'undefined' ? conferenceSearchQuery : '',
-    conferenceFilter: typeof conferenceFilter !== 'undefined' ? conferenceFilter : 'all'
+    conferenceFilter: typeof conferenceFilter !== 'undefined' ? conferenceFilter : 'all',
+    residencySearchQuery: typeof residencySearchQuery !== 'undefined' ? residencySearchQuery : '',
+    residencyShowSource: typeof residencyShowSource !== 'undefined' ? Boolean(residencyShowSource) : false,
+    residencyExpandedMonths: typeof residencyExpandedMonths !== 'undefined' ? [...residencyExpandedMonths] : [],
+    crcSearchQuery: typeof crcSearchQuery !== 'undefined' ? crcSearchQuery : '',
+    crcRoundFilter: typeof crcRoundFilter !== 'undefined' ? crcRoundFilter : 'all',
+    crcStatusFilter: typeof crcStatusFilter !== 'undefined' ? crcStatusFilter : 'all',
+    crcCountryFilter: typeof crcCountryFilter !== 'undefined' ? crcCountryFilter : 'all',
+    crcShowSource: typeof crcShowSource !== 'undefined' ? Boolean(crcShowSource) : false,
+    crcPage: typeof crcPage !== 'undefined' ? crcPage : 0
   };
 
   sectionBrowsingMemory.set(t, state);
@@ -470,7 +584,9 @@ function clampPageForSection(t, targetPage) {
   } else if (t === 'Members' && db && db['Members']) {
     count = records('Members').length;
   }
-  const pageSize = showAll ? (count || 1) : (t === 'Members' ? 50 : 12);
+  const config = typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' ? HISTORICAL_SUMMARY_CONFIG[t] : null;
+  const defaultPageSize = config ? config.pageSize : (t === 'Members' ? 50 : 12);
+  const pageSize = showAll ? (count || 1) : defaultPageSize;
   const maxPage = Math.max(0, Math.ceil(count / pageSize) - 1);
   page = Math.min(Math.max(0, targetPage), maxPage);
 }
@@ -494,8 +610,9 @@ function restoreSectionState(t) {
     page = 0;
     showAll = false;
     currentAnchorRecordId = null;
-    if (t === 'Morning Report') mode = isMobile ? 'agenda' : 'matrix';
+    if (t === 'Morning Report') { mode = isMobile ? 'agenda' : 'matrix'; mrScheduleWeekStart = getDefaultScheduleWeekStart(); mrScheduleRangeMode = 'week'; }
     else if (['Podcast Episodes', 'Schema review'].includes(t)) mode = 'board';
+    else if (typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[t]) mode = isMobile ? 'cards' : 'table';
     else mode = 'cards';
     return;
   }
@@ -513,6 +630,9 @@ function restoreSectionState(t) {
   dateTo = saved.dateTo || '';
   sort = saved.sort || (t === 'CPS Academy VMRs' ? 'date' : 'source');
   showAll = Boolean(saved.showAll);
+  yearFilter = saved.yearFilter || 'all';
+  mrScheduleWeekStart = saved.mrScheduleWeekStart || getDefaultScheduleWeekStart();
+  mrScheduleRangeMode = saved.mrScheduleRangeMode || 'week';
 
   if (t === 'Morning Report') {
     if (isMobile) {
@@ -522,6 +642,8 @@ function restoreSectionState(t) {
     }
   } else if (['Podcast Episodes', 'Schema review'].includes(t)) {
     mode = ['board', 'cards', 'table'].includes(saved.mode) ? saved.mode : 'board';
+  } else if (typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[t]) {
+    mode = ['cards', 'table'].includes(saved.mode) ? saved.mode : (isMobile ? 'cards' : 'table');
   } else {
     mode = ['cards', 'table'].includes(saved.mode) ? saved.mode : 'cards';
   }
@@ -556,6 +678,19 @@ function restoreSectionState(t) {
 
   if (typeof conferenceSearchQuery !== 'undefined' && saved.conferenceSearchQuery !== undefined) conferenceSearchQuery = saved.conferenceSearchQuery;
   if (typeof conferenceFilter !== 'undefined' && saved.conferenceFilter !== undefined) conferenceFilter = saved.conferenceFilter;
+
+  if (typeof residencySearchQuery !== 'undefined' && saved.residencySearchQuery !== undefined) residencySearchQuery = saved.residencySearchQuery;
+  if (typeof residencyShowSource !== 'undefined' && saved.residencyShowSource !== undefined) residencyShowSource = saved.residencyShowSource;
+  if (typeof residencyExpandedMonths !== 'undefined' && saved.residencyExpandedMonths) {
+    residencyExpandedMonths = new Set(saved.residencyExpandedMonths);
+  }
+
+  if (typeof crcSearchQuery !== 'undefined' && saved.crcSearchQuery !== undefined) crcSearchQuery = saved.crcSearchQuery;
+  if (typeof crcRoundFilter !== 'undefined' && saved.crcRoundFilter !== undefined) crcRoundFilter = saved.crcRoundFilter;
+  if (typeof crcStatusFilter !== 'undefined' && saved.crcStatusFilter !== undefined) crcStatusFilter = saved.crcStatusFilter;
+  if (typeof crcCountryFilter !== 'undefined' && saved.crcCountryFilter !== undefined) crcCountryFilter = saved.crcCountryFilter;
+  if (typeof crcShowSource !== 'undefined' && saved.crcShowSource !== undefined) crcShowSource = saved.crcShowSource;
+  if (typeof crcPage !== 'undefined' && saved.crcPage !== undefined) crcPage = saved.crcPage;
 
   clampPageForSection(t, saved.page || 0);
 }
@@ -605,8 +740,13 @@ function clearSectionFilters(t) {
   dateTo = '';
   sort = t === 'CPS Academy VMRs' ? 'date' : 'source';
   page = 0;
+  yearFilter = 'all';
   showAll = false;
   currentAnchorRecordId = null;
+  if (t === 'Morning Report') {
+    mrScheduleRangeMode = 'week';
+    mrScheduleWeekStart = getDefaultScheduleWeekStart();
+  }
 
   if (t === 'Members') {
     memberSearchQuery = '';
@@ -629,6 +769,17 @@ function clearSectionFilters(t) {
   } else if (t === 'Conferences') {
     conferenceSearchQuery = '';
     conferenceFilter = 'all';
+  } else if (t === 'Residency Programs') {
+    residencySearchQuery = '';
+    residencyShowSource = false;
+    residencyExpandedMonths = new Set(['October', 'November', 'December', 'January', 'February']);
+  } else if (t === 'CRC - retired') {
+    crcSearchQuery = '';
+    crcRoundFilter = 'all';
+    crcStatusFilter = 'all';
+    crcCountryFilter = 'all';
+    crcShowSource = false;
+    crcPage = 0;
   }
 
   saveSectionState(t);
@@ -822,7 +973,7 @@ function nav(){
 }
 function header(t,sub){return `<div class="page-heading"><div><p class="eyebrow">CPS Academy · private workspace</p><h1>${esc(t)}</h1><p>${esc(sub)}</p></div></div>`}
 function banner(){return `<div class="mobile-snapshot">Workbook snapshot · saved on this device <button class="text-button" data-go="Workspace">Backups &amp; status</button></div>`+`<div class="snapshot-note"><span class="snapshot-dot"></span><span>Workbook snapshot (2026-09-06) · local changes saved on this device · no live Sheets connection · <button class="text-button" data-go="Workspace">Backups & activity</button></span></div>`}
-function actionButtons(r,t){return `${calendarButton(r,t)}<button class="button primary small" data-open="${esc(r.id)}" data-area="${esc(t)}">${t==='Morning Report'?'Staff session':'Open details'}</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${workspace.favorites.includes(r.id)?'★':'☆'}</button>`}
+function actionButtons(r,t){return `${calendarButton(r,t)}<button class="button primary small" data-open="${esc(r.id)}" data-area="${esc(t)}" data-action="${t==='Morning Report'?'staff':'view'}">${t==='Morning Report'?'Staff session':'Open details'}</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${workspace.favorites.includes(r.id)?'★':'☆'}</button>`}
 function card(r,t=tab,inSearch=false){const f=r.fields;let body='',tag='';
  const c = typeof getRecordClassification === 'function' ? getRecordClassification(r, t) : null;
  if(t==='Morning Report'){tag=f.Type||'Morning Report';body=`<p class="muted">${esc(SessionCore.formatSessionTime(r))}</p>${staffingGrid(r)}`}
@@ -1266,7 +1417,7 @@ function home(){
   const timeStr=SessionCore.formatSessionTime(nextSession);
   const cleanSignups=(nf['Scribe / teaching points sign-ups']||'').split(/\r?\n[-_]{3,}/)[0];
   const pres=nf.Presenter||cleanSignups.match(/(?:Case Presenter|Presenter):[^\S\r\n]*([^\r\n|]+)/i)?.[1]?.trim()||'Unassigned';
-  nextSessionCard=`<article class="panel op-card"><div class="op-card-head"><span class="tag ${countdown==='Today'?'ready-chip':''}">${esc(countdown)} · ${esc(dateValue(nextSession))}</span><span class="op-sub">${esc(timeStr)}</span></div><div class="op-card-body"><small class="op-label">Next Scheduled Session</small><h3 class="op-title">${esc(title(nextSession,'Morning Report'))}</h3><div class="op-meta-grid"><div><small>Type</small><strong>${esc(nf.Type||'Morning Report')}</strong></div><div><small>Facilitator</small><strong>${esc(nf.Facilitator||'Unassigned')}</strong></div><div><small>Presenter</small><strong>${esc(pres)}</strong></div></div></div><div class="op-card-foot">${calendarButton(nextSession,'Morning Report')}<button class="button primary small" data-open="${esc(nextSession.id)}" data-area="Morning Report">Staff session</button><button class="button secondary small" data-go="Morning Report">Open staffing schedule</button></div></article>`;
+  nextSessionCard=`<article class="panel op-card"><div class="op-card-head"><span class="tag ${countdown==='Today'?'ready-chip':''}">${esc(countdown)} · ${esc(dateValue(nextSession))}</span><span class="op-sub">${esc(timeStr)}</span></div><div class="op-card-body"><small class="op-label">Next Scheduled Session</small><h3 class="op-title">${esc(title(nextSession,'Morning Report'))}</h3><div class="op-meta-grid"><div><small>Type</small><strong>${esc(nf.Type||'Morning Report')}</strong></div><div><small>Facilitator</small><strong>${esc(nf.Facilitator||'Unassigned')}</strong></div><div><small>Presenter</small><strong>${esc(pres)}</strong></div></div></div><div class="op-card-foot">${calendarButton(nextSession,'Morning Report')}<button class="button primary small" data-open="${esc(nextSession.id)}" data-area="Morning Report" data-action="staff">Staff session</button><button class="button secondary small" data-go="Morning Report">Open staffing schedule</button></div></article>`;
  }else{
   nextSessionCard=`<article class="panel op-card"><div class="op-card-head"><span class="tag">Schedule</span></div><div class="op-card-body"><small class="op-label">Next Scheduled Session</small><h3 class="op-title">No upcoming dated sessions</h3><p class="muted">Check schedule for pending or past sessions.</p></div><div class="op-card-foot"><button class="button secondary small" data-go="Morning Report">Open staffing schedule</button></div></article>`;
  }
@@ -1275,9 +1426,50 @@ function home(){
  $('#page').innerHTML=`<div class="home-container" id="Home">${header('Home Dashboard','Operational status, upcoming sessions and active Academy resources.')}${banner()}<section class="operational-lead-grid" style="display:grid;gap:16px;margin-bottom:20px;">${nextSessionCard}</section>${commitmentsHtml}<section class="operational-grid">${backupCard}${linksCard}</section>${leaderHtml}<div class="dashboard-heading"><div><h2>Upcoming in the workbook</h2><p class="muted">Workbook snapshot records (2026-09-06)</p></div><button class="text-button" data-go="Morning Report">View schedule →</button></div><section class="hub-grid">${next.map(r=>card(r,'Morning Report')).join('')||'<div class="empty-state">No future dated sessions in this snapshot.</div>'}</section><div class="dashboard-heading"><h2>Recently opened records</h2><span class="muted">Opened in this browser</span></div><section class="hub-grid">${recents.map(({r,t})=>card(r,t)).join('')||'<div class="empty-state panel">Records you open will appear here for quick access.</div>'}</section><div class="dashboard-heading"><h2>Recent local changes</h2><button class="text-button" data-go="Workspace">All activity & backups →</button></div><section class="panel activity-list">${localChanges.map(h=>`<div><strong>${esc(h.action)} · ${esc(h.title)}</strong><small>${esc(h.tab)} · ${esc(new Date(h.at).toLocaleString())} · Saved on this device</small></div>`).join('')||'<div class="empty-state">No local changes yet. Edits and drafts saved on this device will appear here.</div>'}</section><div class="dashboard-heading"><h2>Pinned for quick access</h2><span class="muted">Use ☆ on any record</span></div><section class="hub-grid">${pinned.slice(0,9).map(({r,t})=>card(r,t)).join('')||'<div class="empty-state panel">Pin a session, member or resource to keep it here.</div>'}</section></div>`;
  if($('#home-backup-btn'))$('#home-backup-btn').onclick=()=>{exportBackup();render();};
 }
-function filtered(){let rr=records().filter(r=>Object.values(r.fields).join(' ').toLowerCase().includes((sectionQuery||query).toLowerCase()));if(['Morning Report','CPS Academy VMRs'].includes(tab))rr=rr.filter(r=>SessionCore.matchesFacets(r,{type:sessionType,facilitator:sessionFacilitator,gapsOnly},mrGaps));if(owner){if(tab==='Podcast Episodes')rr=rr.filter(r=>(r.fields['Audio editor']||'').split(/[/,;]/).map(s=>s.trim()).includes(owner)||(r.fields['Point person']||'').split(/[/,;]/).map(s=>s.trim()).includes(owner)||r.fields['Audio editor']===owner||r.fields['Point person']===owner);else if(tab==='Schema review')rr=rr.filter(r=>(r.fields['Video owner']||'').trim()===owner||(r.fields['Infographic owner']||'').trim()===owner);}if(skill)rr=rr.filter(r=>r.fields[skill]==='Yes');if(dateFrom)rr=rr.filter(r=>recordDate(r)&&recordDate(r)>=dateFrom);if(dateTo)rr=rr.filter(r=>recordDate(r)&&recordDate(r)<=dateTo);if(facet)rr=rr.filter(r=>r.fields[facets[tab]]===facet);if(filter==='Needs review')rr=rr.filter(r=>r.flags.length);if(filter==='Local edits')rr=rr.filter(r=>workspace.edits[r.id]||r.id.startsWith('local:'));if(filter==='Pinned')rr=rr.filter(r=>workspace.favorites.includes(r.id));if(filter==='Upcoming')rr=rr.filter(r=>recordDate(r)&&recordDate(r)>=today());if(filter==='This Week')rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&d<=7});if(filter==='Needs Volunteers')rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&mrGaps(r).length>0});if(filter==='My Sessions'){const user=typeof Identity!=='undefined'?Identity.getCurrentUser():null;const profile=user||(workspace.reporterName?{name:workspace.reporterName}:null);rr=rr.filter(r=>profile&&isUserAssignedToSession(r,profile));}if(filter==='Staffing gaps')rr=rr.filter(r=>mrGaps(r).length>0);if(filter==='Has recording')rr=rr.filter(r=>urls(r,'Recording').length);if(filter==='Missing facilitator')rr=rr.filter(r=>!r.fields.Facilitator||/tbd/i.test(r.fields.Facilitator));if(sort==='az')rr.sort((a,b)=>title(a).localeCompare(title(b)));else if(filter==='Upcoming')rr.sort((a,b)=>recordDate(a).localeCompare(recordDate(b)));else if(sort==='date')rr.sort((a,b)=>{const x=recordDate(a),y=recordDate(b);return x&&y?y.localeCompare(x):x?-1:y?1:0});return rr}
+function filtered(){
+  let rr=records().filter(r=>Object.values(r.fields).join(' ').toLowerCase().includes((sectionQuery||query).toLowerCase()));
+  if(['Morning Report','CPS Academy VMRs'].includes(tab))rr=rr.filter(r=>SessionCore.matchesFacets(r,{type:sessionType,facilitator:sessionFacilitator,gapsOnly},mrGaps));
+  if(tab==='Morning Report'){
+    if(filter==='All history'||filter==='All')mrScheduleRangeMode='all';
+    else if(filter==='Unresolved dates'||filter==='Unresolved source dates')mrScheduleRangeMode='unresolved';
+    else if(filter==='This Week'){mrScheduleRangeMode='week';mrScheduleWeekStart=getDefaultScheduleWeekStart();}
+    if(!dateFrom&&!dateTo){
+      if(mrScheduleRangeMode==='unresolved'){
+        rr=rr.filter(r=>!recordDate(r));
+      }else if(mrScheduleRangeMode==='week'){
+        const currentWeekStart=mrScheduleWeekStart||getDefaultScheduleWeekStart();
+        const bounds=typeof SessionCore!=='undefined'&&SessionCore.getWeekBounds?SessionCore.getWeekBounds(currentWeekStart):null;
+        if(bounds){
+          rr=rr.filter(r=>{const d=recordDate(r);return Boolean(d&&d>=bounds.start&&d<=bounds.end);});
+        }
+      }
+    }
+  }
+  if(owner){if(tab==='Podcast Episodes')rr=rr.filter(r=>(r.fields['Audio editor']||'').split(/[/,;]/).map(s=>s.trim()).includes(owner)||(r.fields['Point person']||'').split(/[/,;]/).map(s=>s.trim()).includes(owner)||r.fields['Audio editor']===owner||r.fields['Point person']===owner);else if(tab==='Schema review')rr=rr.filter(r=>(r.fields['Video owner']||'').trim()===owner||(r.fields['Infographic owner']||'').trim()===owner);}
+  if(skill)rr=rr.filter(r=>r.fields[skill]==='Yes');
+  if(dateFrom)rr=rr.filter(r=>recordDate(r)&&recordDate(r)>=dateFrom);
+  if(dateTo)rr=rr.filter(r=>recordDate(r)&&recordDate(r)<=dateTo);
+  if(facet)rr=rr.filter(r=>r.fields[facets[tab]]===facet);
+  if(yearFilter==='unresolved')rr=rr.filter(r=>!recordDate(r));
+  else if(yearFilter&&yearFilter!=='all')rr=rr.filter(r=>recordDate(r)&&recordDate(r).startsWith(yearFilter));
+  if(filter==='Needs review')rr=rr.filter(r=>r.flags.length);
+  if(filter==='Local edits')rr=rr.filter(r=>workspace.edits[r.id]||r.id.startsWith('local:'));
+  if(filter==='Pinned')rr=rr.filter(r=>workspace.favorites.includes(r.id));
+  if(filter==='Upcoming'&&(tab!=='Morning Report'||mrScheduleRangeMode!=='week'))rr=rr.filter(r=>recordDate(r)&&recordDate(r)>=today());
+  if(filter==='This Week')rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&d<=7});
+  if(filter==='Needs Volunteers')rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&mrGaps(r).length>0});
+  if(filter==='My Sessions'){const user=typeof Identity!=='undefined'?Identity.getCurrentUser():null;const profile=user||(workspace.reporterName?{name:workspace.reporterName}:null);rr=rr.filter(r=>profile&&isUserAssignedToSession(r,profile));}
+  if(filter==='Staffing gaps')rr=rr.filter(r=>mrGaps(r).length>0);
+  if(filter==='Has recording')rr=rr.filter(r=>urls(r,'Recording').length);
+  if(filter==='Missing facilitator')rr=rr.filter(r=>!r.fields.Facilitator||/tbd/i.test(r.fields.Facilitator));
+  if(sort==='az')rr.sort((a,b)=>title(a).localeCompare(title(b)));
+  else if(filter==='Upcoming')rr.sort((a,b)=>recordDate(a).localeCompare(recordDate(b)));
+  else if(sort==='date')rr.sort((a,b)=>{const x=recordDate(a),y=recordDate(b);return x&&y?y.localeCompare(x):x?-1:y?1:0});
+  else if(tab==='Morning Report'&&sort==='source')rr.sort((a,b)=>(recordDate(a)||'').localeCompare(recordDate(b)||''));
+  return rr;
+}
 function renderFilters(rr, t, filters, field, options, viewSwitcher) {
-  const count=[filter!=='All',facet,owner,skill,sessionType,sessionFacilitator,dateFrom,dateTo,sort!==(t==='CPS Academy VMRs'?'date':'source'),gapsOnly,showAll].filter(Boolean).length;
+  const count=[filter!=='All',facet,owner,skill,sessionType,sessionFacilitator,dateFrom,dateTo,sort!==(t==='CPS Academy VMRs'?'date':'source'),gapsOnly,showAll,yearFilter!=='all'].filter(Boolean).length;
   return `<div class="filter-toolbar filter-bar schedule-filter-bar roster-toolbar">
     <details class="schedule-secondary-filters" ${scheduleFiltersOpen || (typeof window!=='undefined' && window.innerWidth>760) ? 'open' : ''}>
       <summary>Filters (Active: ${count})</summary>
@@ -1295,15 +1487,272 @@ function renderFilters(rr, t, filters, field, options, viewSwitcher) {
 }
 
 function areaPicker(){const areas=groups[Object.keys(groups).find(g=>groups[g].includes(tab))];return `<label class="mobile-area-picker">Section<select id="area-picker" aria-label="Academy section">${areas.map(t=>`<option value="${esc(t)}" ${t===tab?'selected':''}>${esc(sectionLabel(t))}</option>`).join('')}</select></label>`}
-function listing(){if(tab==='Morning Report'&&(typeof window!=='undefined'&&(window.innerWidth||0)<=760)&&mode==='matrix')mode='agenda';let rr=filtered();const pageSize=showAll?rr.length:12;page=showAll?0:Math.min(page,Math.max(0,Math.ceil(rr.length/pageSize)-1));const current=showAll?rr:rr.slice(page*pageSize,page*pageSize+pageSize),field=['Morning Report','CPS Academy VMRs'].includes(tab)?'':facets[tab],options=field?[...new Set(records().map(r=>r.fields[field]).filter(Boolean))].sort():[];const filters=['All',...(['Morning Report','CPS Academy VMRs'].includes(tab)?['Upcoming','This Week','Needs Volunteers','My Sessions','Staffing gaps','Missing facilitator']:[]),...(db[tab].columns.includes('Recording')?['Has recording']:[]),'Pinned','Needs review','Local edits'];const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Matrix</button><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Agenda</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:['Podcast Episodes','Schema review'].includes(tab)?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;$('#page').innerHTML=header(sectionLabel(tab),descriptions[tab]||'Programme records, assignments and source details.')+banner()+sopBanner(tab)+areaPicker()+`<div class="toolbar area-tabs">${groups[Object.keys(groups).find(g=>groups[g].includes(tab))].map(t=>`<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>${renderFilters(rr,tab,filters,field,options,viewSwitcher)}<p class="muted results-count">${formatResultsCount(rr,tab,records())}${sort==='date'?' · Unresolved dates follow recognised dates':''}${dateFrom||dateTo?' · Records with unresolved dates are excluded from this range':''}</p>${rr.length?(mode==='matrix'&&tab==='Morning Report'?matrixView(rr):(mode==='agenda'&&tab==='Morning Report'?agendaView(rr):(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)?workflowBoard(rr,tab):(mode==='cards'?`<section class="hub-grid">${current.map(r=>card(r)).join('')}</section>`:table(current))))): '<section class="empty-state panel"><h2>No matching records</h2><p>Clear the filters or try a broader search.</p><button class="button secondary" data-clear-filters>Clear filters</button></section>'}${(mode==='matrix'&&tab==='Morning Report')||(mode==='agenda'&&tab==='Morning Report')||(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab))||showAll?'':`<div class="toolbar pagination"><button class="button secondary" id="prev" ${page===0?'disabled':''}>Previous</button><span>Page ${page+1} of ${Math.max(1,Math.ceil(rr.length/12))}</span><button class="button secondary" id="next" ${(page+1)*12>=rr.length?'disabled':''}>Next</button></div>`}${tab==='CRC'&&db['CRC - retired']?crcDrawer():''}`;bindExtraFilters();if($('#area-picker'))$('#area-picker').onchange=e=>navigate(e.target.value);$('#filter').onchange=e=>{filter=e.target.value;page=0;render()};if($('#facet'))$('#facet').onchange=e=>{facet=e.target.value;page=0;render()};$('#sort').onchange=e=>{sort=e.target.value;render()};if($('#show-all-toggle'))$('#show-all-toggle').onchange=e=>{showAll=e.target.checked;page=0;render()};$('#clear').onclick=()=>{query='';filter='All';facet='';owner='';sessionType='';sessionFacilitator='';gapsOnly=false;sectionQuery='';skill='';dateFrom='';dateTo='';sort='source';page=0;showAll=false;$('#global-search').value='';render()};if($('#view'))$('#view').onclick=()=>{mode=mode==='cards'?'table':'cards';render()};document.querySelectorAll('[data-set-view]').forEach(b=>b.onclick=()=>{mode=b.dataset.setView;render()});if($('#prev'))$('#prev').onclick=()=>{page--;render();window.scrollTo(0,0)};if($('#next'))$('#next').onclick=()=>{page++;render();window.scrollTo(0,0)};if(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab))bindBoardEvents(tab);}
+function renderWeekNavigator(rrTotal) {
+  if (tab !== 'Morning Report') return '';
+  const currentWeekStart = mrScheduleWeekStart || getDefaultScheduleWeekStart();
+  const weekBounds = typeof SessionCore !== 'undefined' && SessionCore.getWeekBounds ? SessionCore.getWeekBounds(currentWeekStart) : { start: currentWeekStart, end: currentWeekStart };
+  const currentWeekLabel = weekLabel(weekBounds.start, weekBounds.end);
+  const isCurrentWeek = currentWeekStart === getDefaultScheduleWeekStart();
+
+  const allMr = records('Morning Report');
+  const allSplit = allMr.flatMap(r => typeof SessionCore !== 'undefined' ? SessionCore.splitMorningReport(r) : [r]);
+  const unresolvedRecords = allSplit.filter(r => !recordDate(r));
+  const unresolvedCount = unresolvedRecords.length;
+
+  let content = '';
+
+  if (mrScheduleRangeMode === 'unresolved') {
+    content = `
+      <div class="week-nav-bar week-nav-unresolved-bar">
+        <div class="week-nav-summary">
+          <div class="week-nav-heading">
+            <h3 class="week-nav-title">Unresolved Source Dates</h3>
+            <span class="badge warning-badge" title="Source date cannot be resolved to an unambiguous ISO date">Needs Review</span>
+          </div>
+          <p class="week-convention-note muted"><small>${unresolvedCount} record${unresolvedCount===1?'':'s'} with spreadsheet errors, TBD, or ambiguous date strings in source workbook.</small></p>
+        </div>
+        <div class="week-nav-actions">
+          <button type="button" class="button secondary small" data-schedule-scope="week">← Return to Week view</button>
+        </div>
+      </div>`;
+  } else if (mrScheduleRangeMode === 'all') {
+    content = `
+      <div class="week-nav-bar week-nav-all-bar">
+        <div class="week-nav-summary">
+          <div class="week-nav-heading">
+            <h3 class="week-nav-title">All History Archive</h3>
+            <span class="week-convention-badge">2020 – 2026</span>
+          </div>
+          <p class="week-convention-note muted"><small>Convention: Monday to Sunday (UTC source dates) · Showing full historical schedule (${rrTotal.length} sessions matching filters)</small></p>
+        </div>
+        <div class="week-nav-actions">
+          <button type="button" class="button secondary small" data-schedule-scope="week">← Return to Week view (${isCurrentWeek ? 'This week' : 'Week of ' + weekBounds.start})</button>
+        </div>
+      </div>`;
+  } else {
+    const prevWeekStart = typeof SessionCore !== 'undefined' && SessionCore.addWeeks ? SessionCore.addWeeks(weekBounds.start, -1) : weekBounds.start;
+    const nextWeekStart = typeof SessionCore !== 'undefined' && SessionCore.addWeeks ? SessionCore.addWeeks(weekBounds.start, 1) : weekBounds.start;
+
+    const unresolvedNotice = unresolvedCount > 0 ? `
+      <div class="week-nav-unresolved-notice">
+        <span class="unresolved-pill" title="Unresolved records are not assigned to calendar weeks">⚠ ${unresolvedCount} unresolved date</span>
+        <button type="button" class="text-button small" data-schedule-scope="unresolved" aria-label="View unresolved source dates">View unresolved →</button>
+      </div>` : '';
+
+    content = `
+      <div class="week-nav-bar">
+        <div class="week-nav-controls">
+          <button type="button" class="button secondary small week-nav-prev" id="week-nav-prev" data-week-jump="${esc(prevWeekStart)}" title="Previous week (${esc(prevWeekStart)})" aria-label="Previous week">‹ Prev week</button>
+          <button type="button" class="button ${isCurrentWeek ? 'primary' : 'secondary'} small week-nav-today" id="week-nav-today" data-week-jump="${esc(getDefaultScheduleWeekStart())}" title="Jump to current week" aria-label="Current week">This week</button>
+          <button type="button" class="button secondary small week-nav-next" id="week-nav-next" data-week-jump="${esc(nextWeekStart)}" title="Next week (${esc(nextWeekStart)})" aria-label="Next week">Next week ›</button>
+        </div>
+        <div class="week-nav-center">
+          <div class="week-nav-heading">
+            <h3 class="week-nav-title" id="week-nav-title">${esc(currentWeekLabel)}</h3>
+            <span class="week-convention-badge" title="Week bounds are calculated from Monday 00:00 UTC to Sunday 23:59:59 UTC using parsed source dates">Mon–Sun (UTC)</span>
+          </div>
+          <div class="week-nav-meta">
+            <span class="week-session-count" id="week-session-count"><strong>${rrTotal.length}</strong> matching session${rrTotal.length===1?'':'s'} in this week</span>
+            ${unresolvedNotice}
+          </div>
+          <p class="week-convention-note muted"><small>Convention: Monday to Sunday (UTC source dates) · No ambiguous timezone conversions</small></p>
+        </div>
+        <div class="week-nav-jump">
+          <label class="week-jump-label" for="week-jump-date">
+            <span>Jump to date:</span>
+            <input type="date" id="week-jump-date" class="select small week-jump-input" value="${esc(currentWeekStart)}" aria-label="Jump to date">
+          </label>
+        </div>
+      </div>`;
+  }
+
+  return `
+    <section class="schedule-week-navigator panel" aria-label="Staffing schedule week navigator">
+      <div class="schedule-scope-bar">
+        <div class="schedule-scope-switcher segmented small" role="tablist" aria-label="Schedule range scope">
+          <button type="button" class="${mrScheduleRangeMode==='week'?'active':''}" data-schedule-scope="week" role="tab" aria-selected="${mrScheduleRangeMode==='week'}">Week view</button>
+          <button type="button" class="${mrScheduleRangeMode==='all'?'active':''}" data-schedule-scope="all" role="tab" aria-selected="${mrScheduleRangeMode==='all'}">All history</button>
+          <button type="button" class="${mrScheduleRangeMode==='unresolved'?'active':''}" data-schedule-scope="unresolved" role="tab" aria-selected="${mrScheduleRangeMode==='unresolved'}">Unresolved dates${unresolvedCount ? ` (${unresolvedCount})` : ''}</button>
+        </div>
+      </div>
+      ${content}
+    </section>`;
+}
+function bindWeekNavigatorEvents() {
+  document.querySelectorAll('[data-schedule-scope]').forEach(btn => {
+    btn.onclick = () => {
+      const scope = btn.dataset.scheduleScope;
+      mrScheduleRangeMode = scope;
+      if (scope === 'all' || scope === 'unresolved') filter = 'All';
+      else if (scope === 'week' && !mrScheduleWeekStart) mrScheduleWeekStart = getDefaultScheduleWeekStart();
+      saveSectionState('Morning Report');
+      render();
+    };
+  });
+  document.querySelectorAll('[data-week-jump]').forEach(btn => {
+    btn.onclick = () => {
+      const targetDate = btn.dataset.weekJump;
+      const b = typeof SessionCore !== 'undefined' && SessionCore.getWeekBounds ? SessionCore.getWeekBounds(targetDate) : null;
+      if (b) {
+        mrScheduleWeekStart = b.start;
+        mrScheduleRangeMode = 'week';
+        dateFrom = '';
+        dateTo = '';
+        saveSectionState('Morning Report');
+        render();
+      }
+    };
+  });
+  const jumpInput = document.querySelector('#week-jump-date');
+  if (jumpInput) {
+    jumpInput.onchange = (e) => {
+      const val = e.target.value;
+      if (!val) return;
+      const b = typeof SessionCore !== 'undefined' && SessionCore.getWeekBounds ? SessionCore.getWeekBounds(val) : null;
+      if (b) {
+        mrScheduleWeekStart = b.start;
+        mrScheduleRangeMode = 'week';
+        dateFrom = '';
+        dateTo = '';
+        saveSectionState('Morning Report');
+        render();
+      }
+    };
+  }
+}
+function listing(){
+  if(tab==='Morning Report'&&(typeof window!=='undefined'&&(window.innerWidth||0)<=760)&&mode==='matrix')mode='agenda';
+  let rr=filtered();
+  const isHistorical=Boolean(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab]);
+  const config=isHistorical?HISTORICAL_SUMMARY_CONFIG[tab]:null;
+  const defaultPageSize=isHistorical?config.pageSize:12;
+  const pageSize=showAll?rr.length:defaultPageSize;
+  const totalPages=Math.max(1,Math.ceil(rr.length/pageSize));
+  page=showAll?0:Math.min(page,totalPages-1);
+  const current=showAll?rr:rr.slice(page*pageSize,page*pageSize+pageSize);
+  const start=rr.length===0?0:page*pageSize+1;
+  const end=Math.min((page+1)*pageSize,rr.length);
+
+  const field=['Morning Report','CPS Academy VMRs'].includes(tab)?'':facets[tab];
+  const options=field?[...new Set(records().map(r=>r.fields[field]).filter(Boolean))].sort():[];
+  const filters=['All',...(['Morning Report','CPS Academy VMRs'].includes(tab)?['Upcoming','This Week','Needs Volunteers','My Sessions','Staffing gaps','Missing facilitator']:[]),...(db[tab].columns.includes('Recording')?['Has recording']:[]),'Pinned','Needs review','Local edits'];
+
+  const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Matrix</button><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Agenda</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:['Podcast Episodes','Schema review'].includes(tab)?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;
+
+  const paginationTop = isHistorical && !showAll && totalPages > 1 ? `
+    <div class="toolbar pagination-header pagination-top" aria-label="Pagination top">
+      <span class="pagination-range">Showing ${start}–${end} of ${rr.length} records</span>
+      <div class="pagination-controls">
+        <button type="button" class="button secondary small" id="prev-top" ${page===0?'disabled':''} data-page-nav="-1" aria-label="Previous page">Previous</button>
+        <label class="pagination-select-label" aria-label="Jump to page">
+          <select class="select small page-select" aria-label="Jump to page" data-page-select>
+            ${Array.from({length:totalPages},(_,i)=>`<option value="${i}" ${i===page?'selected':''}>Page ${i+1} of ${totalPages}</option>`).join('')}
+          </select>
+        </label>
+        <button type="button" class="button secondary small" id="next-top" ${(page+1)>=totalPages?'disabled':''} data-page-nav="1" aria-label="Next page">Next</button>
+      </div>
+    </div>` : '';
+
+  const paginationBottom = showAll || (mode==='matrix'&&tab==='Morning Report') || (mode==='agenda'&&tab==='Morning Report') || (mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)) ? '' : (
+    isHistorical ? `
+    <div class="toolbar pagination pagination-bottom" aria-label="Pagination bottom">
+      <button type="button" class="button secondary" id="prev" ${page===0?'disabled':''} data-page-nav="-1">Previous</button>
+      <span>Page ${page+1} of ${totalPages} · Showing ${start}–${end} of ${rr.length} records</span>
+      <label class="pagination-select-label" aria-label="Jump to page">
+        <select class="select small page-select" aria-label="Jump to page" data-page-select>
+          ${Array.from({length:totalPages},(_,i)=>`<option value="${i}" ${i===page?'selected':''}>Page ${i+1} of ${totalPages}</option>`).join('')}
+        </select>
+      </label>
+      <button type="button" class="button secondary" id="next" ${(page+1)>=totalPages?'disabled':''} data-page-nav="1">Next</button>
+    </div>` : `
+    <div class="toolbar pagination">
+      <button class="button secondary" id="prev" ${page===0?'disabled':''}>Previous</button>
+      <span>Page ${page+1} of ${Math.max(1,Math.ceil(rr.length/12))}</span>
+      <button class="button secondary" id="next" ${(page+1)*12>=rr.length?'disabled':''}>Next</button>
+    </div>`
+  );
+
+  const resultsHeading = isHistorical ? `<h2 id="results-heading" class="visually-hidden-focusable" tabindex="-1">${esc(sectionLabel(tab))} Records (Page ${page+1} of ${totalPages})</h2>` : '';
+
+  const recordsContent = rr.length ? (
+    isHistorical ? (
+      (mode === 'table')
+        ? renderHistoricalTable(current, tab, config)
+        : (typeof window !== 'undefined' && window.innerWidth <= 760
+            ? renderHistoricalMobileList(current, tab, config)
+            : `<section class="hub-grid">${current.map(r=>card(r)).join('')}</section>`)
+    ) : (
+      (mode==='matrix'&&tab==='Morning Report'?matrixView(rr)
+      :(mode==='agenda'&&tab==='Morning Report'?agendaView(rr)
+      :(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)?workflowBoard(rr,tab)
+      :(mode==='cards'?`<section class="hub-grid">${current.map(r=>card(r)).join('')}</section>`:table(current)))))
+    )
+  ) : '<section class="empty-state panel"><h2>No matching records</h2><p>Clear the filters or try a broader search.</p><button class="button secondary" data-clear-filters>Clear filters</button></section>';
+
+  $('#page').innerHTML = header(sectionLabel(tab), descriptions[tab]||'Programme records, assignments and source details.') +
+    banner() +
+    sopBanner(tab) +
+    areaPicker() +
+    `<div class="toolbar area-tabs">${groups[Object.keys(groups).find(g=>groups[g].includes(tab))].map(t=>`<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>` +
+    renderFilters(rr, tab, filters, field, options, viewSwitcher) +
+    `<p class="muted results-count" id="results-count-announcer" aria-live="polite">${formatResultsCount(rr,tab,records())}${yearFilter!=='all'?(yearFilter==='unresolved'?' · Unresolved / undated records':' · Year '+yearFilter):''}${sort==='date'?' · Unresolved dates follow recognised dates':''}${dateFrom||dateTo?' · Records with unresolved dates are excluded from this range':''}</p>` +
+    resultsHeading +
+    paginationTop +
+    recordsContent +
+    paginationBottom +
+    (tab==='CRC'&&db['CRC - retired']?crcDrawer():'');
+
+  bindExtraFilters();
+  if($('#area-picker'))$('#area-picker').onchange=e=>navigate(e.target.value);
+  $('#filter').onchange=e=>{filter=e.target.value;page=0;render()};
+  if($('#facet'))$('#facet').onchange=e=>{facet=e.target.value;page=0;render()};
+  $('#sort').onchange=e=>{sort=e.target.value;render()};
+  if($('#show-all-toggle'))$('#show-all-toggle').onchange=e=>{showAll=e.target.checked;page=0;render()};
+  $('#clear').onclick=()=>{query='';filter='All';facet='';owner='';sessionType='';sessionFacilitator='';gapsOnly=false;sectionQuery='';skill='';dateFrom='';dateTo='';yearFilter='all';sort=tab==='CPS Academy VMRs'?'date':'source';page=0;showAll=false;$('#global-search').value='';render()};
+  if($('#view'))$('#view').onclick=()=>{
+    if(isHistorical){
+      const isMobile = typeof window !== 'undefined' && window.innerWidth <= 760;
+      if(isMobile) mode = mode === 'table' ? 'cards' : 'table';
+      else mode = mode === 'cards' ? 'table' : 'cards';
+    } else {
+      mode = mode === 'cards' ? 'table' : 'cards';
+    }
+    saveSectionState(tab);
+    render();
+  };
+  document.querySelectorAll('[data-set-view]').forEach(b=>b.onclick=()=>{mode=b.dataset.setView;saveSectionState(tab);render()});
+
+  document.querySelectorAll('[data-page-nav]').forEach(btn => {
+    btn.onclick = () => {
+      const dir = parseInt(btn.dataset.pageNav, 10);
+      page += dir;
+      clampPageForSection(tab, page);
+      saveSectionState(tab);
+      render();
+      focusAccessibleResultsHeading();
+    };
+  });
+  if($('#prev'))$('#prev').onclick=()=>{page--;clampPageForSection(tab,page);saveSectionState(tab);render();focusAccessibleResultsHeading();};
+  if($('#next'))$('#next').onclick=()=>{page++;clampPageForSection(tab,page);saveSectionState(tab);render();focusAccessibleResultsHeading();};
+  document.querySelectorAll('[data-page-select]').forEach(sel => {
+    sel.onchange = e => {
+      page = parseInt(e.target.value, 10);
+      clampPageForSection(tab, page);
+      saveSectionState(tab);
+      render();
+      focusAccessibleResultsHeading();
+    };
+  });
+  if(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab))bindBoardEvents(tab);
+}
 function crcDrawer(){const retired=records('CRC - retired');const c=getClassificationCounts(retired,'CRC - retired');return `<details class="panel legacy-drawer" style="margin-top:24px"><summary style="cursor:pointer;padding:16px 20px;font-weight:700;display:flex;align-items:center;justify-content:space-between;user-select:none"><span>📁 Archived / Legacy Mentorship (${c.namedEntries} cases in 15 rounds)</span><span class="muted" style="font-size:12px;font-weight:normal">Expand archive records ↓</span></summary><div style="padding:16px 20px;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><p class="muted" style="margin:0">Historical mentorship rounds preserved from original workbook (${c.namedEntries} cases, 15 round headings, ${c.placeholders} placeholders). Active cases remain front-and-center above.</p><button class="button secondary small" data-go="CRC - retired">Full Archive View →</button></div><div class="hub-grid">${retired.slice(0,9).map(r=>card(r,'CRC - retired')).join('')}</div><div style="margin-top:16px;text-align:center"><button class="button secondary small" data-go="CRC - retired">Browse all ${retired.length} archived records →</button></div></div></details>`}
 function table(rr){
  if(window.innerWidth<=760){
   const cols=db[tab].columns.filter(c=>c!==titles[tab]);
   const fields=(r,keys)=>keys.map(c=>`<div><dt>${esc(c)}</dt><dd>${esc(r.fields[c]||'—')}</dd></div>`).join('');
-  return `<section class="mobile-record-list">${rr.map(r=>{const c=typeof getRecordClassification==='function'?getRecordClassification(r,tab):null;const tagBadge=c&&c.category!==RECORD_CATEGORY.NAMED_ENTRY?`<span class="tag tag-heading" style="margin-bottom:6px;display:inline-block;">${esc(c.label||c.category)}</span>`:(c&&c.cohort?`<span class="tag tag-cohort" style="margin-bottom:6px;display:inline-block;">${esc(c.cohort)}</span>`:'');return `<article class="panel mobile-record">${tagBadge}<h2>${esc(title(r,tab))}</h2><dl>${fields(r,cols.slice(0,3))}</dl>${cols.length>3?`<details><summary>All fields (${cols.length-3} more)</summary><dl>${fields(r,cols.slice(3))}</dl></details>`:''}${sessionNotice(r)}${['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs'].includes(tab)?`<p class="session-time">${esc(SessionCore.formatSessionTime(r))}</p>`:''}<div class="card-links">${urls(r,'Recording').map(u=>anchor(u,'Watch recording')).join('')}${urls(r,'Link').map(u=>anchor(u,'Open resource')).join('')}</div><div class="card-actions">${actionButtons(r,tab)}</div><small class="muted">${esc(source(r))}</small></article>`;}).join('')}</section>`;
+  return `<section class="mobile-record-list">${rr.map(r=>{const c=typeof getRecordClassification==='function'?getRecordClassification(r,tab):null;const tagBadge=c&&c.category!==RECORD_CATEGORY.NAMED_ENTRY?`<span class="tag tag-heading" style="margin-bottom:6px;display:inline-block;">${esc(c.label||c.category)}</span>`:(c&&c.cohort?`<span class="tag tag-cohort" style="margin-bottom:6px;display:inline-block;">${esc(c.cohort)}</span>`:'');return `<article class="panel mobile-record">${tagBadge}<h2>${esc(title(r,tab))}</h2><dl>${fields(r,cols.slice(0,3))}</dl>${cols.length>3?`<details><summary>All fields (${cols.length-3} more)</summary><dl>${fields(r,cols.slice(3))}</dl></details>`:''}${sessionNotice(r)}${(!c || c.isSubstantive) && ['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs'].includes(tab)?`<p class="session-time">${esc(SessionCore.formatSessionTime(r))}</p>`:''}<div class="card-links">${urls(r,'Recording').map(u=>anchor(u,'Watch recording')).join('')}${urls(r,'Link').map(u=>anchor(u,'Open resource')).join('')}</div><div class="card-actions">${actionButtons(r,tab)}</div><small class="muted">${esc(source(r))}</small></article>`;}).join('')}</section>`;
  }
- const cols=[titles[tab],...db[tab].columns.filter(c=>c!==titles[tab])];return `<section class="panel table-panel"><table class="data-table"><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}<th>Action</th></tr></thead><tbody>${rr.map(r=>`<tr>${cols.map(c=>`<td data-label="${esc(c)}">${esc(r.fields[c]||'—')}</td>`).join('')}<td>${sessionNotice(r)}${['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs'].includes(tab)?`<p class="session-time">${esc(SessionCore.formatSessionTime(r))}</p>`:''}${actionButtons(r,tab)}</td></tr>`).join('')}</tbody></table></section>`}
+ const cols=[titles[tab],...db[tab].columns.filter(c=>c!==titles[tab])];return `<section class="panel table-panel"><table class="data-table"><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}<th>Action</th></tr></thead><tbody>${rr.map(r=>{const c=typeof getRecordClassification==='function'?getRecordClassification(r,tab):null;return `<tr>${cols.map(c=>`<td data-label="${esc(c)}">${esc(r.fields[c]||'—')}</td>`).join('')}<td>${sessionNotice(r)}${(!c || c.isSubstantive) && ['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs'].includes(tab)?`<p class="session-time">${esc(SessionCore.formatSessionTime(r))}</p>`:''}${actionButtons(r,tab)}</td></tr>`;}).join('')}</tbody></table></section>`}
 function sopBanner(t){
   if(t==='Schema review'){
     return `<details class="panel sop-banner" ${window.innerWidth>760?'open':''}><summary>📋 Operational Guidelines &amp; Production Timeline</summary><div class="sop-content"><div class="sop-grid"><div><strong>Team Leads</strong><p>Umbish &amp; Sawsan · Core Team: Tansu, Masah, Oumaima, Rahul, Ibrahim, Parisa, Zakariyya, Simmy, Daniel, Anmolpreet</p></div><div><strong>Weekly Timeline</strong><p>• <strong>Friday:</strong> Submit draft video for review to <code>sawsansweilmeen2001@gmail.com</code> / <code>umbish21@gmail.com</code>.<br>• <strong>Monday:</strong> Upload final video &amp; infographic (Sawsan).</p></div><div><strong>Video Requirements</strong><p>• 2–3 min max (split longer schemas).<br>• Appear on camera directly (visually engaging; avoid voice-over only).<br>• Link to a CPS Episode with practical examples.<br><a class="button secondary small" href="https://clinicalproblemsolving.com/reasoning-content/" target="_blank" rel="noopener noreferrer">Reasoning Content ↗</a></p></div></div></div></details>`;
@@ -1315,6 +1764,238 @@ function sopBanner(t){
     return `<details class="panel sop-banner"><summary>📋 Production Target &amp; Audio Editing Guidelines</summary><div class="sop-content"><p><strong>Production Goal:</strong> Coordinate efforts across the line so episodes are finalized and ready for upload <strong>2 days prior to release date</strong>.<br>The audio editor emails the finalized episode to the point person 2 days prior to release.</p></div></details>`;
   }
   return '';
+}
+
+function crcStatusClass(status) {
+  if (!status) return '';
+  const s = String(status).toLowerCase();
+  if (s.includes('presented') || s.includes('complete')) return 'ready-chip';
+  if (s.includes('progress') || s.includes('active')) return 'slot-upcoming';
+  if (s.includes('inactive') || s.includes('withdrawn')) return 'slot-open';
+  if (s.includes('concern') || s.includes('issue')) return 'slot-urgent';
+  return '';
+}
+
+function getRecognizedYearsForSection(t) {
+  const recs = records(t);
+  const years = new Set();
+  for (const r of recs) {
+    const rd = recordDate(r);
+    if (rd && /^\d{4}-\d{2}-\d{2}$/.test(rd)) {
+      years.add(rd.slice(0, 4));
+    }
+  }
+  return [...years].sort().reverse();
+}
+
+function renderHistoricalTableCell(colId, r, t) {
+  if (t === 'CPS Academy VMRs') {
+    if (colId === 'date') {
+      const raw = r.fields['Date / time (source)'] || '—';
+      const isUnres = !recordDate(r) && raw !== '—';
+      if (isUnres) {
+        return `<div class="date-cell"><span class="raw-date">${esc(raw)}</span> <span class="tag review-chip" title="Uncertain date">Uncertain date</span></div>`;
+      }
+      const lines = raw.split('\n');
+      return `<div class="date-cell"><strong>${esc(lines[0])}</strong>${lines.length > 1 ? `<br><small class="muted">${esc(lines.slice(1).join(' '))}</small>` : ''}</div>`;
+    }
+    if (colId === 'topic_title') {
+      const topic = r.fields.Topic || '';
+      const sessTitle = r.fields['Session title'] || '';
+      if (topic && sessTitle && topic !== sessTitle) {
+        return `<div class="title-cell"><strong class="primary-topic">${esc(topic)}</strong><br><small class="secondary-title muted">${esc(sessTitle)}</small></div>`;
+      }
+      return `<div class="title-cell"><strong>${esc(topic || sessTitle || 'Untitled')}</strong></div>`;
+    }
+    if (colId === 'facilitator') {
+      return esc(r.fields.Facilitator || '—');
+    }
+    if (colId === 'recording') {
+      const recUrls = urls(r, 'Recording');
+      if (recUrls.length > 0) {
+        return `<a class="button primary small recording-btn" href="${esc(recUrls[0])}" target="_blank" rel="noopener noreferrer">Watch recording ↗</a>`;
+      }
+      return '<span class="muted">—</span>';
+    }
+  }
+
+  if (t === 'Special VMRs') {
+    if (colId === 'date_time') {
+      const date = r.fields.Date || '—';
+      const times = [r.fields['Pacific time (source)'], r.fields['Eastern time (source)']].filter(Boolean).join(' / ');
+      const isUnres = !recordDate(r) && date !== '—';
+      return `<div class="date-cell"><strong>${esc(date)}</strong>${times ? `<br><small class="muted">${esc(times)}</small>` : ''}${isUnres ? ` <span class="tag review-chip">Uncertain date</span>` : ''}</div>`;
+    }
+    if (colId === 'details') {
+      return `<div class="details-cell">${esc(r.fields.Details || '—')}</div>`;
+    }
+    if (colId === 'person_in_charge') {
+      return esc(r.fields['Person in charge'] || '—');
+    }
+    if (colId === 'facilitator') {
+      return esc(r.fields.Facilitator || '—');
+    }
+  }
+
+  if (t === 'Student Forum') {
+    if (colId === 'date_time') {
+      const date = r.fields.Date || '—';
+      const times = [r.fields['Pacific time (source)'], r.fields['Eastern time (source)']].filter(Boolean).join(' / ');
+      const isUnres = !recordDate(r) && date !== '—';
+      return `<div class="date-cell"><strong>${esc(date)}</strong>${times ? `<br><small class="muted">${esc(times)}</small>` : ''}${isUnres ? ` <span class="tag review-chip">Uncertain date</span>` : ''}</div>`;
+    }
+    if (colId === 'topic') {
+      return `<div class="topic-cell"><strong>${esc(r.fields.Topic || '—')}</strong></div>`;
+    }
+    if (colId === 'expert') {
+      return esc(r.fields.Expert || '—');
+    }
+    if (colId === 'person_in_charge') {
+      return esc(r.fields['Person in charge'] || '—');
+    }
+    if (colId === 'recording') {
+      const recUrls = urls(r, 'Recording');
+      if (recUrls.length > 0) {
+        return `<a class="button primary small recording-btn" href="${esc(recUrls[0])}" target="_blank" rel="noopener noreferrer">Watch recording ↗</a>`;
+      }
+      return '<span class="muted">—</span>';
+    }
+  }
+
+  if (t === 'CRC') {
+    if (colId === 'presenter') {
+      return `<div class="presenter-cell"><strong>${esc(r.fields.Presenter || '—')}</strong></div>`;
+    }
+    if (colId === 'mentor') {
+      return esc(r.fields.Mentor || '—');
+    }
+    if (colId === 'status') {
+      const status = r.fields.Status || 'Unspecified';
+      return `<span class="tag ${crcStatusClass(status)}">${esc(status)}</span>`;
+    }
+    if (colId === 'vmr_date') {
+      const vDate = r.fields['VMR date'] || '—';
+      const isUnres = !recordDate(r) && vDate !== '—';
+      return `<div>${esc(vDate)}${isUnres ? ` <span class="tag review-chip">Uncertain date</span>` : ''}</div>`;
+    }
+  }
+
+  return esc(r.fields[colId] || '—');
+}
+
+function renderHistoricalTableRow(r, t, config) {
+  const isStarred = workspace.favorites.includes(r.id);
+  const hasEdits = Boolean(workspace.edits[r.id]);
+  const isDraft = r.id.startsWith('local:');
+
+  return `<tr class="historical-row ${hasEdits ? 'has-local-edits' : ''}" data-record-id="${esc(r.id)}">
+    ${config.columns.map(c => `<td data-label="${esc(c.label)}" style="${c.align ? `text-align:${c.align};` : ''}">${renderHistoricalTableCell(c.id, r, t)}</td>`).join('')}
+    <td class="cell-actions" style="text-align:right;white-space:nowrap;">
+      ${hasEdits ? chip('Edited', 'local-chip') : ''}
+      ${isDraft ? chip('Draft', 'local-chip') : ''}
+      <button type="button" class="icon-button star ${isStarred ? 'is-starred' : ''}" data-star="${esc(r.id)}" aria-label="${isStarred ? 'Unpin' : 'Pin'} record">${isStarred ? '★' : '☆'}</button>
+      <button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="${esc(t)}">Details</button>
+    </td>
+  </tr>`;
+}
+
+function renderHistoricalTable(rr, t, config) {
+  return `<section class="panel table-panel compact-summary-container">
+    <div class="table-scroll-wrapper">
+      <table class="data-table compact-summary-table" aria-label="${esc(config.label || t)}">
+        <thead>
+          <tr>
+            ${config.columns.map(c => `<th scope="col" style="${c.width ? `width:${c.width};` : ''}${c.align ? `text-align:${c.align};` : ''}">${esc(c.label)}</th>`).join('')}
+            <th scope="col" style="width:140px;text-align:right;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rr.map(r => renderHistoricalTableRow(r, t, config)).join('')}
+        </tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderHistoricalMobileRow(r, t, config) {
+  const recUrls = urls(r, 'Recording');
+  const isUncertain = !recordDate(r) && Boolean(dateValue(r));
+  const isDraft = r.id.startsWith('local:');
+  const hasEdits = Boolean(workspace.edits[r.id]);
+  const isStarred = workspace.favorites.includes(r.id);
+
+  let primaryTitle = '';
+  let subtitle = '';
+  let statusBadge = '';
+
+  if (t === 'CPS Academy VMRs') {
+    primaryTitle = r.fields.Topic || r.fields['Session title'] || 'Untitled session';
+    subtitle = (r.fields.Topic && r.fields['Session title'] && r.fields.Topic !== r.fields['Session title']) ? r.fields['Session title'] : '';
+  } else if (t === 'Special VMRs') {
+    primaryTitle = r.fields.Details || r.fields.Type || 'Special VMR';
+    subtitle = r.fields.Type || '';
+  } else if (t === 'Student Forum') {
+    primaryTitle = r.fields.Topic || 'Student Forum';
+    subtitle = r.fields.Type || '';
+  } else if (t === 'CRC') {
+    primaryTitle = r.fields.Presenter || 'Clinical Reasoning Case';
+    subtitle = r.fields.Mentor ? `Mentor: ${r.fields.Mentor}` : '';
+    if (r.fields.Status) {
+      statusBadge = `<span class="tag ${crcStatusClass(r.fields.Status)}">${esc(r.fields.Status)}</span>`;
+    }
+  }
+
+  const essentialItems = config.essentialKeys.map(k => {
+    const val = r.fields[k] || '';
+    if (!val) return '';
+    return `<div class="compact-field-item"><dt>${esc(k)}</dt><dd>${esc(val)}</dd></div>`;
+  }).filter(Boolean).join('');
+
+  const secondaryItems = config.secondaryKeys.map(k => {
+    const val = r.fields[k] || '';
+    return `<div class="compact-field-item"><dt>${esc(k)}</dt><dd>${esc(val || '—')}</dd></div>`;
+  }).join('');
+
+  return `<article class="panel mobile-record compact-summary-card" data-record-id="${esc(r.id)}">
+    <div class="compact-card-header">
+      <div class="compact-card-meta">
+        ${statusBadge}
+        ${isUncertain ? chip('Uncertain date', 'review-chip') : ''}
+        ${hasEdits ? chip('Local changes', 'local-chip') : ''}
+        ${isDraft ? chip('Local draft', 'local-chip') : ''}
+      </div>
+      <button type="button" class="icon-button star ${isStarred ? 'is-starred' : ''}" data-star="${esc(r.id)}" aria-label="${isStarred ? 'Unpin' : 'Pin'} record">${isStarred ? '★' : '☆'}</button>
+    </div>
+    <h3 class="compact-card-title">${esc(primaryTitle)}</h3>
+    ${subtitle ? `<p class="compact-card-subtitle muted">${esc(subtitle)}</p>` : ''}
+    <dl class="compact-essential-fields">
+      ${essentialItems}
+    </dl>
+    ${recUrls.length ? `<div class="compact-direct-actions"><a class="button primary small recording-btn" href="${esc(recUrls[0])}" target="_blank" rel="noopener noreferrer">Watch recording ↗</a></div>` : ''}
+    ${config.secondaryKeys.length ? `<details class="compact-secondary-details"><summary class="compact-details-summary">All fields (${config.secondaryKeys.length} more)</summary><dl class="compact-secondary-fields-list">${secondaryItems}</dl></details>` : ''}
+    <div class="card-actions compact-card-footer">
+      <button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="${esc(t)}">Open details</button>
+      <small class="muted compact-source-ref">${esc(source(r))}</small>
+    </div>
+  </article>`;
+}
+
+function renderHistoricalMobileList(rr, t, config) {
+  return `<section class="mobile-record-list compact-summary-mobile-list">${rr.map(r => renderHistoricalMobileRow(r, t, config)).join('')}</section>`;
+}
+
+function focusAccessibleResultsHeading() {
+  if (typeof document === 'undefined') return;
+  const heading = document.getElementById('results-heading');
+  if (heading) {
+    if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+    try {
+      heading.focus({ preventScroll: false });
+      heading.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch {}
+    return;
+  }
+  focusAccessibleDestination(true);
 }
 function workspaceView(){
   const hasRollback = !!sessionStorage.getItem('cps-rollback-snapshot');
@@ -2943,6 +3624,612 @@ function bindOrgEvents(){
   });
 }
 
+const RESIDENCY_MONTHS = [
+  { key: 'October', name: 'October', headingId: 'Residency Programs:3', label: 'OCTOBER' },
+  { key: 'November', name: 'November', headingId: 'Residency Programs:8', label: 'NOVEMBER' },
+  { key: 'December', name: 'December', headingId: 'Residency Programs:13', label: 'DECEMBER' },
+  { key: 'January', name: 'January', headingId: 'Residency Programs:17', label: 'JANUARY' },
+  { key: 'February', name: 'February', headingId: 'Residency Programs:21', label: 'FEBRUARY' }
+];
+
+function residencyProgramsView() {
+  const allRecords = records('Residency Programs');
+  const classified = allRecords.map(r => ({ record: r, classification: getRecordClassification(r, 'Residency Programs') }));
+  const substantiveSessions = classified.filter(x => x.classification.isSubstantive);
+  const sourceHeadings = classified.filter(x => x.classification.isStructural);
+  const totalSessions = substantiveSessions.length;
+
+  const queryTerms = residencySearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+
+  function matchesFilters(x) {
+    if (!queryTerms.length) return true;
+    const f = x.record.fields || {};
+    const c = x.classification;
+    const hay = `${f['Residency Programs'] || ''} ${f['Resident/attending discussant'] || ''} ${f['Junior Member'] || ''} ${f.Facilitator || ''} ${c.month || ''}`.toLowerCase();
+    return queryTerms.every(t => hay.includes(t));
+  }
+
+  const visibleSessions = substantiveSessions.filter(matchesFilters);
+  const isFiltering = queryTerms.length > 0;
+
+  const areaGroup = Object.keys(groups).find(g => groups[g].includes('Residency Programs')) || 'Sessions';
+  const areaButtons = groups[areaGroup]
+    .map(t => `<button type="button" class="button ${t === tab ? 'primary' : 'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('');
+
+  const toolbarHtml = `
+    <div class="toolbar area-tabs">${areaButtons}</div>
+    <div class="residency-toolbar panel">
+      <div class="residency-toolbar-controls">
+        <div class="residency-search-wrap">
+          <span class="residency-search-icon" aria-hidden="true">⌕</span>
+          <input type="search" id="residency-search-input" class="input residency-search-input" placeholder="Search residency sessions, discussants, or facilitators…" value="${esc(residencySearchQuery)}" aria-label="Search residency programs">
+          ${residencySearchQuery ? `<button type="button" class="icon-button residency-search-clear" id="residency-clear-input" aria-label="Clear search">×</button>` : ''}
+        </div>
+        <div class="residency-filter-actions">
+          <button type="button" class="button ${residencyShowSource ? 'primary' : 'secondary'} small" id="residency-toggle-source" title="Inspect source month label headings preserved from workbook">
+            📋 Source month labels (${sourceHeadings.length})
+          </button>
+          ${isFiltering ? `<button type="button" class="button secondary small" id="residency-reset-filters">Reset filters</button>` : ''}
+        </div>
+      </div>
+      <div class="residency-toolbar-meta">
+        <p class="muted results-count" id="residency-results-meta">
+          ${formatResultsCount(isFiltering ? visibleSessions.map(x => x.record) : allRecords, 'Residency Programs', allRecords)}
+        </p>
+      </div>
+    </div>
+  `;
+
+  const sourceDrawerHtml = `
+    <details class="panel residency-source-drawer" id="residency-source-drawer" ${residencyShowSource ? 'open' : ''}>
+      <summary class="residency-source-summary">
+        <strong>📋 Source Month Labels (${sourceHeadings.length} workbook headings)</strong>
+        <span class="muted" style="font-size:12px;">Preserved from original workbook snapshot · Excluded from session counts</span>
+      </summary>
+      <div class="residency-source-body">
+        <p class="muted" style="font-size:13px; margin: 4px 0 12px 0;">
+          These rows are month labels in the source workbook tab (OCTOBER, NOVEMBER, DECEMBER, JANUARY, FEBRUARY). They are structural section markers and do not have scheduled session times. If edited locally with session details, they dynamically promote to substantive sessions.
+        </p>
+        <div class="hub-grid residency-source-cards">
+          ${sourceHeadings.map(x => card(x.record, 'Residency Programs')).join('')}
+        </div>
+      </div>
+    </details>
+  `;
+
+  const monthSectionsHtml = RESIDENCY_MONTHS.map(month => {
+    const monthSessions = visibleSessions.filter(x => x.classification.month === month.name);
+    const hasSessions = monthSessions.length > 0;
+    const isExpanded = residencyExpandedMonths.has(month.name);
+
+    let monthContentHtml = '';
+    if (hasSessions) {
+      monthContentHtml = `<div class="residency-sessions-list">
+        ${monthSessions.map(x => {
+          const r = x.record;
+          const f = r.fields || {};
+          const c = x.classification;
+          const isPinned = workspace.favorites.includes(r.id);
+          const hasEdits = Boolean(workspace.edits[r.id]);
+          const dynChip = c.wasHeading ? chip('Locally edited from heading', 'local-chip') : '';
+          const localChip = hasEdits ? chip('Local changes', 'local-chip') : '';
+          const flagsChip = (r.flags && r.flags.length) ? chip('Verify source details', 'review-chip') : '';
+
+          return `
+            <article class="panel residency-session-card" data-record-id="${esc(r.id)}">
+              <div class="residency-session-header">
+                <div>
+                  <span class="tag tag-session">${esc(month.name)} Session</span>
+                  ${localChip} ${dynChip} ${flagsChip}
+                  <h3 class="residency-session-title">${esc(f['Residency Programs'] || 'Allegheny Internal Medicine')}</h3>
+                </div>
+              </div>
+              <div class="residency-roles-trio">
+                <div class="role-trio-item">
+                  <small class="muted">Resident / Attending Discussant</small>
+                  <strong>${esc(f['Resident/attending discussant'] || 'Not entered')}</strong>
+                </div>
+                <div class="role-trio-item">
+                  <small class="muted">Junior Member</small>
+                  <strong>${esc(f['Junior Member'] || 'Not entered')}</strong>
+                </div>
+                <div class="role-trio-item">
+                  <small class="muted">Facilitator</small>
+                  <strong>${esc(f.Facilitator || 'Not entered')}</strong>
+                </div>
+              </div>
+              <div class="residency-session-footer">
+                <div class="card-actions">
+                  ${calendarButton(r, 'Residency Programs')}
+                  <button type="button" class="button primary small" data-open="${esc(r.id)}" data-area="Residency Programs" data-action="view">Open details</button>
+                  <button type="button" class="icon-button star ${isPinned ? 'is-starred' : ''}" data-star="${esc(r.id)}" aria-label="${isPinned ? 'Unpin' : 'Pin'} record">${isPinned ? '★' : '☆'}</button>
+                </div>
+                <small class="muted">${esc(source(r))}</small>
+              </div>
+            </article>
+          `;
+        }).join('')}
+      </div>`;
+    } else {
+      monthContentHtml = `
+        <div class="empty-month-box panel">
+          <p class="muted empty-month-notice">No session entered in this source</p>
+        </div>
+      `;
+    }
+
+    return `
+      <details class="panel residency-month-accordion" id="residency-month-${month.key.toLowerCase()}" ${hasSessions || isExpanded ? 'open' : ''} data-month="${esc(month.name)}">
+        <summary class="residency-month-summary">
+          <div class="residency-month-summary-left">
+            <span class="residency-month-name"><strong>${esc(month.name)}</strong></span>
+            <span class="tag ${hasSessions ? 'tag-session-count' : 'tag-empty-count'}">${monthSessions.length} session${monthSessions.length === 1 ? '' : 's'}</span>
+          </div>
+          <span class="muted residency-month-toggle-label">${hasSessions ? 'Details' : 'Empty'}</span>
+        </summary>
+        <div class="residency-month-body">
+          ${monthContentHtml}
+        </div>
+      </details>
+    `;
+  }).join('');
+
+  let contentHtml = '';
+  if (isFiltering && visibleSessions.length === 0) {
+    contentHtml = `
+      <section class="empty-state panel">
+        <h2>No matching sessions</h2>
+        <p>No residency sessions matched "${esc(residencySearchQuery)}".</p>
+        <button type="button" class="button secondary" id="residency-empty-clear">Clear filter</button>
+      </section>
+    `;
+  } else {
+    contentHtml = `
+      <div class="residency-months-container">
+        ${monthSectionsHtml}
+      </div>
+    `;
+  }
+
+  $('#page').innerHTML = `
+    <div class="residency-container" id="ResidencyPrograms">
+      ${header('Residency Programs', descriptions['Residency Programs'] || 'Partner hospital residency programs, discussants and session facilitators.')}
+      ${banner()}
+      ${sopBanner('Residency Programs')}
+      ${areaPicker()}
+      ${toolbarHtml}
+      ${contentHtml}
+      ${sourceDrawerHtml}
+    </div>
+  `;
+
+  const searchInput = $('#residency-search-input');
+  if (searchInput) {
+    searchInput.oninput = e => {
+      residencySearchQuery = e.target.value;
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+      render();
+      const nextInput = $('#residency-search-input');
+      if (nextInput) {
+        nextInput.focus();
+        try { nextInput.setSelectionRange(start, end); } catch {}
+      }
+    };
+  }
+
+  const clearInput = $('#residency-clear-input');
+  if (clearInput) clearInput.onclick = () => { residencySearchQuery = ''; render(); focusAccessibleDestination(); };
+
+  const resetBtn = $('#residency-reset-filters');
+  if (resetBtn) resetBtn.onclick = () => { clearSectionFilters('Residency Programs'); focusAccessibleDestination(); };
+
+  const emptyClearBtn = $('#residency-empty-clear');
+  if (emptyClearBtn) emptyClearBtn.onclick = () => { clearSectionFilters('Residency Programs'); focusAccessibleDestination(); };
+
+  const toggleSourceBtn = $('#residency-toggle-source');
+  if (toggleSourceBtn) {
+    toggleSourceBtn.onclick = () => {
+      residencyShowSource = !residencyShowSource;
+      const drawer = $('#residency-source-drawer');
+      if (drawer) {
+        drawer.open = residencyShowSource;
+        if (residencyShowSource) drawer.scrollIntoView({ behavior: 'smooth' });
+      }
+    };
+  }
+
+  const sourceDrawer = $('#residency-source-drawer');
+  if (sourceDrawer) {
+    sourceDrawer.ontoggle = () => { residencyShowSource = sourceDrawer.open; };
+  }
+
+  document.querySelectorAll('.residency-month-accordion').forEach(d => {
+    d.ontoggle = () => {
+      const m = d.dataset.month;
+      if (m) {
+        if (d.open) residencyExpandedMonths.add(m);
+        else residencyExpandedMonths.delete(m);
+      }
+    };
+  });
+}
+
+const CRC_PAGE_SIZE = 25;
+
+function crcRetiredView() {
+  const allRecords = records('CRC - retired');
+  const classified = allRecords.map(r => ({ record: r, classification: getRecordClassification(r, 'CRC - retired') }));
+  const substantiveCases = classified.filter(x => x.classification.isSubstantive);
+  const sourceHeadings = classified.filter(x => x.classification.category === RECORD_CATEGORY.SOURCE_HEADING);
+  const placeholders = classified.filter(x => x.classification.category === RECORD_CATEGORY.PLACEHOLDER);
+  const unknowns = classified.filter(x => x.classification.category === RECORD_CATEGORY.UNKNOWN);
+
+  const totalCases = substantiveCases.length;
+  const totalStructural = sourceHeadings.length + placeholders.length + unknowns.length;
+
+  const roundsData = CRC_RETIRED_ROUNDS.map(cfg => {
+    const count = substantiveCases.filter(x => x.classification.round === cfg.round).length;
+    return { round: cfg.round, count, headingRow: cfg.headingRow };
+  });
+
+  const countries = [...new Set(substantiveCases.map(x => (x.record.fields["PRESENTER'S COUNTRY"] || '').trim()).filter(Boolean))].sort();
+  const queryTerms = crcSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+
+  function matchesFilters(x) {
+    const f = x.record.fields || {};
+    const c = x.classification;
+
+    if (crcRoundFilter !== 'all' && c.round !== crcRoundFilter) return false;
+
+    if (crcStatusFilter === 'complete' && f['CASE COMPLETE?'] !== '1') return false;
+    if (crcStatusFilter === 'presented' && f['PRESENTED?'] !== '1') return false;
+    if (crcStatusFilter === 'contacted' && f['CONTACTED?'] !== '1') return false;
+    if (crcStatusFilter === 'open' && (f['CASE COMPLETE?'] === '1' || f['PRESENTED?'] === '1')) return false;
+
+    if (crcCountryFilter !== 'all' && (f["PRESENTER'S COUNTRY"] || '').trim() !== crcCountryFilter) return false;
+
+    if (!queryTerms.length) return true;
+    const hay = `${f.MENTEE || ''} ${f['CPSOLVERS MENTOR'] || ''} ${f['CONTACT INFO'] || ''} ${f['DATE OF PRESENTATION'] || ''} ${f["PRESENTER'S COUNTRY"] || ''} ${f['ISSUES/CONCERNS'] || ''} ${c.round || ''}`.toLowerCase();
+    return queryTerms.every(t => hay.includes(t));
+  }
+
+  const visibleCases = substantiveCases.filter(matchesFilters);
+  const isFiltering = queryTerms.length > 0 || crcRoundFilter !== 'all' || crcStatusFilter !== 'all' || crcCountryFilter !== 'all';
+
+  const totalPages = Math.max(1, Math.ceil(visibleCases.length / CRC_PAGE_SIZE));
+  crcPage = Math.min(Math.max(0, crcPage), totalPages - 1);
+  const currentCases = showAll ? visibleCases : visibleCases.slice(crcPage * CRC_PAGE_SIZE, (crcPage + 1) * CRC_PAGE_SIZE);
+
+  const areaGroup = Object.keys(groups).find(g => groups[g].includes('CRC - retired')) || 'People';
+  const areaButtons = groups[areaGroup]
+    .map(t => `<button type="button" class="button ${t === tab ? 'primary' : 'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('');
+
+  const roundNavHtml = `
+    <nav class="crc-round-nav" aria-label="CRC mentorship rounds navigation">
+      <div class="crc-round-nav-label">Rounds overview:</div>
+      <div class="crc-round-chips">
+        <button type="button" class="crc-round-chip ${crcRoundFilter === 'all' ? 'active' : ''}" data-filter-round="all">
+          <span class="crc-round-chip-name">All rounds</span>
+          <span class="crc-round-chip-count">${totalCases}</span>
+        </button>
+        ${roundsData.map(r => `
+          <button type="button" class="crc-round-chip ${crcRoundFilter === r.round ? 'active' : ''}" data-filter-round="${esc(r.round)}">
+            <span class="crc-round-chip-name">${esc(r.round)}</span>
+            <span class="crc-round-chip-count">${r.count}</span>
+          </button>
+        `).join('')}
+        <button type="button" class="crc-round-chip structural-chip ${crcShowSource ? 'active' : ''}" id="crc-toggle-source-btn" title="Inspect ${totalStructural} source structural entries (round headings and template placeholders)">
+          <span class="crc-round-chip-name">Source entries</span>
+          <span class="crc-round-chip-count">${totalStructural}</span>
+        </button>
+      </div>
+    </nav>
+  `;
+
+  const toolbarHtml = `
+    <div class="toolbar area-tabs">${areaButtons}</div>
+    ${roundNavHtml}
+    <div class="crc-toolbar panel">
+      <div class="crc-toolbar-controls">
+        <div class="crc-search-wrap">
+          <span class="crc-search-icon" aria-hidden="true">⌕</span>
+          <input type="search" id="crc-search-input" class="input crc-search-input" placeholder="Search mentee, mentor, country, or round (e.g. Round 3)…" value="${esc(crcSearchQuery)}" aria-label="Filter retired CRC cases">
+          ${crcSearchQuery ? `<button type="button" class="icon-button crc-search-clear" id="crc-clear-input" aria-label="Clear filter">×</button>` : ''}
+        </div>
+        <label class="crc-select-label">
+          <span class="muted">Round:</span>
+          <select class="select crc-select" id="crc-round-select" aria-label="Filter by round">
+            <option value="all" ${crcRoundFilter === 'all' ? 'selected' : ''}>All rounds (${totalCases})</option>
+            ${roundsData.map(r => `<option value="${esc(r.round)}" ${crcRoundFilter === r.round ? 'selected' : ''}>${esc(r.round)} (${r.count} cases)</option>`).join('')}
+          </select>
+        </label>
+        <label class="crc-select-label">
+          <span class="muted">Status:</span>
+          <select class="select crc-select" id="crc-status-select" aria-label="Filter by status">
+            <option value="all" ${crcStatusFilter === 'all' ? 'selected' : ''}>All statuses</option>
+            <option value="complete" ${crcStatusFilter === 'complete' ? 'selected' : ''}>Case complete</option>
+            <option value="presented" ${crcStatusFilter === 'presented' ? 'selected' : ''}>Presented</option>
+            <option value="contacted" ${crcStatusFilter === 'contacted' ? 'selected' : ''}>Contacted</option>
+            <option value="open" ${crcStatusFilter === 'open' ? 'selected' : ''}>In progress / unrecorded</option>
+          </select>
+        </label>
+        <label class="crc-select-label">
+          <span class="muted">Country:</span>
+          <select class="select crc-select" id="crc-country-select" aria-label="Filter by country">
+            <option value="all" ${crcCountryFilter === 'all' ? 'selected' : ''}>All countries (${countries.length})</option>
+            ${countries.map(c => `<option value="${esc(c)}" ${crcCountryFilter === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="toggle-control crc-show-all-label">
+          <input type="checkbox" id="show-all-toggle" ${showAll ? 'checked' : ''}>
+          <span>Show all</span>
+        </label>
+        ${isFiltering ? `<button type="button" class="button secondary small" id="crc-reset-filters">Reset filters</button>` : ''}
+      </div>
+      <div class="crc-toolbar-meta">
+        <p class="muted results-count" id="crc-results-meta">
+          ${formatResultsCount(isFiltering ? visibleCases.map(x => x.record) : allRecords, 'CRC - retired', allRecords)}
+        </p>
+      </div>
+    </div>
+  `;
+
+  const sourceDrawerHtml = `
+    <details class="panel crc-source-drawer" id="crc-source-drawer" ${crcShowSource || showAll ? 'open' : ''}>
+      <summary class="crc-source-summary">
+        <strong>📋 Source Entries (${sourceHeadings.length} round headings, ${placeholders.length} placeholders${unknowns.length ? `, ${unknowns.length} unknowns` : ''})</strong>
+        <span class="muted" style="font-size:12px;">Preserved from original workbook snapshot · Excluded from case counts</span>
+      </summary>
+      <div class="crc-source-body">
+        <p class="muted" style="font-size:13px; margin: 4px 0 12px 0;">
+          These rows are round boundary labels and template placeholders from the source workbook tab. If edited locally with substantive case details, they dynamically promote to active mentorship cases.
+        </p>
+        <div class="hub-grid crc-source-grid">
+          ${sourceHeadings.concat(placeholders).concat(unknowns).map(x => card(x.record, 'CRC - retired')).join('')}
+        </div>
+      </div>
+    </details>
+  `;
+
+  const renderCrcDesktopRow = x => {
+    const r = x.record;
+    const f = r.fields || {};
+    const c = x.classification;
+    const isPinned = workspace.favorites.includes(r.id);
+    const hasEdits = Boolean(workspace.edits[r.id]);
+    const localChip = hasEdits ? chip('Local changes', 'local-chip') : '';
+    const dynChip = c.wasPlaceholder ? chip('Locally edited from placeholder', 'local-chip') : (c.wasHeading ? chip('Locally edited from heading', 'local-chip') : '');
+    const flagsChip = (r.flags && r.flags.length) ? chip('Verify', 'review-chip') : '';
+
+    const isComplete = f['CASE COMPLETE?'] === '1';
+    const isPresented = f['PRESENTED?'] === '1';
+    const isContacted = f['CONTACTED?'] === '1';
+
+    return `
+      <tr class="crc-case-row" data-id="${esc(r.id)}">
+        <td class="td-round">
+          <span class="tag tag-round">${esc(c.round || 'Round')}</span>
+        </td>
+        <td class="td-mentee">
+          <div class="crc-mentee-wrap">
+            <strong class="crc-mentee-name">${esc(f.MENTEE || 'Mentorship case')}</strong>
+            ${(localChip || dynChip || flagsChip) ? `<div class="crc-badges-wrap">${localChip}${dynChip}${flagsChip}</div>` : ''}
+            ${f['CONTACT INFO'] ? `<small class="muted crc-contact-info">${esc(f['CONTACT INFO'])}</small>` : ''}
+          </div>
+        </td>
+        <td class="td-country">
+          <span>${esc(f["PRESENTER'S COUNTRY"] || '—')}</span>
+        </td>
+        <td class="td-mentor">
+          <span>${esc(f['CPSOLVERS MENTOR'] || 'Unassigned')}</span>
+        </td>
+        <td class="td-date">
+          <span class="crc-date-val">${esc(f['DATE OF PRESENTATION'] || '—')}</span>
+        </td>
+        <td class="td-status">
+          <div class="crc-status-chips">
+            ${isComplete ? chip('Case complete', 'ready-chip') : ''}
+            ${isPresented ? chip('Presented', 'ready-chip') : ''}
+            ${isContacted ? chip('Contacted', 'ready-chip') : ''}
+            ${!isComplete && !isPresented && !isContacted ? '<span class="status-neutral muted">In progress / unrecorded</span>' : ''}
+          </div>
+        </td>
+        <td class="td-actions">
+          <div class="crc-actions-wrap">
+            <button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="CRC - retired">Details</button>
+            <button type="button" class="icon-button star ${isPinned ? 'is-starred' : ''}" data-star="${esc(r.id)}" aria-label="${isPinned ? 'Unpin' : 'Pin'} record">${isPinned ? '★' : '☆'}</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  };
+
+  const renderCrcMobileCard = x => {
+    const r = x.record;
+    const f = r.fields || {};
+    const c = x.classification;
+    const isPinned = workspace.favorites.includes(r.id);
+    const hasEdits = Boolean(workspace.edits[r.id]);
+    const localChip = hasEdits ? chip('Local changes', 'local-chip') : '';
+    const dynChip = c.wasPlaceholder ? chip('Locally edited from placeholder', 'local-chip') : (c.wasHeading ? chip('Locally edited from heading', 'local-chip') : '');
+    const flagsChip = (r.flags && r.flags.length) ? chip('Verify', 'review-chip') : '';
+
+    const isComplete = f['CASE COMPLETE?'] === '1';
+    const isPresented = f['PRESENTED?'] === '1';
+    const isContacted = f['CONTACTED?'] === '1';
+
+    return `
+      <article class="panel crc-mobile-card" data-record-id="${esc(r.id)}">
+        <div class="crc-mobile-header">
+          <div>
+            <span class="tag tag-round">${esc(c.round || 'Round')}</span>
+            ${f["PRESENTER'S COUNTRY"] ? `<span class="tag tag-country">${esc(f["PRESENTER'S COUNTRY"])}</span>` : ''}
+            ${localChip} ${dynChip} ${flagsChip}
+            <h3 class="crc-mobile-mentee">${esc(f.MENTEE || 'Mentorship case')}</h3>
+          </div>
+          <button type="button" class="icon-button star ${isPinned ? 'is-starred' : ''}" data-star="${esc(r.id)}" aria-label="${isPinned ? 'Unpin' : 'Pin'} record">${isPinned ? '★' : '☆'}</button>
+        </div>
+        <p class="crc-mobile-mentor"><strong>Mentor:</strong> ${esc(f['CPSOLVERS MENTOR'] || 'Unassigned')}</p>
+        ${f['DATE OF PRESENTATION'] ? `<p class="muted crc-mobile-date"><strong>Presented:</strong> ${esc(f['DATE OF PRESENTATION'])}</p>` : ''}
+        ${f['CONTACT INFO'] ? `<p class="muted crc-mobile-contact"><strong>Contact:</strong> ${esc(f['CONTACT INFO'])}</p>` : ''}
+        <div class="crc-status-chips" style="margin-top: 6px;">
+          ${isComplete ? chip('Case complete', 'ready-chip') : ''}
+          ${isPresented ? chip('Presented', 'ready-chip') : ''}
+          ${isContacted ? chip('Contacted', 'ready-chip') : ''}
+          ${!isComplete && !isPresented && !isContacted ? '<span class="status-neutral muted">In progress / unrecorded</span>' : ''}
+        </div>
+        <div class="card-actions" style="margin-top: 10px;">
+          <button type="button" class="button primary small" data-open="${esc(r.id)}" data-area="CRC - retired">Open details</button>
+        </div>
+      </article>
+    `;
+  };
+
+  let contentHtml = '';
+  if (visibleCases.length === 0) {
+    contentHtml = `
+      <section class="empty-state panel">
+        <h2>No matching cases</h2>
+        <p>No retired clinical reasoning cases matched your criteria.</p>
+        <button type="button" class="button secondary" id="crc-empty-clear">Clear filters</button>
+      </section>
+    `;
+  } else {
+    const desktopTableHtml = `
+      <div class="crc-table-container panel">
+        <table class="data-table crc-case-table">
+          <thead>
+            <tr>
+              <th scope="col">Round</th>
+              <th scope="col">Mentee (Presenter)</th>
+              <th scope="col">Country</th>
+              <th scope="col">CPSolvers Mentor</th>
+              <th scope="col">Date of Presentation</th>
+              <th scope="col">Status</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${currentCases.map(renderCrcDesktopRow).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    const mobileListHtml = `
+      <div class="crc-mobile-list">
+        ${currentCases.map(renderCrcMobileCard).join('')}
+      </div>
+    `;
+
+    const isMobile = typeof window !== 'undefined' && (window.innerWidth || 0) <= 760;
+    contentHtml = isMobile ? mobileListHtml : desktopTableHtml;
+  }
+
+  const paginationHtml = (!showAll && totalPages > 1) ? `
+    <div class="toolbar pagination">
+      <button type="button" class="button secondary" id="crc-prev-btn" ${crcPage === 0 ? 'disabled' : ''}>Previous</button>
+      <span>Page ${crcPage + 1} of ${totalPages} (${visibleCases.length} cases)</span>
+      <button type="button" class="button secondary" id="crc-next-btn" ${(crcPage + 1) >= totalPages ? 'disabled' : ''}>Next</button>
+    </div>
+  ` : '';
+
+  $('#page').innerHTML = `
+    <div class="crc-retired-container" id="CRCRetired">
+      ${header('CRC - retired', descriptions['CRC - retired'] || 'Archived and legacy clinical reasoning case mentorship records.')}
+      ${banner()}
+      ${sopBanner('CRC - retired')}
+      ${areaPicker()}
+      ${toolbarHtml}
+      ${contentHtml}
+      ${sourceDrawerHtml}
+      ${paginationHtml}
+    </div>
+  `;
+
+  const searchInput = $('#crc-search-input');
+  if (searchInput) {
+    searchInput.oninput = e => {
+      crcSearchQuery = e.target.value;
+      crcPage = 0;
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+      render();
+      const nextInput = $('#crc-search-input');
+      if (nextInput) {
+        nextInput.focus();
+        try { nextInput.setSelectionRange(start, end); } catch {}
+      }
+    };
+  }
+
+  const clearInput = $('#crc-clear-input');
+  if (clearInput) clearInput.onclick = () => { crcSearchQuery = ''; crcPage = 0; render(); focusAccessibleDestination(); };
+
+  const roundSelect = $('#crc-round-select');
+  if (roundSelect) roundSelect.onchange = e => { crcRoundFilter = e.target.value; crcPage = 0; render(); focusAccessibleDestination(); };
+
+  const statusSelect = $('#crc-status-select');
+  if (statusSelect) statusSelect.onchange = e => { crcStatusFilter = e.target.value; crcPage = 0; render(); focusAccessibleDestination(); };
+
+  const countrySelect = $('#crc-country-select');
+  if (countrySelect) countrySelect.onchange = e => { crcCountryFilter = e.target.value; crcPage = 0; render(); focusAccessibleDestination(); };
+
+  const showAllToggle = $('#show-all-toggle');
+  if (showAllToggle) showAllToggle.onchange = e => { showAll = e.target.checked; crcPage = 0; render(); };
+
+  const resetBtn = $('#crc-reset-filters');
+  if (resetBtn) resetBtn.onclick = () => { clearSectionFilters('CRC - retired'); focusAccessibleDestination(); };
+
+  const emptyClearBtn = $('#crc-empty-clear');
+  if (emptyClearBtn) emptyClearBtn.onclick = () => { clearSectionFilters('CRC - retired'); focusAccessibleDestination(); };
+
+  document.querySelectorAll('[data-filter-round]').forEach(b => {
+    b.onclick = () => {
+      crcRoundFilter = b.dataset.filterRound;
+      crcPage = 0;
+      render();
+      focusAccessibleDestination();
+    };
+  });
+
+  const toggleSourceBtn = $('#crc-toggle-source-btn');
+  if (toggleSourceBtn) {
+    toggleSourceBtn.onclick = () => {
+      crcShowSource = !crcShowSource;
+      const drawer = $('#crc-source-drawer');
+      if (drawer) {
+        drawer.open = crcShowSource;
+        if (crcShowSource) drawer.scrollIntoView({ behavior: 'smooth' });
+      }
+    };
+  }
+
+  const sourceDrawer = $('#crc-source-drawer');
+  if (sourceDrawer) {
+    sourceDrawer.ontoggle = () => { crcShowSource = sourceDrawer.open; };
+  }
+
+  const prevBtn = $('#crc-prev-btn');
+  if (prevBtn) prevBtn.onclick = () => {
+    if (crcPage > 0) {
+      crcPage--;
+      render();
+      focusAccessibleDestination(true);
+    }
+  };
+
+  const nextBtn = $('#crc-next-btn');
+  if (nextBtn) nextBtn.onclick = () => {
+    if ((crcPage + 1) < totalPages) {
+      crcPage++;
+      render();
+      focusAccessibleDestination(true);
+    }
+  };
+}
+
 function render(){
   nav();
   updateProfileDisplay();
@@ -2956,11 +4243,18 @@ function render(){
   else if(tab==='Important links')importantLinksView();
   else if(tab==='Conferences')conferencesView();
   else if(tab==='Research @CPSolvers')researchView();
+  else if(tab==='Residency Programs')residencyProgramsView();
+  else if(tab==='CRC - retired')crcRetiredView();
   else listing();
   bindCalendarButtons();
   document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>navigate(b.dataset.go));
-  document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openRecord(b.dataset.open,b.dataset.area,b.dataset.role));
-  document.querySelectorAll('[data-record-menu]').forEach(b=>b.onclick=e=>{e.stopPropagation();openRecordActionsMenu(b.dataset.recordMenu,b.dataset.area||tab);});
+  document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{
+    trackDialogOpener(b);
+    if(typeof setSectionAnchor==='function') setSectionAnchor(b.dataset.area || tab, b.dataset.open);
+    const isDirect = b.dataset.action === 'staff' || Boolean(b.dataset.role);
+    openRecord(b.dataset.open, b.dataset.area, b.dataset.role, isDirect);
+  });
+  document.querySelectorAll('[data-record-menu]').forEach(b=>b.onclick=e=>{e.stopPropagation();trackDialogOpener(b);openRecordActionsMenu(b.dataset.recordMenu,b.dataset.area||tab);});
   document.querySelectorAll('.gap-action-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();claimRole(b.dataset.open,b.dataset.role);});
   document.querySelectorAll('.staff-token').forEach(b=>b.onclick=e=>{e.stopPropagation();openStaffTokenDialog(b.dataset.sessionId,b.dataset.role,b.dataset.tokenName);});
   document.querySelectorAll('.staff-add-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();openStaffAddDialog(b.dataset.sessionId,b.dataset.addRole);});
@@ -3546,19 +4840,22 @@ function openRecordActionsMenu(id, area=tab){
  const timing=pendingTime?{status:'unresolved'}:SessionCore.parseSessionTime(r);
  const canCal=timing.status==='resolved'&&['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs'].includes(area);
  $('#record-actions-body').innerHTML=`
+  <button type="button" class="button secondary" id="menu-act-view" style="width:100%;justify-content:flex-start;">👁 View Details Summary</button>
   <button type="button" class="button primary" id="menu-act-open" style="width:100%;justify-content:flex-start;">✎ Staff &amp; Edit Details</button>
   ${canCal?`<button type="button" class="button secondary" id="menu-act-cal" style="width:100%;justify-content:flex-start;">📅 Add to Calendar (${timing.durationAssumed?'60m assumed':'Export .ics'})</button>`:''}
   <button type="button" class="button secondary" id="menu-act-star" style="width:100%;justify-content:flex-start;">${isFav?'★ Unpin from Quick Access':'☆ Pin to Quick Access'}</button>
  `;
- $('#menu-act-open').onclick=()=>{dialog.close();openRecord(id,area);};
+ $('#menu-act-view').onclick=()=>{dialog.close();openRecord(id,area,null,false);};
+ $('#menu-act-open').onclick=()=>{dialog.close();openRecord(id,area,null,true);};
  if(canCal&&$('#menu-act-cal'))$('#menu-act-cal').onclick=()=>{dialog.close();downloadCalendar(id,area);};
  $('#menu-act-star').onclick=()=>{dialog.close();const willBeStarred=!workspace.favorites.includes(id);if(mutate(w=>{w.favorites=willBeStarred?[...w.favorites,id]:w.favorites.filter(x=>x!==id)})){render();toast(willBeStarred?'Pinned to favorites':'Unpinned from favorites');}};
  dialog.showModal();
 }
-function openRecord(id,t,role){editingTab=t;selected=records(t).find(r=>r.id===id);mutate(w=>{w.recent=[{id,tab:t,at:new Date().toISOString()},...(w.recent||[]).filter(x=>x.id!==id)].slice(0,10);});editDialog(false,role)}
+let detailMode='read';
+function openRecord(id,t,role,directEdit=false){editingTab=t||tab;selected=records(editingTab).find(r=>r.id===id);if(!selected)return;mutate(w=>{w.recent=[{id,tab:editingTab,at:new Date().toISOString()},...(w.recent||[]).filter(x=>x.id!==id)].slice(0,10);});if(directEdit||role){editDialog(false,role);}else{viewDetailDialog(selected,editingTab);}}
 function createRecord(){editingTab=db[tab]?tab:'Morning Report';selected={id:'local:'+crypto.randomUUID(),tab:editingTab,source:'Local draft',row:null,fields:Object.fromEntries(db[editingTab].columns.map(k=>[k,''])),links:{},flags:[]};editDialog(true)}
 function getFormValues(){const f={};$('#dialog-content').querySelectorAll('[data-field]').forEach(el=>f[el.dataset.field]=el.value.trim());return f}
-function isFormDirty(){if(reviewedSessionFields.size)return true;const cur=getFormValues();for(const k of Object.keys(initialFormValues)){if((cur[k]??'')!==(initialFormValues[k]??''))return true}return false}
+function isFormDirty(){if(detailMode!=='edit')return false;if(reviewedSessionFields.size)return true;const cur=getFormValues();for(const k of Object.keys(initialFormValues)){if((cur[k]??'')!==(initialFormValues[k]??''))return true}return false}
 function confirmDiscard(e){if(isFormDirty()){if(!confirm('You have unsaved changes. Discard them?')){if(e){e.preventDefault();e.stopPropagation()}return false}}return true}
 function renderFieldControl(c,val,r,req){
  const multiline=/notes|remarks|meeting|sign-ups|comments|details|social handles/i.test(c);
@@ -3592,11 +4889,262 @@ function renderFieldControl(c,val,r,req){
  }
  return `<input class="input" type="text" data-field="${esc(c)}" value="${esc(val)}" ${req}>`;
 }
-function editDialog(isNew,targetRole){reviewedSessionFields=new Set();const r=selected;$('#dialog-eyebrow').textContent=isNew?'New '+editingTab:source(r);$('#dialog-title').textContent=isNew?'Create a record':title(r,editingTab);$('#dialog-content').innerHTML=`<p class="form-note">Saved on this device. No changes are sent to the live workbook.</p>${r.flags.length?`<details class="review-details"><summary>${r.flags.length} source details to verify</summary>${r.flags.map(f=>`<p>${esc(f)}</p>`).join('')}</details>`:''}${sessionNotice(r)}${sessionReviewControls(r)}${!isNew?calendarButton(r,editingTab):''}${editingTab==='Morning Report'?staffingTools():''}<div class="record-form">${db[editingTab].columns.map(c=>`<label class="record-field">${esc(c)}${c===titles[editingTab]?' *':''}${renderFieldControl(c,r.fields[c]??'',r,c===titles[editingTab]?'required':'')}${urls(r,c).map(u=>anchor(u,'Open '+c)).join('')}</label>`).join('')}</div>${!isNew?`<button type="button" class="text-button" id="restore-record">${r.id.startsWith('local:')?(r.session?.count>1?'Remove entire multi-session local draft':'Remove this local draft'):'Restore original workbook values'}</button><div id="restore-confirm"></div>`:''}`;$('#dialog-primary').textContent=isNew?'Create local record':'Save changes';$('#dialog-primary').dataset.isNew=String(isNew);if($('#restore-record'))$('#restore-record').onclick=()=>{$('#restore-confirm').innerHTML='<p>This discards this record’s local changes.</p><button type="button" class="button secondary" id="confirm-restore">Confirm restore / removal</button>';$('#confirm-restore').onclick=()=>{if(mutate(w=>{removeLocalRecord(w,r);log(w,'Restored / removed',r,editingTab)}, r.id)){initialFormValues=getFormValues();reviewedSessionFields.clear();$('#detail-dialog').close();render();toast('Local record restored or removed')}}};bindCalendarButtons($('#dialog-content'));$('#dialog-content').querySelectorAll('[data-confirm-session-field]').forEach(b=>b.onclick=()=>{reviewedSessionFields.add(b.dataset.confirmSessionField);b.textContent='Displayed value will be confirmed when saved';b.disabled=true});bindStaffingTools(targetRole);$('#dialog-content').querySelectorAll('.convert-date-btn').forEach(btn=>{btn.onclick=()=>{const col=btn.dataset.dateCol,input=$('#dialog-content').querySelector(`[data-field="${col}"]`);if(input){input.type='date';input.value='';input.focus();btn.closest('.uncertain-field')?.querySelector('.uncertain-meta')?.remove()}}});initialFormValues=getFormValues();$('#detail-dialog').showModal()}
+function viewDetailDialog(r, area){
+ detailMode='read';
+ editingTab=area;
+ selected=r;
+ initialFormValues={};
+ reviewedSessionFields.clear();
+
+ const groupName=Object.keys(groups).find(g=>groups[g].includes(area))||'Academy';
+ const isLocal=Boolean(workspace.edits[r.id]);
+ const isDraft=r.id.startsWith('local:');
+ const c=typeof getRecordClassification==='function'?getRecordClassification(r,area):null;
+
+ const eyebrowEl=$('#dialog-eyebrow');
+ const titleEl=$('#dialog-title');
+ if(eyebrowEl)eyebrowEl.textContent=`${groupName} · ${area} · ${source(r)}`;
+ if(titleEl){
+  titleEl.textContent=title(r,area);
+  titleEl.setAttribute('tabindex','-1');
+ }
+
+ const backBtn=$('#detail-back-btn');
+ if(backBtn)backBtn.textContent=`‹ Back to ${area}`;
+
+ const secBtn=$('#dialog-secondary');
+ const editBtn=$('#edit-record-btn');
+ const primBtn=$('#dialog-primary');
+ if(secBtn){secBtn.textContent='Close';secBtn.style.display='';}
+ if(editBtn){editBtn.style.display='';}
+ if(primBtn){primBtn.style.display='none';}
+
+ const localChip=isDraft?chip('Local draft','local-chip'):(isLocal?chip('Locally edited on this device','local-chip'):'');
+ const classChip=c&&c.category!==RECORD_CATEGORY.NAMED_ENTRY
+  ?chip(c.label||c.category,'tag-heading')
+  :(c&&c.cohort?chip(c.cohort,'tag-cohort'):'');
+
+ const flagsHtml=r.flags&&r.flags.length
+  ?`<details class="review-details" open style="margin:12px 0;"><summary>⚠️ ${r.flags.length} source detail${r.flags.length>1?'s':''} to verify</summary>${r.flags.map(f=>`<p style="margin:4px 0 0 0;">${esc(f)}</p>`).join('')}</details>`
+  :'';
+
+ const isStructural = c && (c.category === RECORD_CATEGORY.SOURCE_HEADING || c.category === RECORD_CATEGORY.PLACEHOLDER);
+ const sessionTimeHtml = !isStructural && ['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs'].includes(area)
+  ?`<p class="session-time" style="margin:8px 0;">${esc(SessionCore.formatSessionTime(r))}</p>`
+  :'';
+ const calBtnHtml=calendarButton(r,area);
+
+ const cols=db[area]?.columns||Object.keys(r.fields||{});
+ const fieldsHtml=cols.map(col=>{
+  const rawVal=r.fields[col];
+  const val=rawVal!==undefined&&rawVal!==null?String(rawVal).trim():'';
+  const fieldLinkList=urls(r,col);
+  const isMultiline=/notes|remarks|meeting|sign-ups|comments|details|social handles/i.test(col)||val.length>80;
+
+  let valueContent='';
+  if(fieldLinkList.length>0){
+   const linkBtns=fieldLinkList.map(u=>{
+    const linkLabel=col==='Recording'?'Watch recording ↗':(col==='Link'?'Open resource ↗':'Open link ↗');
+    return `<a class="button secondary small detail-link-btn" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(linkLabel)}</a>`;
+   }).join(' ');
+   valueContent=`<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">${val&&!val.startsWith('http')?`<span style="display:block;margin-bottom:4px;overflow-wrap:anywhere;">${esc(val)}</span>`:''}${linkBtns}</div>`;
+  }else if(val){
+   valueContent=`<span class="detail-val-text">${esc(val)}</span>`;
+  }else{
+   valueContent=`<span class="muted">—</span>`;
+  }
+
+  return `<div class="detail-field-item ${isMultiline?'full-width':''}"><dt class="detail-field-name">${esc(col)}</dt><dd class="detail-field-value">${valueContent}</dd></div>`;
+ }).join('');
+
+ $('#dialog-content').innerHTML=`
+  <div class="detail-meta-bar">
+   <span class="tag">${esc(area)}</span>
+   <span class="muted" style="font-size:11px;">Identity: <code>${esc(r.id)}</code>${r.row?` · row ${esc(r.row)}`:''}</span>
+   ${classChip}
+   ${localChip}
+  </div>
+  ${flagsHtml}
+  ${sessionNotice(r)}
+  ${sessionTimeHtml}
+  ${calBtnHtml?`<div style="margin:10px 0;">${calBtnHtml}</div>`:''}
+  <dl class="detail-fields-list">
+   ${fieldsHtml}
+  </dl>
+ `;
+
+ bindCalendarButtons($('#dialog-content'));
+ if(!$('#detail-dialog').open){
+  $('#detail-dialog').showModal();
+ }
+ try{titleEl?.focus({preventScroll:true});}catch{}
+}
+function editDialog(isNew,targetRole){
+ detailMode='edit';
+ reviewedSessionFields=new Set();
+ const r=selected;
+
+ const eyebrowEl=$('#dialog-eyebrow');
+ const titleEl=$('#dialog-title');
+ if(eyebrowEl)eyebrowEl.textContent=isNew?'New '+editingTab:`${editingTab} · ${source(r)}`;
+ if(titleEl){
+  titleEl.textContent=isNew?'Create a record':'Edit: '+title(r,editingTab);
+  titleEl.setAttribute('tabindex','-1');
+ }
+
+ const backBtn=$('#detail-back-btn');
+ if(backBtn)backBtn.textContent=`‹ Back to ${editingTab}`;
+
+ const secBtn=$('#dialog-secondary');
+ const editBtn=$('#edit-record-btn');
+ const primBtn=$('#dialog-primary');
+ if(secBtn){secBtn.textContent='Cancel';secBtn.style.display='';}
+ if(editBtn){editBtn.style.display='none';}
+ if(primBtn){
+  primBtn.style.display='';
+  primBtn.textContent=isNew?'Create local record':'Save changes';
+  primBtn.dataset.isNew=String(isNew);
+ }
+
+ $('#dialog-content').innerHTML=`
+  <div class="edit-workflow-note-bar">
+   <p class="form-note">Saved on this device; no changes sent to the workbook.</p>
+  </div>
+  ${r.flags.length?`<details class="review-details"><summary>${r.flags.length} source details to verify</summary>${r.flags.map(f=>`<p>${esc(f)}</p>`).join('')}</details>`:''}
+  ${sessionNotice(r)}
+  ${sessionReviewControls(r)}
+  ${!isNew?calendarButton(r,editingTab):''}
+  ${editingTab==='Morning Report'?staffingTools():''}
+  <div class="record-form">
+   ${db[editingTab].columns.map(c=>`<label class="record-field">${esc(c)}${c===titles[editingTab]?' *':''}${renderFieldControl(c,r.fields[c]??'',r,c===titles[editingTab]?'required':'')}${urls(r,c).map(u=>anchor(u,'Open '+c)).join('')}</label>`).join('')}
+  </div>
+  ${!isNew?`<button type="button" class="text-button" id="restore-record">${r.id.startsWith('local:')?(r.session?.count>1?'Remove entire multi-session local draft':'Remove this local draft'):'Restore original workbook values'}</button><div id="restore-confirm"></div>`:''}
+ `;
+
+ if($('#restore-record'))$('#restore-record').onclick=()=>{
+  $('#restore-confirm').innerHTML='<p>This discards this record’s local changes.</p><button type="button" class="button secondary" id="confirm-restore">Confirm restore / removal</button>';
+  $('#confirm-restore').onclick=()=>{
+   if(mutate(w=>{removeLocalRecord(w,r);log(w,'Restored / removed',r,editingTab)}, r.id)){
+    initialFormValues=getFormValues();
+    reviewedSessionFields.clear();
+    $('#detail-dialog').close();
+    render();
+    toast('Local record restored or removed');
+   }
+  };
+ };
+
+ bindCalendarButtons($('#dialog-content'));
+ $('#dialog-content').querySelectorAll('[data-confirm-session-field]').forEach(b=>b.onclick=()=>{
+  reviewedSessionFields.add(b.dataset.confirmSessionField);
+  b.textContent='Displayed value will be confirmed when saved';
+  b.disabled=true;
+ });
+ bindStaffingTools(targetRole);
+ $('#dialog-content').querySelectorAll('.convert-date-btn').forEach(btn=>{
+  btn.onclick=()=>{
+   const col=btn.dataset.dateCol,input=$('#dialog-content').querySelector(`[data-field="${col}"]`);
+   if(input){
+    input.type='date';
+    input.value='';
+    input.focus();
+    btn.closest('.uncertain-field')?.querySelector('.uncertain-meta')?.remove();
+   }
+  };
+ });
+
+ initialFormValues=getFormValues();
+ if(!$('#detail-dialog').open){
+  $('#detail-dialog').showModal();
+ }
+ const firstInput=$('#dialog-content').querySelector('input:not([type="hidden"]), select, textarea');
+ if(firstInput){
+  try{firstInput.focus();}catch{}
+ }
+}
 function log(w,action,r,t){w.history.unshift({action,title:title(r,t),tab:t,at:new Date().toISOString()});w.history=w.history.slice(0,100)}
-$('#dialog-primary').onclick=e=>{e.preventDefault();const form=$('#detail-dialog form');if(!form.reportValidity())return;const fields={};$('#dialog-content').querySelectorAll('[data-field]').forEach(el=>fields[el.dataset.field]=el.value.trim());if(!fields[titles[editingTab]]){toast('Please enter the required title or name.');return}const isNew=e.currentTarget.dataset.isNew==='true',r={...selected,fields};if(mutate(w=>{if(isNew)w.added.push(r);else w.edits[r.id]={...(w.edits[r.id]||{}),...changedFields(fields,initialFormValues,reviewedSessionFields)};log(w,isNew?'Created':'Updated',r,editingTab)}, r.id)){initialFormValues=getFormValues();reviewedSessionFields.clear();$('#detail-dialog').close();render();toast('Saved on this device')}};
-$('#detail-dialog').addEventListener('cancel',e=>{if(!confirmDiscard(e))e.preventDefault()});
-$('#detail-dialog').querySelectorAll('[value="cancel"]').forEach(b=>{b.onclick=e=>{if(!confirmDiscard(e)){e.preventDefault();e.stopPropagation()}}});
+
+if($('#edit-record-btn')){
+ $('#edit-record-btn').onclick=e=>{
+  e.preventDefault();
+  editDialog(false);
+ };
+}
+
+if($('#detail-back-btn')){
+ $('#detail-back-btn').onclick=e=>{
+  e.preventDefault();
+  if(detailMode==='edit'){
+   if(!confirmDiscard(e))return;
+   if(selected&&!selected.id.startsWith('local:')){
+    viewDetailDialog(selected,editingTab);
+   }else{
+    $('#detail-dialog').close();
+   }
+  }else{
+   $('#detail-dialog').close();
+  }
+ };
+}
+
+if($('#detail-mobile-close-btn')){
+ $('#detail-mobile-close-btn').onclick=e=>{
+  e.preventDefault();
+  if(!confirmDiscard(e))return;
+  $('#detail-dialog').close();
+ };
+}
+
+if($('#dialog-close-x')){
+ $('#dialog-close-x').onclick=e=>{
+  e.preventDefault();
+  if(!confirmDiscard(e))return;
+  $('#detail-dialog').close();
+ };
+}
+
+if($('#dialog-secondary')){
+ $('#dialog-secondary').onclick=e=>{
+  e.preventDefault();
+  if(detailMode==='edit'){
+   if(!confirmDiscard(e))return;
+   if(selected&&!selected.id.startsWith('local:')){
+    viewDetailDialog(selected,editingTab);
+   }else{
+    $('#detail-dialog').close();
+   }
+  }else{
+   $('#detail-dialog').close();
+  }
+ };
+}
+
+$('#dialog-primary').onclick=e=>{
+ e.preventDefault();
+ const form=$('#detail-dialog form');
+ if(!form.reportValidity())return;
+ const fields={};
+ $('#dialog-content').querySelectorAll('[data-field]').forEach(el=>fields[el.dataset.field]=el.value.trim());
+ if(!fields[titles[editingTab]]){toast('Please enter the required title or name.');return}
+ const isNew=e.currentTarget.dataset.isNew==='true',r={...selected,fields};
+ if(mutate(w=>{
+  if(isNew)w.added.push(r);
+  else w.edits[r.id]={...(w.edits[r.id]||{}),...changedFields(fields,initialFormValues,reviewedSessionFields)};
+  log(w,isNew?'Created':'Updated',r,editingTab);
+ }, r.id)){
+  initialFormValues=getFormValues();
+  reviewedSessionFields.clear();
+  $('#detail-dialog').close();
+  render();
+  toast('Saved on this device');
+ }
+};
+
+$('#detail-dialog').addEventListener('cancel',e=>{
+ if(detailMode==='edit'){
+  if(!confirmDiscard(e))e.preventDefault();
+ }
+});
 function exportBackup(){mutate(w=>{w.lastBackup=new Date().toISOString()});const blob=new Blob([JSON.stringify({format:'cps-hub-backup-v2',snapshot:'workbook-2026-09-06',exported:new Date().toISOString(),...workspace},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cps-hub-backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Backup downloaded')}
 function workbookDiffHtml(){
   const editEntries = Object.entries(workspace.edits);
@@ -3825,7 +5373,8 @@ function globalResults(){
   document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{
     trackDialogOpener(b);
     setSectionAnchor(b.dataset.area || tab, b.dataset.open);
-    openRecord(b.dataset.open,b.dataset.area);
+    const isDirect = b.dataset.action === 'staff' || Boolean(b.dataset.role);
+    openRecord(b.dataset.open, b.dataset.area, b.dataset.role, isDirect);
   });
   document.querySelectorAll('[data-star]').forEach(b=>b.onclick=()=>{
     setSectionAnchor(tab, b.dataset.star);
@@ -3899,15 +5448,25 @@ window.addEventListener('hashchange',()=>{
   if(t!==tab&&(db[t]||['Home','Workspace'].includes(t)))navigate(t);
 });
 const loadWb = (typeof OfflineManager !== 'undefined' && OfflineManager.loadWorkbook) ? OfflineManager.loadWorkbook : () => fetch('workbook.json').then(r => { if (!r.ok) throw Error(); return r.json(); });
-loadWb().then(data=>{db=data;for(const[t,grp]of Object.entries(db))for(const r of grp.records)r._search=buildSearchIndex(r,t);let hash=decodeURIComponent(location.hash.slice(1));if(hash.startsWith('/'))hash=hash.slice(1);if(hash==='admin/issues'){if(isAdmin())tab='admin/issues';else tab='Home';}else if(hash==='profile/logbook'){tab='profile/logbook';}else if(db[hash]||['Home','Workspace'].includes(hash))tab=hash;if(tab==='Morning Report')mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'agenda':'matrix';sort=tab==='CPS Academy VMRs'?'date':'source';filter=tab==='Morning Report'?'Upcoming':'All';render();if(storageIssue)toast('Browser storage could not be read. Export changes before leaving.')}).catch(()=>{
+loadWb().then(data=>{db=data;for(const[t,grp]of Object.entries(db))for(const r of grp.records)r._search=buildSearchIndex(r,t);let hash=decodeURIComponent(location.hash.slice(1));if(hash.startsWith('/'))hash=hash.slice(1);if(hash==='admin/issues'){if(isAdmin())tab='admin/issues';else tab='Home';}else if(hash==='profile/logbook'){tab='profile/logbook';}else if(db[hash]||['Home','Workspace'].includes(hash))tab=hash;if(tab==='Morning Report')mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'agenda':'matrix';else if(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab])mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'cards':'table';sort=tab==='CPS Academy VMRs'?'date':'source';filter=tab==='Morning Report'?'Upcoming':'All';render();if(storageIssue)toast('Browser storage could not be read. Export changes before leaving.')}).catch(()=>{
   $('#page').innerHTML='<div class="empty-state"><h1>Could not load the workbook</h1><p>You appear to be offline without a cached copy, or the network request failed.</p><div style="margin-top:16px;"><button class="button primary" onclick="location.reload()">Retry connection</button></div></div>';
 });
 
 // Recognise only unambiguous calendar dates; leave the source text and timezones intact.
 function recordDate(r){const raw=dateValue(r);if(!raw)return '';const isoCand=String(raw).trim().slice(0,10);if(iso(isoCand))return validDate(isoCand);const usM=String(raw).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(usM)return validDate(`${usM[3]}-${usM[1].padStart(2,'0')}-${usM[2].padStart(2,'0')}`);const months=['january','february','march','april','may','june','july','august','september','october','november','december'];const m=String(raw).toLowerCase().match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?[,]?\s+(\d{4})\b/);if(!m)return '';return validDate(`${m[3]}-${String(months.indexOf(m[1])+1).padStart(2,'0')}-${m[2].padStart(2,'0')}`)}
 function validDate(s){const d=new Date(s+'T12:00:00Z');return Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==s?'':s}
-function extraFilters(){let html=compoundSessionFilters();if(tab==='Podcast Episodes'){const owners=[...new Set(records('Podcast Episodes').flatMap(r=>[r.fields['Point person'],r.fields['Audio editor']].flatMap(v=>(v||'').split(/[/,;]/).map(s=>s.trim())).filter(Boolean)))].sort();html+=`<label>Owner<select class="select" id="owner-filter"><option value="">All owners</option>${owners.map(o=>`<option value="${esc(o)}" ${owner===o?'selected':''}>${esc(o)}</option>`).join('')}</select></label>`;}else if(tab==='Schema review'){const owners=[...new Set(records('Schema review').flatMap(r=>[r.fields['Video owner'],r.fields['Infographic owner']].map(s=>(s||'').trim()).filter(Boolean)))].sort();html+=`<label>Owner<select class="select" id="owner-filter"><option value="">All owners</option>${owners.map(o=>`<option value="${esc(o)}" ${owner===o?'selected':''}>${esc(o)}</option>`).join('')}</select></label>`;}if(tab==='Research @CPSolvers')html+=`<label>Research skill<select class="select" id="skill"><option value="">Any skill</option>${['Research writing','Data analytics','Cross-sectional studies','Systematic reviews','Qualitative studies','Case reports'].map(k=>`<option ${skill===k?'selected':''}>${esc(k)}</option>`).join('')}</select></label>`;if(records().some(r=>dateValue(r)))html+=`<label>From<input class="select" type="date" id="date-from" value="${esc(dateFrom)}"></label><label>To<input class="select" type="date" id="date-to" value="${esc(dateTo)}"></label>`;return html}
-function bindExtraFilters(){bindCompoundSessionFilters();if($('#owner-filter'))$('#owner-filter').onchange=e=>{owner=e.target.value;page=0;render()};if($('#skill'))$('#skill').onchange=e=>{skill=e.target.value;page=0;render()};for(const id of ['date-from','date-to'])if($('#'+id))$('#'+id).onchange=e=>{if(id==='date-from')dateFrom=e.target.value;else dateTo=e.target.value;page=0;render()}}
+function extraFilters(){
+  let html=compoundSessionFilters();
+  if(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab]){
+    const recYears=getRecognizedYearsForSection(tab);
+    html+=`<label>Year<select class="select" id="year-filter"><option value="all">All years</option>${recYears.map(y=>`<option value="${esc(y)}" ${yearFilter===y?'selected':''}>${esc(y)}</option>`).join('')}<option value="unresolved" ${yearFilter==='unresolved'?'selected':''}>Unresolved / undated</option></select></label>`;
+  }
+  if(tab==='Podcast Episodes'){const owners=[...new Set(records('Podcast Episodes').flatMap(r=>[r.fields['Point person'],r.fields['Audio editor']].flatMap(v=>(v||'').split(/[/,;]/).map(s=>s.trim())).filter(Boolean)))].sort();html+=`<label>Owner<select class="select" id="owner-filter"><option value="">All owners</option>${owners.map(o=>`<option value="${esc(o)}" ${owner===o?'selected':''}>${esc(o)}</option>`).join('')}</select></label>`;}else if(tab==='Schema review'){const owners=[...new Set(records('Schema review').flatMap(r=>[r.fields['Video owner'],r.fields['Infographic owner']].map(s=>(s||'').trim()).filter(Boolean)))].sort();html+=`<label>Owner<select class="select" id="owner-filter"><option value="">All owners</option>${owners.map(o=>`<option value="${esc(o)}" ${owner===o?'selected':''}>${esc(o)}</option>`).join('')}</select></label>`;}if(tab==='Research @CPSolvers')html+=`<label>Research skill<select class="select" id="skill"><option value="">Any skill</option>${['Research writing','Data analytics','Cross-sectional studies','Systematic reviews','Qualitative studies','Case reports'].map(k=>`<option ${skill===k?'selected':''}>${esc(k)}</option>`).join('')}</select></label>`;if(records().some(r=>dateValue(r)))html+=`<label>From<input class="select" type="date" id="date-from" value="${esc(dateFrom)}"></label><label>To<input class="select" type="date" id="date-to" value="${esc(dateTo)}"></label>`;return html
+}
+function bindExtraFilters(){
+  bindCompoundSessionFilters();
+  if($('#year-filter'))$('#year-filter').onchange=e=>{yearFilter=e.target.value;page=0;render()};
+  if($('#owner-filter'))$('#owner-filter').onchange=e=>{owner=e.target.value;page=0;render()};if($('#skill'))$('#skill').onchange=e=>{skill=e.target.value;page=0;render()};for(const id of ['date-from','date-to'])if($('#'+id))$('#'+id).onchange=e=>{if(id==='date-from')dateFrom=e.target.value;else dateTo=e.target.value;page=0;render()}}
 function staffingTools(){return `<section class="staffing-tools"><h3>Quick staffing entry</h3><p>Choose a role and enter a name. This fills the form; use Save changes to keep it.</p><label>Role<select id="staff-role" class="select">${['Facilitator','Presenter','Scribe','Teaching Points','Active participant 1','Active participant 2','Active participant 3','Active participant 4','Chat support','Available team'].map(k=>`<option>${k}</option>`).join('')}</select></label><label>Name<input id="staff-name" placeholder="Name or team" autocomplete="off"></label><button type="button" class="button secondary" id="assign-name">Fill assignment</button><p id="staff-message" role="status"></p></section>`}
 function bindStaffingTools(targetRole){if(!$('#assign-name'))return;if(targetRole&&$('#staff-role')){$('#staff-role').value=targetRole;if(typeof window!=='undefined'&&(window.innerWidth||0)>760){setTimeout(()=>$('#staff-name')?.focus(),60);}}$('#assign-name').onclick=()=>{const name=$('#staff-name').value.trim(),role=$('#staff-role').value;if(!name){$('#staff-message').textContent='Enter a name first.';return}if(role==='Scribe'||role==='Teaching Points'){const el=[...$('#dialog-content').querySelectorAll('[data-field]')].find(el=>el.dataset.field==='Scribe / teaching points sign-ups');if(el){const rolePat=role==='Teaching Points'?'(?:Teaching Points|TP)':'Scribe';const lineRegex=new RegExp(`(^|\\r?\\n)([^\\S\\r\\n]*${rolePat}:[^\\S\\r\\n]*)([^\\r\\n|]*)(.*?)($|\\r?\\n)`,`i`);if(lineRegex.test(el.value)){el.value=el.value.replace(lineRegex,(match,p1,p2,p3,p4,p5)=>`${p1}${p2}${name}${p4}${p5}`);}else{el.value=(el.value?el.value+'\n':'')+`${role}: ${name}`}el.dispatchEvent(new Event('input',{bubbles:true}));$('#staff-message').textContent=`${role} filled. Save changes to keep the assignment.`;el.focus();return}}const el=[...$('#dialog-content').querySelectorAll('[data-field]')].find(el=>el.dataset.field===role);if(!el)return;const current=el.value.trim();if(current&&!/^(tbd|none|-|na|n\/a|—)$/i.test(current)){if(current.split(/[,;\n&+/]/).some(s=>s.trim().toLowerCase()===name.toLowerCase())){$('#staff-message').textContent='That name is already assigned.';return}if(/\b(tbd|none|-)\b/i.test(current)){el.value=current.replace(/\b(tbd|none|-)\b/i,name)}else{el.value=current+', '+name}}else el.value=name;el.dispatchEvent(new Event('input',{bubbles:true}));$('#staff-message').textContent=`${role} filled. Save changes to keep the assignment.`;el.focus()}}
 
@@ -4171,4 +5730,11 @@ if(typeof globalThis!=='undefined'){
   globalThis.clampPageForSection=clampPageForSection;
   globalThis.setSectionAnchor=setSectionAnchor;
   globalThis.sectionBrowsingMemory=sectionBrowsingMemory;
+  globalThis.HISTORICAL_SUMMARY_CONFIG=HISTORICAL_SUMMARY_CONFIG;
+  globalThis.getRecognizedYearsForSection=getRecognizedYearsForSection;
+  globalThis.renderHistoricalTable=renderHistoricalTable;
+  globalThis.renderHistoricalMobileList=renderHistoricalMobileList;
+  globalThis.RESIDENCY_MONTHS=RESIDENCY_MONTHS;
+  globalThis.residencyProgramsView=residencyProgramsView;
+  globalThis.crcRetiredView=crcRetiredView;
 }
