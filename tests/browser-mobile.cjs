@@ -22,10 +22,11 @@ const routes=['Home','Morning Report','CPS Academy VMRs','Special VMRs','Student
   const shot=async name=>{if(process.env.CPS_QA_SCREENSHOTS){fs.mkdirSync('screenshots/mobile-audit',{recursive:true});await p.screenshot({path:`screenshots/mobile-audit/${width}-${name}.png`});}};
   for(const route of routes){
    await p.goto(base+'/#'+encodeURIComponent(route));await p.locator('#page h1').waitFor();await fits(route);await shot(route.replaceAll(/[^a-z0-9]/gi,'-'));
-   if(await p.locator('#filter').count()){
+   if(await p.locator('#scope-select').count()){
     assert.equal(await p.locator('.schedule-secondary-filters .schedule-secondary-filters').count(),0);
     await p.locator('.schedule-secondary-filters').evaluate(d=>d.open=true);
-    await p.locator('#filter').selectOption('All');await fits(route+' filters');
+    await p.locator('#scope-select').selectOption('All');await fits(route+' filters');
+    await p.locator('.schedule-secondary-filters').evaluate(d=>d.open=false);
    }
    // Exercise every available representation, including the intentional comparison matrix.
    const views=await p.locator('[data-set-view]').evaluateAll(els=>els.map(e=>e.dataset.setView));

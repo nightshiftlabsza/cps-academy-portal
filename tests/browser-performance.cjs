@@ -133,10 +133,12 @@ async function runPerformanceAudit() {
       await new Promise((r) => setTimeout(r, 100));
     }
 
-    // Ensure filter is "All" so full historical records are rendered
+    // Ensure full historical records are rendered
     await cdp.evaluate(() => {
+      if (typeof mode !== 'undefined') mode = 'matrix';
+      if (typeof mrScheduleRangeMode !== 'undefined') mrScheduleRangeMode = 'all';
       if (typeof filter !== 'undefined') {
-        filter = 'All';
+        filter = 'All history';
         if (typeof render === 'function') render();
       }
     });
@@ -188,20 +190,23 @@ async function runPerformanceAudit() {
       return { scrollTop: container.scrollTop };
     });
 
-    await new Promise((r) => setTimeout(r, 300));
+    let postScrollStats = null;
+    for (let i = 0; i < 20; i++) {
+      postScrollStats = await cdp.evaluate(() => {
+        const tbody = document.querySelector('.matrix-table tbody');
+        const spacerTop = tbody.querySelector('.matrix-spacer-row.spacer-top');
+        const spacerBottom = tbody.querySelector('.matrix-spacer-row.spacer-bottom');
+        const rows = tbody.querySelectorAll('tr:not(.matrix-spacer-row)');
 
-    const postScrollStats = await cdp.evaluate(() => {
-      const tbody = document.querySelector('.matrix-table tbody');
-      const spacerTop = tbody.querySelector('.matrix-spacer-row.spacer-top');
-      const spacerBottom = tbody.querySelector('.matrix-spacer-row.spacer-bottom');
-      const rows = tbody.querySelectorAll('tr:not(.matrix-spacer-row)');
-
-      return {
-        renderedRows: rows.length,
-        topSpacerHeight: spacerTop ? parseFloat(spacerTop.style.height || '0') : 0,
-        bottomSpacerHeight: spacerBottom ? parseFloat(spacerBottom.style.height || '0') : 0
-      };
-    });
+        return {
+          renderedRows: rows.length,
+          topSpacerHeight: spacerTop ? parseFloat(spacerTop.style.height || '0') : 0,
+          bottomSpacerHeight: spacerBottom ? parseFloat(spacerBottom.style.height || '0') : 0
+        };
+      });
+      if (postScrollStats && postScrollStats.topSpacerHeight > 0) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
 
     console.log('\n[Post-Scroll Audit]');
     console.log(`Top spacer height after scroll: ${postScrollStats.topSpacerHeight}px`);

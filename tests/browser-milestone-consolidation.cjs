@@ -45,10 +45,11 @@ const { chromium } = require('playwright-core');
       assert.equal(todayTitle, initialTitle, 'This week button must return to default week');
 
       // 2. Defect 2: Custom date filter agreement
-      await page.locator('#date-from').fill('2026-09-01');
-      await page.locator('#date-from').dispatchEvent('change');
-      await page.locator('#date-to').fill('2026-09-15');
-      await page.locator('#date-to').dispatchEvent('change');
+      await page.locator('.schedule-secondary-filters').evaluate(el=>el.open=true);
+      await page.locator('#panel-date-from').fill('2026-09-01');
+      await page.locator('#panel-date-from').dispatchEvent('change');
+      await page.locator('#panel-date-to').fill('2026-09-15');
+      await page.locator('#panel-date-to').dispatchEvent('change');
       await page.waitForTimeout(100);
 
       const customTitle = await page.locator('#week-nav-title').innerText();
@@ -57,7 +58,8 @@ const { chromium } = require('playwright-core');
       assert.match(resultsSummary, /Custom date range \(2026-09-01 to 2026-09-15\)/i, 'Results summary must indicate custom date range');
 
       // Clear filters
-      await page.locator('#clear').click();
+      await page.locator('#secondary-clear-btn').click();
+      await page.locator('.schedule-secondary-filters').evaluate(el=>el.open=false);
       await page.waitForTimeout(100);
 
       // 3. Defect 8 & 7: CRC - retired
@@ -69,9 +71,9 @@ const { chromium } = require('playwright-core');
       assert.ok(statusSelectHtml.includes('Progress not recorded'), 'CRC status filter must have Progress not recorded');
       assert.ok(!statusSelectHtml.includes('In progress / unrecorded'), 'CRC status filter must not have In progress / unrecorded');
 
-      // Check classification summary contains 400 cases (357 named mentees, 43 mentor-only)
+      // Check classification summary contains 400 cases (400 historical records: 357 named mentee rows and 43 unnamed records)
       const crcSummary = await page.locator('#crc-results-meta').innerText();
-      assert.match(crcSummary, /400 cases \(357 named mentees,\s*43 mentor-only\)/i, 'CRC summary must distinguish mentees and mentor-only');
+      assert.match(crcSummary, /400 cases \(400 historical records:\s*357 named mentee rows and 43 unnamed records\)/i, 'CRC summary must distinguish named mentees and unnamed records');
       assert.ok(crcSummary.includes('15 round headings'), 'CRC summary must state 15 round headings');
       assert.ok(crcSummary.includes('2 placeholders'), 'CRC summary must state 2 placeholders');
 

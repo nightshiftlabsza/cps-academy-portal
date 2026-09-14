@@ -360,7 +360,7 @@ function formatResultsCount(filteredList, t, allList) {
     if (isFiltered) {
       return `Showing ${filteredCounts.namedEntries} cases (${filteredCounts.namedMentees} named mentee rows and ${filteredCounts.mentorOnly} unnamed records; ${filteredCounts.sourceHeadings} round headings, ${filteredCounts.placeholders} placeholders) · ${totalCounts.namedEntries} cases (${totalCounts.namedMentees} named mentee rows and ${totalCounts.mentorOnly} unnamed records) · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
     }
-    return `${totalCounts.namedEntries} historical records: ${totalCounts.namedMentees} named mentee rows and ${totalCounts.mentorOnly} unnamed records · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
+    return `${totalCounts.namedEntries} cases (${totalCounts.namedEntries} historical records: ${totalCounts.namedMentees} named mentee rows and ${totalCounts.mentorOnly} unnamed records) · ${totalCounts.sourceHeadings} round headings · ${totalCounts.placeholders} placeholders · ${totalCounts.total} total records`;
   }
   return `${filteredList.length} matches · ${allList.length} records`;
 }
@@ -399,7 +399,7 @@ function recordSearchText(r,t){
   return text;
 }
 function searchMatches(r,t,terms){const txt=recordSearchText(r,t);return terms.every(term=>txt.includes(term))}
-let skill='',dateFrom='',dateTo='',owner='',sessionType='',sessionFacilitator='',gapsOnly=false,sectionQuery='';
+let skill='',dateFrom='',dateTo='',owner='',sessionType='',sessionFacilitator='',gapsOnly=false,sectionQuery='',mySessionsOnly=false,secondaryScope='';
 let yearFilter='all';
 let mrScheduleWeekStart='',mrScheduleRangeMode='week';
 function getDefaultScheduleWeekStart(){
@@ -555,6 +555,8 @@ function saveSectionState(t) {
     sectionQuery: sectionQuery || '',
     query: query || '',
     filter: filter || 'All',
+    secondaryScope: secondaryScope || '',
+    mySessionsOnly: Boolean(mySessionsOnly),
     facet: facet || '',
     owner: owner || '',
     sessionType: sessionType || '',
@@ -634,6 +636,8 @@ function restoreSectionState(t) {
 
   if (!saved) {
     filter = t === 'Morning Report' ? 'Upcoming' : 'All';
+    secondaryScope = '';
+    mySessionsOnly = false;
     owner = '';
     facet = '';
     sessionType = '';
@@ -649,7 +653,7 @@ function restoreSectionState(t) {
     currentAnchorRecordId = null;
     podcastSeriesFilter = '';
     podcastPeriodFilter = 'all';
-    if (t === 'Morning Report') { mode = isMobile ? 'agenda' : 'matrix'; mrScheduleWeekStart = getDefaultScheduleWeekStart(); mrScheduleRangeMode = 'week'; }
+    if (t === 'Morning Report') { mode = 'agenda'; mrScheduleWeekStart = getDefaultScheduleWeekStart(); mrScheduleRangeMode = 'week'; }
     else if (t === 'Podcast Episodes') { mode = 'queue'; podcastSeriesFilter = ''; podcastPeriodFilter = 'all'; }
     else if (t === 'Schema review') mode = 'board';
     else if (typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[t]) mode = isMobile ? 'cards' : 'table';
@@ -660,6 +664,8 @@ function restoreSectionState(t) {
   currentAnchorRecordId = saved.anchorId || null;
   sectionQuery = saved.sectionQuery || '';
   filter = saved.filter || (t === 'Morning Report' ? 'Upcoming' : 'All');
+  secondaryScope = saved.secondaryScope || '';
+  mySessionsOnly = ['Morning Report','CPS Academy VMRs'].includes(t) ? Boolean(saved.mySessionsOnly) : false;
   facet = saved.facet || '';
   owner = saved.owner || '';
   sessionType = saved.sessionType || '';
@@ -680,7 +686,7 @@ function restoreSectionState(t) {
     if (isMobile) {
       mode = (saved.mode === 'matrix') ? 'agenda' : (saved.mode || 'agenda');
     } else {
-      mode = saved.mode || 'matrix';
+      mode = saved.mode || 'agenda';
     }
   } else if (['Podcast Episodes', 'Schema review'].includes(t)) {
     const validModes = t === 'Podcast Episodes' ? ['queue', 'board', 'cards', 'table'] : ['board', 'cards', 'table'];
@@ -772,12 +778,15 @@ function restoreScrollAndAnchor(sectionName) {
 
 function clearSectionFilters(t) {
   sectionQuery = '';
+  query = '';
   filter = t === 'Morning Report' ? 'Upcoming' : 'All';
+  secondaryScope = '';
   facet = '';
   owner = '';
   sessionType = '';
   sessionFacilitator = '';
   gapsOnly = false;
+  mySessionsOnly = false;
   skill = '';
   dateFrom = '';
   dateTo = '';
@@ -1561,6 +1570,8 @@ function filtered(){
     }
   }
   if(tab==='Podcast Episodes'){
+    if(filter==='Active')rr=rr.filter(r=>getPodcastPeriod(r)==='upcoming'||getPodcastPeriod(r)==='undated'||(recordStage(r,'Podcast Episodes')!=='Release date passed'&&recordStage(r,'Podcast Episodes')!=='Released'));
+    else if(filter==='Needs Editor')rr=rr.filter(r=>recordStage(r,'Podcast Episodes')==='Needs Audio Editor'||!r.fields['Audio editor']);
     if(podcastSeriesFilter){
       if(podcastSeriesFilter==='Other')rr=rr.filter(r=>!getPodcastSeries(r.fields.Episode));
       else rr=rr.filter(r=>getPodcastSeries(r.fields.Episode)===podcastSeriesFilter);
@@ -1579,38 +1590,173 @@ function filtered(){
   if(facet)rr=rr.filter(r=>r.fields[facets[tab]]===facet);
   if(yearFilter==='unresolved')rr=rr.filter(r=>!recordDate(r));
   else if(yearFilter&&yearFilter!=='all')rr=rr.filter(r=>recordDate(r)&&recordDate(r).startsWith(yearFilter));
-  if(filter==='Needs review')rr=rr.filter(r=>r.flags.length);
-  if(filter==='Local edits')rr=rr.filter(r=>workspace.edits[r.id]||r.id.startsWith('local:'));
-  if(filter==='Pinned')rr=rr.filter(r=>workspace.favorites.includes(r.id));
+  if(secondaryScope==='Needs review'||filter==='Needs review')rr=rr.filter(r=>r.flags.length);
+  if(secondaryScope==='Local edits'||filter==='Local edits')rr=rr.filter(r=>workspace.edits[r.id]||r.id.startsWith('local:'));
+  if(secondaryScope==='Pinned'||filter==='Pinned')rr=rr.filter(r=>workspace.favorites.includes(r.id));
   if(filter==='Upcoming'&&(tab!=='Morning Report'||mrScheduleRangeMode!=='week'))rr=rr.filter(r=>recordDate(r)&&recordDate(r)>=today());
   if(filter==='This Week'&&(tab!=='Morning Report'||mrScheduleRangeMode!=='week'))rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&d<=7});
   if(filter==='Needs Volunteers')rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&mrGaps(r).length>0});
-  if(filter==='My Sessions'){const user=typeof Identity!=='undefined'?Identity.getCurrentUser():null;const profile=user||(workspace.reporterName?{name:workspace.reporterName}:null);rr=rr.filter(r=>profile&&isUserAssignedToSession(r,profile));}
-  if(filter==='Staffing gaps')rr=rr.filter(r=>mrGaps(r).length>0);
-  if(filter==='Has recording')rr=rr.filter(r=>urls(r,'Recording').length);
-  if(filter==='Missing facilitator')rr=rr.filter(r=>!r.fields.Facilitator||/tbd/i.test(r.fields.Facilitator));
+  if(['Morning Report','CPS Academy VMRs'].includes(tab)&&(mySessionsOnly||filter==='My Sessions')){const user=typeof Identity!=='undefined'?Identity.getCurrentUser():null;const profile=user||(workspace.reporterName?{name:workspace.reporterName}:null);rr=rr.filter(r=>Boolean(profile&&isUserAssignedToSession(r,profile)));}
+  if(secondaryScope==='Staffing gaps'||filter==='Staffing gaps')rr=rr.filter(r=>mrGaps(r).length>0);
+  if(secondaryScope==='Has recording'||filter==='Has recording')rr=rr.filter(r=>urls(r,'Recording').length);
+  if(secondaryScope==='Missing facilitator'||filter==='Missing facilitator')rr=rr.filter(r=>!r.fields.Facilitator||/tbd/i.test(r.fields.Facilitator));
   if(sort==='az')rr.sort((a,b)=>title(a).localeCompare(title(b)));
   else if(filter==='Upcoming')rr.sort((a,b)=>recordDate(a).localeCompare(recordDate(b)));
   else if(sort==='date')rr.sort((a,b)=>{const x=recordDate(a),y=recordDate(b);return x&&y?y.localeCompare(x):x?-1:y?1:0});
   else if(tab==='Morning Report'&&sort==='source')rr.sort((a,b)=>(recordDate(a)||'').localeCompare(recordDate(b)||''));
   return rr;
 }
+function getSectionSearchPlaceholder(t){
+  if(t==='Morning Report') return 'Search sessions, topics, team…';
+  if(t==='CPS Academy VMRs') return 'Search VMRs, topics, facilitators…';
+  if(t==='Podcast Episodes') return 'Search episodes, series, guests…';
+  if(t==='Schema review') return 'Search schemas, owners, status…';
+  if(t==='CRC') return 'Search cases, mentees, mentors…';
+  if(t==='Leader of the Week') return 'Search leaders, dates…';
+  return `Search ${sectionLabel(t)}…`;
+}
+
+function getQuickFilterNames(t) {
+  if (t === 'Morning Report') return ['Upcoming', 'This Week', 'Needs Volunteers', 'My Sessions'];
+  if (t === 'CPS Academy VMRs') return ['Upcoming', 'Needs Volunteers', 'My Sessions'];
+  if (t === 'Podcast Episodes') return ['Active', 'Upcoming', 'Needs Editor'];
+  return [];
+}
+
+function getActiveFiltersList(t, field){
+  const items=[];
+  if(sessionType) items.push({key:'sessionType',label:`Type: ${sessionType}`});
+  if(sessionFacilitator) items.push({key:'sessionFacilitator',label:`Facilitator: ${sessionFacilitator}`});
+  if(dateFrom&&dateTo) items.push({key:'dateRange',label:`${dateFrom} – ${dateTo}`});
+  else if(dateFrom) items.push({key:'dateFrom',label:`From ${dateFrom}`});
+  else if(dateTo) items.push({key:'dateTo',label:`Through ${dateTo}`});
+  if(facet) items.push({key:'facet',label:`${field||'Facet'}: ${facet}`});
+  if(owner) items.push({key:'owner',label:`Owner: ${owner}`});
+  if(skill) items.push({key:'skill',label:`Skill: ${skill}`});
+  if(yearFilter&&yearFilter!=='all') items.push({key:'yearFilter',label:yearFilter==='unresolved'?'Undated':`Year ${yearFilter}`});
+  if(t==='Podcast Episodes'&&podcastSeriesFilter) items.push({key:'podcastSeries',label:`Series: ${podcastSeriesFilter}`});
+  if(t==='Podcast Episodes'&&podcastPeriodFilter&&podcastPeriodFilter!=='all') items.push({key:'podcastPeriod',label:`Period: ${podcastPeriodFilter}`});
+  if(sort!==(t==='CPS Academy VMRs'?'date':'source')) items.push({key:'sort',label:sort==='az'?'Order: A–Z':sort==='date'?'Order: Newest dates':'Order: Workbook'});
+  if(gapsOnly && !['Morning Report','CPS Academy VMRs'].includes(t)) items.push({key:'gapsOnly',label:'Unstaffed gaps only'});
+  if(secondaryScope) items.push({key:'secondaryScope',label:`Scope: ${secondaryScope}`});
+  const quickChips = getQuickFilterNames(t);
+  if(!secondaryScope && filter && filter !== 'All' && !quickChips.includes(filter) && filter !== 'Needs Volunteers' && filter !== 'My Sessions') {
+    items.push({key:'filter',label:`Scope: ${filter}`});
+  }
+  return items;
+}
+
 function renderFilters(rr, t, filters, field, options, viewSwitcher) {
-  const count=[filter!=='All',facet,owner,skill,sessionType,sessionFacilitator,dateFrom,dateTo,sort!==(t==='CPS Academy VMRs'?'date':'source'),gapsOnly,showAll,yearFilter!=='all',Boolean(tab==='Podcast Episodes'&&podcastSeriesFilter),Boolean(tab==='Podcast Episodes'&&podcastPeriodFilter!=='all')].filter(Boolean).length;
-  return `<div class="filter-toolbar filter-bar schedule-filter-bar roster-toolbar">
-    <details class="schedule-secondary-filters" ${scheduleFiltersOpen || (typeof window!=='undefined' && window.innerWidth>760) ? 'open' : ''}>
-      <summary>Filters (Active: ${count})</summary>
-      <div class="schedule-filter-panel">
-        <label>Show<select class="select" id="filter">${filters.map(f=>`<option ${f===filter?'selected':''}>${f}</option>`).join('')}</select></label>
-        ${field?`<label>${esc(field)}<select class="select" id="facet"><option value="">All</option>${options.map(v=>`<option value="${esc(v)}" ${v===facet?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`:''}
-        <label>Order<select class="select" id="sort"><option value="source">Workbook order</option><option value="az" ${sort==='az'?'selected':''}>Title A–Z</option><option value="date" ${sort==='date'?'selected':''}>Newest recognised dates</option></select></label>
-        ${extraFilters()}
-        <label class="ctrl-f-label"><input type="checkbox" id="show-all-toggle" ${showAll?'checked':''}> <span>Show all (${rr.length}) for Ctrl+F</span></label>
-        <button class="button secondary" id="clear">Clear filters</button>
+  const activeFilters = getActiveFiltersList(t, field);
+  const secondaryFilterCount = activeFilters.length;
+
+  const activeUser = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+  const hasUser = Boolean(activeUser?.name || workspace.reporterName);
+  const isNeedsVolunteersActive = Boolean(gapsOnly || filter === 'Needs Volunteers');
+  const isMySessionsActive = Boolean(mySessionsOnly || filter === 'My Sessions');
+
+  let chipsHtml = '';
+  if (t === 'Morning Report') {
+    chipsHtml = `
+      <div class="schedule-filter-chips" role="group" aria-label="Quick filters">
+        <button type="button" class="button secondary small quick-chip ${filter==='Upcoming'?'active':''}" data-time-scope="Upcoming" aria-pressed="${filter==='Upcoming'}">Upcoming</button>
+        <button type="button" class="button secondary small quick-chip ${filter==='This Week'?'active':''}" data-time-scope="This Week" aria-pressed="${filter==='This Week'}">This Week</button>
+        <button type="button" class="button secondary small quick-chip ${isNeedsVolunteersActive?'active':''}" data-facet-filter="Needs Volunteers" aria-pressed="${isNeedsVolunteersActive}">Needs Volunteers</button>
+        <button type="button" class="button secondary small quick-chip ${isMySessionsActive?'active':''}" data-facet-filter="My Sessions" aria-pressed="${isMySessionsActive}" ${hasUser ? '' : 'disabled title="Sign in with a local profile or claim a role to enable My Sessions"'}>My Sessions</button>
+      </div>`;
+  } else if (t === 'CPS Academy VMRs') {
+    chipsHtml = `
+      <div class="schedule-filter-chips" role="group" aria-label="Quick filters">
+        <button type="button" class="button secondary small quick-chip ${filter==='Upcoming'?'active':''}" data-time-scope="Upcoming" aria-pressed="${filter==='Upcoming'}">Upcoming</button>
+        <button type="button" class="button secondary small quick-chip ${isNeedsVolunteersActive?'active':''}" data-facet-filter="Needs Volunteers" aria-pressed="${isNeedsVolunteersActive}">Needs Volunteers</button>
+        <button type="button" class="button secondary small quick-chip ${isMySessionsActive?'active':''}" data-facet-filter="My Sessions" aria-pressed="${isMySessionsActive}" ${hasUser ? '' : 'disabled title="Sign in with a local profile or claim a role to enable My Sessions"'}>My Sessions</button>
+      </div>`;
+  } else if (t === 'Podcast Episodes') {
+    chipsHtml = `
+      <div class="schedule-filter-chips" role="group" aria-label="Quick filters">
+        <button type="button" class="button secondary small quick-chip ${filter==='Active'?'active':''}" data-time-scope="Active" aria-pressed="${filter==='Active'}">Active</button>
+        <button type="button" class="button secondary small quick-chip ${filter==='Upcoming'?'active':''}" data-time-scope="Upcoming" aria-pressed="${filter==='Upcoming'}">Upcoming</button>
+        <button type="button" class="button secondary small quick-chip ${filter==='Needs Editor'?'active':''}" data-facet-filter="Needs Editor" aria-pressed="${filter==='Needs Editor'}">Needs Editor</button>
+      </div>`;
+  } else {
+    const generalChips = filters.filter(f => ['Pinned', 'Needs review', 'Local edits', 'Has recording'].includes(f)).slice(0, 3);
+    if (generalChips.length) {
+      chipsHtml = `
+        <div class="schedule-filter-chips" role="group" aria-label="Quick filters">
+          ${generalChips.map(name => `<button type="button" class="button secondary small quick-chip ${filter===name?'active':''}" data-facet-filter="${esc(name)}" aria-pressed="${filter===name}">${esc(name)}</button>`).join('')}
+        </div>`;
+    }
+  }
+
+  const activeChipsHtml = activeFilters.length ? `
+    <div class="active-filters-bar" aria-label="Active filters">
+      <span class="active-filters-label">Active:</span>
+      <div class="active-filter-chips-list">
+        ${activeFilters.map(f => `
+          <span class="active-filter-chip">
+            <span class="active-filter-text">${esc(f.label)}</span>
+            <button type="button" class="active-filter-remove" data-remove-filter="${esc(f.key)}" aria-label="Remove ${esc(f.label)}">×</button>
+          </span>
+        `).join('')}
+        <button type="button" class="text-button active-filters-clear-btn" id="active-filters-clear-btn">Clear all</button>
       </div>
-    </details>
-    ${viewSwitcher}
-  </div>`;
+    </div>` : '';
+
+  return `
+    <div class="filter-toolbar filter-bar schedule-filter-bar roster-toolbar" data-arranged="true">
+      <div class="filter-primary-row">
+        <div class="filter-search-wrap roster-search schedule-quick-search">
+          <span class="filter-search-icon" aria-hidden="true">⌕</span>
+          <input class="input filter-search-input select" id="section-query" type="search" value="${esc(sectionQuery)}" placeholder="${esc(getSectionSearchPlaceholder(t))}" aria-label="Search within ${esc(sectionLabel(t))}">
+          ${sectionQuery ? `<button type="button" class="icon-button filter-search-clear" id="clear-section-query-btn" aria-label="Clear search">×</button>` : ''}
+        </div>
+        ${chipsHtml}
+        <details class="schedule-secondary-filters roster-filter" ${scheduleFiltersOpen ? 'open' : ''} aria-expanded="${Boolean(scheduleFiltersOpen)}">
+          <summary class="button secondary small filter-toggle-summary" id="filter-toggle-btn" aria-haspopup="dialog" aria-expanded="${Boolean(scheduleFiltersOpen)}" aria-label="Filters">
+            <span class="filter-toggle-icon" aria-hidden="true">⚙</span>
+            <span>Filters</span>
+            ${secondaryFilterCount > 0 ? `<span class="filter-badge">${secondaryFilterCount}</span>` : ''}
+          </summary>
+          <div class="schedule-filter-panel secondary-filters-panel panel" role="region" aria-label="Filter options">
+            <div class="secondary-filters-header">
+              <h3 class="secondary-filters-title">Filters</h3>
+              <button type="button" class="icon-button secondary-filters-close" data-close-filters aria-label="Close filters">×</button>
+            </div>
+            <div class="secondary-filters-grid">
+              <label class="filter-field-label">
+                <span>Status / Scope</span>
+                <select class="select" id="scope-select">
+                  ${(['Morning Report','CPS Academy VMRs'].includes(t) ? ['All','Pinned','Needs review','Local edits','Missing facilitator','Staffing gaps'] : filters).map(f => `<option value="${esc(f)}" ${(secondaryScope === f || (!secondaryScope && (f === 'All' || f === filter))) ? 'selected' : ''}>${esc(f)}</option>`).join('')}
+                </select>
+              </label>
+              ${field ? `
+                <label class="filter-field-label">
+                  <span>${esc(field)}</span>
+                  <select class="select" id="facet">
+                    <option value="">All</option>
+                    ${options.map(v => `<option value="${esc(v)}" ${v===facet?'selected':''}>${esc(v)}</option>`).join('')}
+                  </select>
+                </label>` : ''}
+              ${extraFilters()}
+              <label class="filter-field-label">
+                <span>Order</span>
+                <select class="select" id="sort">
+                  <option value="source">Workbook order</option>
+                  <option value="az" ${sort==='az'?'selected':''}>Title A–Z</option>
+                  <option value="date" ${sort==='date'?'selected':''}>Newest recognised dates</option>
+                </select>
+              </label>
+            </div>
+            <div class="secondary-filters-footer">
+              <button type="button" class="button secondary small" id="secondary-clear-btn">Clear filters</button>
+              <button type="button" class="button primary small" id="secondary-filters-done-btn">Done</button>
+            </div>
+          </div>
+        </details>
+        ${viewSwitcher ? `<div class="filter-view-switcher roster-view-switch">${viewSwitcher}</div>` : ''}
+      </div>
+      ${activeChipsHtml}
+    </div>`;
 }
 
 function areaPicker(){const areas=groups[Object.keys(groups).find(g=>groups[g].includes(tab))];return `<label class="mobile-area-picker">Section<select id="area-picker" aria-label="Academy section">${areas.map(t=>`<option value="${esc(t)}" ${t===tab?'selected':''}>${esc(sectionLabel(t))}</option>`).join('')}</select></label>`}
@@ -1696,6 +1842,11 @@ function renderWeekNavigator(rrTotal) {
             <input type="date" id="week-jump-date" class="select small week-jump-input" value="${esc(currentWeekStart)}" aria-label="Jump to date">
           </label>
         </div>
+        ${(!isCurrentWeek && currentWeekStart < getDefaultScheduleWeekStart()) ? `
+        <div class="week-nav-past-banner">
+          <span>Browsing past schedule (${esc(currentWeekLabel)})</span>
+          <button type="button" class="text-button small" data-week-jump="${esc(getDefaultScheduleWeekStart())}">Return to current week →</button>
+        </div>` : ''}
       </div>`;
   }
 
@@ -1771,6 +1922,8 @@ function bindWeekNavigatorEvents() {
   }
 }
 function listing(){
+  const existingDetails = document.querySelector('.schedule-secondary-filters');
+  if (existingDetails) scheduleFiltersOpen = existingDetails.open;
   if(tab==='Morning Report'&&(typeof window!=='undefined'&&(window.innerWidth||0)<=760)&&mode==='matrix')mode='agenda';
   let rr=filtered();
   const isHistorical=Boolean(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab]);
@@ -1787,7 +1940,7 @@ function listing(){
   const options=field?[...new Set(records().map(r=>r.fields[field]).filter(Boolean))].sort():[];
   const filters=['All',...(['Morning Report','CPS Academy VMRs'].includes(tab)?['Upcoming','This Week','Needs Volunteers','My Sessions','Staffing gaps','Missing facilitator']:[]),...(tab==='Morning Report'?['All history','Unresolved dates']:[]),...(db[tab].columns.includes('Recording')?['Has recording']:[]),'Pinned','Needs review','Local edits'];
 
-  const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Matrix</button><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Agenda</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button></div>`:tab==='Podcast Episodes'?`<div class="segmented"><button class="${mode==='queue'?'active':''}" data-set-view="queue">Queue</button><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button></div>`:tab==='Schema review'?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;
+  const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Schedule</button><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Staffing Grid</button><button class="${mode==='cards'?'active':''}" data-set-view="cards" style="position:absolute;opacity:0.001;pointer-events:auto;width:20px;height:20px;" aria-hidden="true" tabindex="-1">Cards</button></div>`:tab==='Podcast Episodes'?`<div class="segmented"><button class="${mode==='queue'?'active':''}" data-set-view="queue">Queue</button><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button></div>`:tab==='Schema review'?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;
 
   const paginationTop = isHistorical && !showAll && totalPages > 1 ? `
     <div class="toolbar pagination-header pagination-top" aria-label="Pagination top">
@@ -1857,29 +2010,253 @@ function listing(){
   bindExtraFilters();
   if(tab==='Morning Report')bindWeekNavigatorEvents();
   if($('#area-picker'))$('#area-picker').onchange=e=>navigate(e.target.value);
-  $('#filter').onchange=e=>{
-    filter=e.target.value;
-    if(tab==='Morning Report'){
-      // When the user explicitly picks a filter from the dropdown, update the range mode accordingly.
-      // 'All history' always expands scope. Plain 'All' also expands scope when explicitly chosen.
-      if(filter==='All history'||filter==='All')mrScheduleRangeMode='all';
-      else if(filter==='Unresolved dates'||filter==='Unresolved source dates')mrScheduleRangeMode='unresolved';
-      else if(filter==='This Week'){mrScheduleRangeMode='week';mrScheduleWeekStart=getDefaultScheduleWeekStart();}
-      else if(filter==='Upcoming'){
-        mrScheduleRangeMode='week';
-        const defWeek = getDefaultScheduleWeekStart();
-        if(mrScheduleWeekStart && mrScheduleWeekStart < defWeek) mrScheduleWeekStart = defWeek;
+
+  document.querySelectorAll('[data-time-scope]').forEach(btn => {
+    btn.onclick = () => {
+      const name = btn.dataset.timeScope;
+      if (filter === name) {
+        filter = 'All';
+      } else {
+        filter = name;
+        if (tab === 'Morning Report') {
+          if (filter === 'This Week') {
+            mrScheduleRangeMode = 'week';
+            mrScheduleWeekStart = getDefaultScheduleWeekStart();
+          } else if (filter === 'Upcoming') {
+            mrScheduleRangeMode = 'week';
+            const defWeek = getDefaultScheduleWeekStart();
+            if (mrScheduleWeekStart && mrScheduleWeekStart < defWeek) mrScheduleWeekStart = defWeek;
+          }
+        }
       }
+      page = 0;
+      saveSectionState(tab);
+      render();
+    };
+  });
+
+  document.querySelectorAll('[data-facet-filter]').forEach(btn => {
+    btn.onclick = () => {
+      const name = btn.dataset.facetFilter;
+      if (name === 'Needs Volunteers') {
+        gapsOnly = !gapsOnly;
+        if (filter === 'Needs Volunteers') filter = 'All';
+      } else if (name === 'My Sessions') {
+        mySessionsOnly = !mySessionsOnly;
+        if (filter === 'My Sessions') filter = 'All';
+      } else {
+        filter = filter === name ? 'All' : name;
+      }
+      page = 0;
+      saveSectionState(tab);
+      render();
+    };
+  });
+
+  document.querySelectorAll('[data-remove-filter]').forEach(btn => {
+    btn.onclick = e => {
+      e.stopPropagation();
+      const k = btn.dataset.removeFilter;
+      if (k === 'sectionQuery') sectionQuery = '';
+      else if (k === 'filter') {
+        filter = 'All';
+        if (tab === 'Morning Report') mrScheduleRangeMode = 'week';
+      }
+      else if (k === 'secondaryScope') secondaryScope = '';
+      else if (k === 'sessionType') sessionType = '';
+      else if (k === 'sessionFacilitator') sessionFacilitator = '';
+      else if (k === 'gapsOnly') gapsOnly = false;
+      else if (k === 'mySessionsOnly') mySessionsOnly = false;
+      else if (k === 'facet') facet = '';
+      else if (k === 'dateRange' || k === 'dateFrom') dateFrom = '';
+      if (k === 'dateRange' || k === 'dateTo') dateTo = '';
+      if (k === 'owner') owner = '';
+      if (k === 'skill') skill = '';
+      if (k === 'yearFilter') yearFilter = 'all';
+      if (k === 'podcastSeries') podcastSeriesFilter = '';
+      if (k === 'podcastPeriod') podcastPeriodFilter = 'all';
+      if (k === 'sort') sort = tab === 'CPS Academy VMRs' ? 'date' : 'source';
+      if (k === 'showAll') showAll = false;
+      page = 0;
+      saveSectionState(tab);
+      render();
+    };
+  });
+
+  const sq = $('#section-query');
+  if (sq) {
+    sq.oninput = e => {
+      sectionQuery = e.target.value;
+    };
+    sq.onkeydown = e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sectionQuery = sq.value;
+        page = 0;
+        saveSectionState(tab);
+        render();
+      }
+    };
+    sq.onchange = e => {
+      sectionQuery = e.target.value;
+      page = 0;
+      saveSectionState(tab);
+      render();
+    };
+  }
+
+  if ($('#clear-section-query-btn')) {
+    $('#clear-section-query-btn').onclick = () => {
+      sectionQuery = '';
+      page = 0;
+      saveSectionState(tab);
+      render();
+    };
+  }
+
+  function clearSecondaryFilters() {
+    facet = '';
+    owner = '';
+    sessionType = '';
+    sessionFacilitator = '';
+    skill = '';
+    dateFrom = '';
+    dateTo = '';
+    yearFilter = 'all';
+    podcastSeriesFilter = '';
+    podcastPeriodFilter = 'all';
+    sort = tab === 'CPS Academy VMRs' ? 'date' : 'source';
+    secondaryScope = '';
+    const quickChips = getQuickFilterNames(tab);
+    if (!quickChips.includes(filter) && filter !== 'Needs Volunteers' && filter !== 'My Sessions') {
+      filter = 'All';
     }
-    page=0;render();
-  };
-  if($('#facet'))$('#facet').onchange=e=>{facet=e.target.value;page=0;render()};
-  $('#sort').onchange=e=>{sort=e.target.value;render()};
-  if($('#show-all-toggle'))$('#show-all-toggle').onchange=e=>{showAll=e.target.checked;page=0;render()};
-  $('#clear').onclick=()=>{
-    query='';filter='All';facet='';owner='';sessionType='';sessionFacilitator='';gapsOnly=false;sectionQuery='';skill='';dateFrom='';dateTo='';yearFilter='all';sort=tab==='CPS Academy VMRs'?'date':'source';page=0;showAll=false;podcastSeriesFilter='';podcastPeriodFilter='all';$('#global-search').value='';
-    if(tab==='Morning Report'){mrScheduleRangeMode='week';mrScheduleWeekStart=getDefaultScheduleWeekStart();}
+    if (tab === 'Morning Report' && (filter === 'All' || !filter)) {
+      mrScheduleRangeMode = 'week';
+      mrScheduleWeekStart = getDefaultScheduleWeekStart();
+    }
+    page = 0;
+    saveSectionState(tab);
     render();
+  }
+
+  if ($('#active-filters-clear-btn')) {
+    $('#active-filters-clear-btn').onclick = () => clearSecondaryFilters();
+  }
+
+  function positionFiltersPanel() {
+    const secDetails = document.querySelector('.schedule-secondary-filters');
+    const panel = secDetails?.querySelector('.secondary-filters-panel');
+    const toggleBtn = document.querySelector('#filter-toggle-btn');
+    if (!secDetails || !panel || !toggleBtn) return;
+    if (typeof window !== 'undefined' && window.innerWidth <= 760) {
+      panel.style.left = '';
+      panel.style.right = '';
+      return;
+    }
+    const btnRect = toggleBtn.getBoundingClientRect();
+    const panelWidth = Math.min(400, window.innerWidth - 32);
+    const clampedLeft = Math.max(16, Math.min(btnRect.left, window.innerWidth - panelWidth - 16));
+    panel.style.left = `${clampedLeft - btnRect.left}px`;
+    panel.style.right = 'auto';
+  }
+  if (typeof window !== 'undefined') window.positionFiltersPanel = positionFiltersPanel;
+
+  const secDetails = document.querySelector('.schedule-secondary-filters');
+  if (secDetails) {
+    const toggleBtn = document.querySelector('#filter-toggle-btn');
+    secDetails.ontoggle = () => {
+      scheduleFiltersOpen = secDetails.open;
+      secDetails.setAttribute('aria-expanded', String(secDetails.open));
+      if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(secDetails.open));
+      if (secDetails.open) positionFiltersPanel();
+    };
+    if (toggleBtn) {
+      toggleBtn.onclick = () => {
+        const willBeOpen = !secDetails.open;
+        toggleBtn.setAttribute('aria-expanded', String(willBeOpen));
+        secDetails.setAttribute('aria-expanded', String(willBeOpen));
+        if (willBeOpen) positionFiltersPanel();
+      };
+    }
+    if (secDetails.open) positionFiltersPanel();
+    document.querySelectorAll('[data-close-filters]').forEach(btn => {
+      btn.onclick = e => {
+        e.stopPropagation();
+        secDetails.open = false;
+        scheduleFiltersOpen = false;
+        secDetails.setAttribute('aria-expanded', 'false');
+        if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+        document.querySelector('#filter-toggle-btn')?.focus();
+      };
+    });
+  }
+
+  if ($('#secondary-filters-done-btn')) {
+    $('#secondary-filters-done-btn').onclick = () => {
+      const details = document.querySelector('.schedule-secondary-filters');
+      if (details) {
+        details.open = false;
+        details.setAttribute('aria-expanded', 'false');
+      }
+      const toggleBtn = document.querySelector('#filter-toggle-btn');
+      if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+      scheduleFiltersOpen = false;
+      document.querySelector('#filter-toggle-btn')?.focus();
+    };
+  }
+
+  if ($('#secondary-clear-btn')) {
+    $('#secondary-clear-btn').onclick = () => clearSecondaryFilters();
+  }
+
+  document.querySelectorAll('[data-clear-filters]').forEach(b => {
+    b.onclick = () => clearSectionFilters(tab);
+  });
+
+  if ($('#scope-select')) {
+    $('#scope-select').onchange = e => {
+      const val = e.target.value;
+      const quickChips = getQuickFilterNames(tab);
+      if (quickChips.length) {
+        secondaryScope = val === 'All' ? '' : val;
+      } else {
+        filter = val;
+        secondaryScope = val === 'All' ? '' : val;
+      }
+      if (tab === 'Morning Report') {
+        if (val === 'All history' || val === 'All') mrScheduleRangeMode = 'all';
+        else if (val === 'Unresolved dates' || val === 'Unresolved source dates') mrScheduleRangeMode = 'unresolved';
+      }
+      page = 0;
+      saveSectionState(tab);
+      render();
+    };
+  }
+
+  if ($('#filter')) {
+    $('#filter').onchange = e => {
+      filter = e.target.value;
+      if (tab === 'Morning Report') {
+        if (filter === 'All history' || filter === 'All') mrScheduleRangeMode = 'all';
+        else if (filter === 'Unresolved dates' || filter === 'Unresolved source dates') mrScheduleRangeMode = 'unresolved';
+        else if (filter === 'This Week') { mrScheduleRangeMode = 'week'; mrScheduleWeekStart = getDefaultScheduleWeekStart(); }
+        else if (filter === 'Upcoming') {
+          mrScheduleRangeMode = 'week';
+          const defWeek = getDefaultScheduleWeekStart();
+          if (mrScheduleWeekStart && mrScheduleWeekStart < defWeek) mrScheduleWeekStart = defWeek;
+        }
+      }
+      page = 0;
+      saveSectionState(tab);
+      render();
+    };
+  }
+  if($('#facet'))$('#facet').onchange=e=>{facet=e.target.value;page=0;saveSectionState(tab);render()};
+  $('#sort').onchange=e=>{sort=e.target.value;saveSectionState(tab);render()};
+  if($('#show-all-toggle'))$('#show-all-toggle').onchange=e=>{showAll=e.target.checked;page=0;render()};
+  if($('#clear'))$('#clear').onclick=()=>{
+    clearSecondaryFilters();
   };
   if($('#view'))$('#view').onclick=()=>{
     if(isHistorical){
@@ -2235,7 +2612,7 @@ function personalLogbookView(){
       const sliceRows = data.pastEntries.slice(initWin.startIndex, initWin.endIndex).map((e, i) => renderLogbookPastRow(e, initWin.startIndex + i)).join('');
       pastRowsHtml = topSp + sliceRows + botSp;
     }
-    const logbookToggleHtml = data.pastEntries.length > 50 ? `<div class="window-toggle-bar"><span>Showing virtualized assignments (<strong>${data.pastEntries.length}</strong> total)</span><button type="button" class="button secondary small window-toggle-btn" id="logbook-window-toggle-btn">Show all for Find (Ctrl+F)</button></div>` : '';
+    const logbookToggleHtml = data.pastEntries.length > 50 ? `<div class="window-toggle-bar"><span>Showing virtualized assignments (<strong>${data.pastEntries.length}</strong> total)</span><button type="button" class="button secondary small window-toggle-btn" id="logbook-window-toggle-btn">Show all rows</button></div>` : '';
 
     content=`<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:18px;"><div style="display:flex;align-items:center;gap:8px;"><span class="tag local-profile-tag">Local test profile</span><span class="tag">Local preview</span><span class="muted" style="font-size:12px;">Canonical ID: <code>${esc(slice.personId)}</code></span></div><div style="display:flex;gap:8px;"><label class="button secondary small" style="cursor:pointer;">Switch Slice<input type="file" id="logbook-slice-file" accept="application/json,.json" hidden></label><button class="button secondary small" id="unload-logbook-btn">Unload Slice</button></div></div><div class="logbook-metrics-grid"><div class="logbook-metric-card"><strong>${m.recordedAssignments}</strong><span>Recorded assignments</span><small class="muted" style="font-size:11px;">Completed historical session assignments</small></div><div class="logbook-metric-card"><strong>${m.distinctSessions}</strong><span>Distinct sessions</span><small class="muted" style="font-size:11px;">Individual morning report and VMR dates</small></div><div class="logbook-metric-card"><strong>${Object.keys(m.roleBreakdown).length}</strong><span>Roles performed</span><div class="logbook-role-grid">${Object.entries(m.roleBreakdown).map(([rName,count])=>`<div class="logbook-role-item"><small>${esc(rName)}</small><strong>${count}</strong></div>`).join('')||'<span class="muted">None recorded</span>'}</div></div></div><section class="panel table-panel" style="margin-bottom:24px;"><div style="padding:16px 20px 10px;border-bottom:1px solid var(--line);"><h2 style="margin:0;font-size:16px;">Completed Clinical Assignments (${data.pastEntries.length})</h2><p class="muted" style="margin:4px 0 0 0;font-size:12px;">Reverse-chronological history of recorded workbook assignments (assignments are not verified attendance).</p></div>${logbookToggleHtml}<div class="logbook-table-container"><table class="data-table"><thead><tr><th>Date</th><th>Series</th><th>Role</th><th>Session Title / Topic</th><th>Source ID</th></tr></thead><tbody>${pastRowsHtml}</tbody></table></div></section>${data.scheduledEntries.length?`<section class="panel table-panel" style="margin-bottom:24px;"><div style="padding:16px 20px 10px;border-bottom:1px solid var(--line);"><h2 style="margin:0;font-size:16px;">Scheduled Upcoming Assignments (${data.scheduledEntries.length})</h2><p class="muted" style="margin:4px 0 0 0;font-size:12px;">Upcoming assignments excluded from completed totals.</p></div><table class="data-table"><thead><tr><th>Scheduled Date</th><th>Series</th><th>Role</th><th>Session Title</th><th>Source ID</th></tr></thead><tbody>${data.scheduledEntries.map(e=>`<tr><td data-label="Scheduled Date"><strong>${esc(e.date)}</strong></td><td data-label="Series">${esc(e.series||'Morning Report')}</td><td data-label="Role"><span class="tag slot-upcoming">${esc(e.role||'Unspecified')}</span></td><td data-label="Title">${esc(e.title||'Morning Report')}</td><td data-label="Source"><small class="muted">${esc(e.sessionId||e.id)}</small></td></tr>`).join('')}</tbody></table></section>`:''}${data.unresolvedEntries.length?`<section class="panel table-panel"><div style="padding:16px 20px 10px;border-bottom:1px solid var(--line);"><h2 style="margin:0;font-size:16px;">Unresolved Date Records (${data.unresolvedEntries.length})</h2><p class="muted" style="margin:4px 0 0 0;font-size:12px;">Entries without unambiguous calendar dates (sequestered from historical totals).</p></div><table class="data-table"><thead><tr><th>Source Date Raw</th><th>Series</th><th>Role</th><th>Session Title</th><th>Source ID</th></tr></thead><tbody>${data.unresolvedEntries.map(e=>`<tr><td data-label="Date Raw"><span class="tag slot-urgent">${esc(e.date||'Unspecified date')}</span></td><td data-label="Series">${esc(e.series||'Morning Report')}</td><td data-label="Role"><span class="tag">${esc(e.role||'Unspecified')}</span></td><td data-label="Title">${esc(e.title||'Morning Report')}</td><td data-label="Source"><small class="muted">${esc(e.sessionId||e.id)}</small></td></tr>`).join('')}</tbody></table></section>`:''}`;
   }
@@ -4544,7 +4921,7 @@ function render(){
   if($('#commitments-open-prefs-btn'))$('#commitments-open-prefs-btn').onclick=()=>{const t=$('#admin-toggle');if(t)t.checked=isAdmin();updateProfileDisplay();$('#admin-prefs-dialog')?.showModal()};
   document.querySelectorAll('[data-star]').forEach(b=>b.onclick=e=>{e.stopPropagation();const id=b.dataset.star;const willBeStarred=!workspace.favorites.includes(id);if(mutate(w=>{w.favorites=willBeStarred?[...w.favorites,id]:w.favorites.filter(x=>x!==id)})){document.querySelectorAll(`[data-star="${CSS.escape?CSS.escape(id):id}"]`).forEach(starBtn=>{starBtn.textContent=willBeStarred?'★':'☆';starBtn.classList.toggle('is-starred',willBeStarred);starBtn.setAttribute('aria-label',`${willBeStarred?'Unpin':'Pin'} record`);});if(filter==='Pinned'||tab==='Home')render();else toast(willBeStarred?'Pinned to favorites':'Unpinned from favorites');}});
   document.querySelectorAll('.schedule-secondary-filters').forEach(d=>d.ontoggle=()=>{if(window.innerWidth<=760)scheduleFiltersOpen=d.open});
-  document.querySelectorAll('[data-clear-filters]').forEach(b=>b.onclick=()=>$('#clear')?.click());
+  document.querySelectorAll('[data-clear-filters]').forEach(b=>b.onclick=()=>clearSectionFilters(tab));
   $('#global-search').placeholder='Search all Academy records…';if(db[tab]&&!query.trim())arrangeScheduleFilters();
   attachMatrixWindowing();
   attachLogbookWindowing();
@@ -4580,7 +4957,7 @@ function attachMatrixWindowing() {
     renderRow: renderMatrixItem,
     onWindowChange: ({ isExpanded }) => {
       const btn = document.querySelector('#matrix-window-toggle-btn');
-      if (btn) btn.textContent = isExpanded ? 'Collapse to virtual scroll' : 'Show all for Find (Ctrl+F)';
+      if (btn) btn.textContent = isExpanded ? 'Collapse to virtual scroll' : 'Show all rows';
       bindCalendarButtons(container);
     }
   });
@@ -4674,7 +5051,7 @@ function attachLogbookWindowing() {
     renderRow: renderLogbookPastRow,
     onWindowChange: ({ isExpanded }) => {
       const btn = document.querySelector('#logbook-window-toggle-btn');
-      if (btn) btn.textContent = isExpanded ? 'Collapse to virtual scroll' : 'Show all for Find (Ctrl+F)';
+      if (btn) btn.textContent = isExpanded ? 'Collapse to virtual scroll' : 'Show all rows';
     }
   });
 
@@ -5706,7 +6083,21 @@ $('#global-search').oninput=e=>{
   searchPage=0;
   render();
 };$('#new-item-button').onclick=()=>{if(!db['Morning Report'])return toast('Please wait for the workbook to load');createRecord()};
-document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()};if(e.key==='Escape'&&document.activeElement===$('#global-search')&&query.trim()){query='';searchPage=0;$('#global-search').value='';render()}});
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()}
+  if(e.key==='Escape'){
+    if(document.activeElement===$('#global-search')&&query.trim()){query='';searchPage=0;$('#global-search').value='';render()}
+    const secDetails = document.querySelector('.schedule-secondary-filters[open]');
+    if(secDetails){
+      secDetails.open=false;
+      scheduleFiltersOpen=false;
+      secDetails.setAttribute('aria-expanded', 'false');
+      const tb = document.querySelector('#filter-toggle-btn');
+      if(tb) tb.setAttribute('aria-expanded', 'false');
+      tb?.focus();
+    }
+  }
+});
 $('.sync-card').onclick=()=>navigate('Workspace');$('.sync-card strong').textContent='Workbook snapshot';$('.sync-card small').textContent='Local changes · no live sync';$('.notification-button')?.remove();
 if($('#feedback-trigger-btn'))$('#feedback-trigger-btn').onclick=openIssueModal;
 if($('#issue-report-form'))$('#issue-report-form').onsubmit=submitIssueReport;
@@ -5785,7 +6176,7 @@ if(mrParsed){
   }
   tab='Morning Report';
 }
-if(tab==='Morning Report')mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'agenda':'matrix';else if(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab])mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'cards':'table';sort=tab==='CPS Academy VMRs'?'date':'source';if(!mrParsed)filter=tab==='Morning Report'?'Upcoming':'All';render();if(storageIssue)toast('Browser storage could not be read. Export changes before leaving.')}).catch(()=>{
+if(tab==='Morning Report')mode='agenda';else if(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab])mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'cards':'table';sort=tab==='CPS Academy VMRs'?'date':'source';if(!mrParsed)filter=tab==='Morning Report'?'Upcoming':'All';render();if(storageIssue)toast('Browser storage could not be read. Export changes before leaving.')}).catch(()=>{
   $('#page').innerHTML='<div class="empty-state"><h1>Could not load the workbook</h1><p>You appear to be offline without a cached copy, or the network request failed.</p><div style="margin-top:16px;"><button class="button primary" onclick="location.reload()">Retry connection</button></div></div>';
 });
 
@@ -5808,7 +6199,7 @@ function extraFilters(){
     html+=`<label>Owner<select class="select" id="owner-filter"><option value="">All owners</option>${owners.map(o=>`<option value="${esc(o)}" ${owner===o?'selected':''}>${esc(o)}</option>`).join('')}</select></label>`;
   }
   if(tab==='Research @CPSolvers')html+=`<label>Research skill<select class="select" id="skill"><option value="">Any skill</option>${['Research writing','Data analytics','Cross-sectional studies','Systematic reviews','Qualitative studies','Case reports'].map(k=>`<option ${skill===k?'selected':''}>${esc(k)}</option>`).join('')}</select></label>`;
-  if(records().some(r=>dateValue(r)))html+=`<label>From<input class="select" type="date" id="date-from" value="${esc(dateFrom)}"></label><label>To<input class="select" type="date" id="date-to" value="${esc(dateTo)}"></label>`;
+  if(records().some(r=>dateValue(r)))html+=`<label class="filter-field-label"><span>From</span><input class="select" type="date" id="panel-date-from" value="${esc(dateFrom)}"></label><label class="filter-field-label"><span>To</span><input class="select" type="date" id="panel-date-to" value="${esc(dateTo)}"></label>`;
   return html
 }
 function bindExtraFilters(){
@@ -5816,7 +6207,7 @@ function bindExtraFilters(){
   if($('#podcast-series-filter'))$('#podcast-series-filter').onchange=e=>{podcastSeriesFilter=e.target.value;page=0;render()};
   if($('#podcast-period-filter'))$('#podcast-period-filter').onchange=e=>{podcastPeriodFilter=e.target.value;page=0;render()};
   if($('#year-filter'))$('#year-filter').onchange=e=>{yearFilter=e.target.value;page=0;render()};
-  if($('#owner-filter'))$('#owner-filter').onchange=e=>{owner=e.target.value;page=0;render()};if($('#skill'))$('#skill').onchange=e=>{skill=e.target.value;page=0;render()};for(const id of ['date-from','date-to'])if($('#'+id))$('#'+id).onchange=e=>{if(id==='date-from')dateFrom=e.target.value;else dateTo=e.target.value;page=0;render()}}
+  if($('#owner-filter'))$('#owner-filter').onchange=e=>{owner=e.target.value;page=0;render()};if($('#skill'))$('#skill').onchange=e=>{skill=e.target.value;page=0;render()};for(const id of ['date-from','date-to','panel-date-from','panel-date-to'])if($('#'+id))$('#'+id).onchange=e=>{if(id==='date-from'||id==='panel-date-from')dateFrom=e.target.value;else dateTo=e.target.value;page=0;render()}}
 function staffingTools(){return `<section class="staffing-tools"><h3>Quick staffing entry</h3><p>Choose a role and enter a name. This fills the form; use Save changes to keep it.</p><label>Role<select id="staff-role" class="select">${['Facilitator','Presenter','Scribe','Teaching Points','Active participant 1','Active participant 2','Active participant 3','Active participant 4','Chat support','Available team'].map(k=>`<option>${k}</option>`).join('')}</select></label><label>Name<input id="staff-name" placeholder="Name or team" autocomplete="off"></label><button type="button" class="button secondary" id="assign-name">Fill assignment</button><p id="staff-message" role="status"></p></section>`}
 function bindStaffingTools(targetRole){if(!$('#assign-name'))return;if(targetRole&&$('#staff-role')){$('#staff-role').value=targetRole;if(typeof window!=='undefined'&&(window.innerWidth||0)>760){setTimeout(()=>$('#staff-name')?.focus(),60);}}$('#assign-name').onclick=()=>{const name=$('#staff-name').value.trim(),role=$('#staff-role').value;if(!name){$('#staff-message').textContent='Enter a name first.';return}if(role==='Scribe'||role==='Teaching Points'){const el=[...$('#dialog-content').querySelectorAll('[data-field]')].find(el=>el.dataset.field==='Scribe / teaching points sign-ups');if(el){const rolePat=role==='Teaching Points'?'(?:Teaching Points|TP)':'Scribe';const lineRegex=new RegExp(`(^|\\r?\\n)([^\\S\\r\\n]*${rolePat}:[^\\S\\r\\n]*)([^\\r\\n|]*)(.*?)($|\\r?\\n)`,`i`);if(lineRegex.test(el.value)){el.value=el.value.replace(lineRegex,(match,p1,p2,p3,p4,p5)=>`${p1}${p2}${name}${p4}${p5}`);}else{el.value=(el.value?el.value+'\n':'')+`${role}: ${name}`}el.dispatchEvent(new Event('input',{bubbles:true}));$('#staff-message').textContent=`${role} filled. Save changes to keep the assignment.`;el.focus();return}}const el=[...$('#dialog-content').querySelectorAll('[data-field]')].find(el=>el.dataset.field===role);if(!el)return;const current=el.value.trim();if(current&&!/^(tbd|none|-|na|n\/a|—)$/i.test(current)){if(current.split(/[,;\n&+/]/).some(s=>s.trim().toLowerCase()===name.toLowerCase())){$('#staff-message').textContent='That name is already assigned.';return}if(/\b(tbd|none|-)\b/i.test(current)){el.value=current.replace(/\b(tbd|none|-)\b/i,name)}else{el.value=current+', '+name}}else el.value=name;el.dispatchEvent(new Event('input',{bubbles:true}));$('#staff-message').textContent=`${role} filled. Save changes to keep the assignment.`;el.focus()}}
 
@@ -5872,13 +6263,17 @@ function tokenizeStaff(raw){
 function renderStaffTokens(namesArray, role, sessionId){
  const tokens=Array.isArray(namesArray)?namesArray:tokenizeStaff(namesArray);
  if(!tokens.length)return '';
+ const userIsAdmin = typeof isAdmin === 'function' ? isAdmin() : true;
+ const isTP = role === 'Teaching Points';
+ const prefix = isTP ? '<span class="tp-icon" aria-hidden="true">📝 </span>' : '';
  const tokensHtml=tokens.map(name=>{
   const noteMatch=name.match(/^([^(]+)(\([^)]+\))$/);
   const main=noteMatch?noteMatch[1].trim():name;
   const note=noteMatch?` <span class="staff-token-note">${esc(noteMatch[2])}</span>`:'';
-  return `<button type="button" class="staff-token" data-token-name="${esc(name)}" data-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="Click to swap or remove ${esc(main)}"><span class="staff-token-name">${esc(main)}</span>${note}</button>`;
+  return `<button type="button" class="staff-token${isTP ? ' tp-token' : ''}${!userIsAdmin ? ' is-readonly-token' : ''}" data-token-name="${esc(name)}" data-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="${userIsAdmin ? `Click to swap or remove ${esc(main)}` : esc(main)}">${prefix}<span class="staff-token-name">${esc(main)}</span>${note}</button>`;
  }).join('');
- return `<div class="staff-tokens-container" data-session-id="${esc(sessionId)}" data-role="${esc(role)}">${tokensHtml}<button type="button" class="staff-add-btn" data-add-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="Add another ${esc(role)}">＋ Add</button></div>`;
+ const addBtn = userIsAdmin ? `<button type="button" class="staff-add-btn" data-add-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="Add another ${esc(role)}">＋ Add</button>` : '';
+ return `<div class="staff-tokens-container" data-session-id="${esc(sessionId)}" data-role="${esc(role)}">${tokensHtml}${addBtn}</div>`;
 }
 
 function updateRoleAssignment(sessionId, role, updateFn){
@@ -5963,18 +6358,19 @@ function addStaffToken(sessionId, role, newName){
 }
 
 function staffingSlot(r,role){
+ const isTP = role === 'Teaching Points';
  if(!mrGaps(r).includes(role)){
   const val=staffingRoleValue(r,role);
   const tokens=tokenizeStaff(val);
-  if(tokens.length)return `<div class="matrix-slot-assigned staffing-people">${renderStaffTokens(tokens,role,r.id)}</div>`;
-  return `<span class="matrix-slot-assigned staffing-people" title="${esc(val)}">${esc(val||'Not scheduled')}</span>`;
+  if(tokens.length)return `<div class="matrix-slot-assigned staffing-people${isTP ? ' tp-assigned-slot' : ''}">${renderStaffTokens(tokens,role,r.id)}</div>`;
+  return `<span class="matrix-slot-assigned staffing-people" title="${esc(val)}">${isTP ? '📝 ' : ''}${esc(val||'Not scheduled')}</span>`;
  }
  const timing=SessionCore.parseSessionTime(r);
  const isUncertain=(r.flags&&r.flags.some(f=>/moved|rescheduled|tentative|uncertain|verify|tbd/i.test(f)))||(r.session?.unresolved&&r.session.unresolved.length>0)||/moved|tentative|\?|tbd/i.test(r.fields.Date||'')||timing.status!=='resolved';
  const baseTier=getStaffingUrgency(SessionCore.parseDate(dateValue(r)));
  const tier=isUncertain?'open':baseTier;
- const label=isUncertain?`+ Open ${role} (Verify Date)`:(tier==='urgent'?`⚠ Urgent: ${role} Needed`:tier==='upcoming'?`◷ ${role} Needed`:`+ Open ${role}`);
- return `<button type="button" class="status-chip matrix-slot-btn matrix-slot-gap gap-action-btn slot-${tier}" data-status="${tier}" data-open="${esc(r.id)}" data-role="${esc(role)}" aria-label="${esc(label)}">${esc(label)}</button>`;
+ const label=isUncertain?`+ Open ${isTP ? 'TP Lead' : role} (Verify Date)`:(tier==='urgent'?`● Urgent: ${isTP ? 'TP Lead' : role}`:tier==='upcoming'?`◷ ${isTP ? 'TP Lead' : role}`:`+ Open ${isTP ? 'TP Lead' : role}`);
+ return `<button type="button" class="status-chip matrix-slot-btn matrix-slot-gap gap-action-btn slot-${tier}${isTP ? ' slot-tp' : ''}" data-status="${tier}" data-open="${esc(r.id)}" data-role="${esc(role)}" aria-label="${esc(label)}" title="${esc(label)}">${esc(label)}</button>`;
 }
 function staffingGrid(r){return `<div class="staffing-grid">${['Facilitator','Presenter','Scribe','Teaching Points'].map(role=>`<div class="staffing-role"><small>${role}</small>${staffingSlot(r,role)}</div>`).join('')}</div>`;}
 
@@ -5988,10 +6384,24 @@ function scheduleGroups(rr){
 function scheduleSummary(rr){return `<div class="agenda-summary panel"><strong>${rr.length} session${rr.length===1?'':'s'} in this view</strong>${staffingHealthBadge(records('Morning Report'))}</div>`;}
 function renderMatrixItem(item, index) {
  if (item.type === 'week') {
-  return `<tr class="matrix-week-row" data-index="${index}"><td colspan="7">${esc(weekLabel(item.week.start, item.week.end))} · ${item.week.records.length} sessions</td></tr>`;
+  const gapsInWeek = item.week.records.reduce((acc, r) => acc + mrGaps(r).length, 0);
+  const gapSummary = gapsInWeek > 0 ? `<span class="matrix-week-gaps-badge">⚠ ${gapsInWeek} vacanc${gapsInWeek===1?'y':'ies'}</span>` : `<span class="matrix-week-staffed-badge">✓ Fully staffed</span>`;
+  return `<tr class="matrix-week-row" data-index="${index}"><td colspan="7"><div class="matrix-week-header-content"><span class="matrix-week-title">📅 ${esc(weekLabel(item.week.start, item.week.end))}</span><span class="matrix-week-meta"><span class="matrix-week-count">${item.week.records.length} session${item.week.records.length===1?'':'s'}</span>${gapSummary}</span></div></td></tr>`;
  }
  const r = item.record;
- return `<tr class="matrix-row${mrGaps(r).length ? ' matrix-row-has-gap' : ''}" data-index="${index}"><td><div class="matrix-date-cell"><strong>${esc(recordDate(r))}</strong><span class="matrix-time-sub">${esc(SessionCore.formatSessionTime(r))}</span></div></td><td><strong>${esc(r.fields.Type || 'Morning Report')}</strong></td>${['Facilitator','Presenter','Scribe','Teaching Points'].map(role => `<td>${staffingSlot(r, role)}</td>`).join('')}<td>${sessionNotice(r)}<div class="matrix-actions">${calendarButton(r, 'Morning Report', { compact: true })}<button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" data-star="${esc(r.id)}" aria-label="${workspace.favorites.includes(r.id) ? 'Unpin' : 'Pin'} record">${workspace.favorites.includes(r.id) ? '★' : '☆'}</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></td></tr>`;
+ const dStr = recordDate(r);
+ let dayBadge = 'TBD';
+ let dateFormatted = dStr || 'Date TBD';
+ if (dStr) {
+  const dObj = new Date(dStr + 'T12:00:00Z');
+  if (!Number.isNaN(dObj.getTime())) {
+   dayBadge = dObj.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).toUpperCase();
+   dateFormatted = dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  }
+ }
+ const sessionType = r.fields.Type || 'Morning Report';
+ const isSpecial = /neuro|special|syndrome|solvers/i.test(sessionType);
+  return `<tr class="matrix-row${mrGaps(r).length ? ' matrix-row-has-gap' : ''}" data-index="${index}"><td class="matrix-col-date"><div class="matrix-date-cell"><span class="matrix-day-badge">${esc(dayBadge)}</span><div><div class="matrix-date-text">${esc(dateFormatted)}</div><span class="matrix-time-sub">${esc(SessionCore.formatSessionTime(r))}</span></div></div></td><td class="matrix-col-type"><div class="matrix-type-wrapper"><span class="matrix-type-badge${isSpecial?' matrix-type-special':''}">${esc(sessionType)}</span></div></td>${['Facilitator','Presenter','Scribe','Teaching Points'].map(role => `<td class="matrix-col-role matrix-col-${role.toLowerCase().replace(/[^a-z]/g,'')}">${staffingSlot(r, role)}</td>`).join('')}<td class="matrix-col-actions">${sessionNotice(r)}<div class="matrix-actions"><button type="button" class="button secondary small matrix-action-primary" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details and roster">Details</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" data-star="${esc(r.id)}" aria-label="${workspace.favorites.includes(r.id) ? 'Unpin' : 'Pin'} record">${workspace.favorites.includes(r.id) ? '★' : '☆'}</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button><span class="visually-hidden-accessible" style="position:absolute;left:0;top:0;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);">${calendarButton(r, 'Morning Report', { compact: true })}</span></div></td></tr>`;
 }
 function matrixView(rr){
  const {weeks,unresolved}=scheduleGroups(rr);
@@ -6014,7 +6424,7 @@ function matrixView(rr){
   const slice = flatItems.slice(initialWin.startIndex, initialWin.endIndex).map((it, i) => renderMatrixItem(it, initialWin.startIndex + i)).join('');
   rows = topSpacer + slice + bottomSpacer;
  }
- const windowToggleHtml = flatItems.length > threshold ? `<div class="window-toggle-bar"><span>Showing virtualized window (<strong>${flatItems.length}</strong> total items)</span><button type="button" class="button secondary small window-toggle-btn" id="matrix-window-toggle-btn">Show all for Find (Ctrl+F)</button></div>` : '';
+ const windowToggleHtml = flatItems.length > threshold ? `<div class="window-toggle-bar" style="display:none;" aria-hidden="true"><button type="button" id="matrix-window-toggle-btn">Load all records</button></div>` : '';
  return `<section class="matrix-view">${scheduleSummary(rr)}${windowToggleHtml}<div class="matrix-card"><div class="matrix-container"><table class="matrix-table"><thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows||'<tr><td colspan="7">No dated sessions match these filters.</td></tr>'}</tbody></table></div></div>${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates</h2>${unresolved.map(r=>agendaCard(r,true)).join('')}</section>`:''}</section>`;
 }
 function agendaView(rr){
@@ -6029,7 +6439,7 @@ function agendaView(rr){
    const wLbl = bounds ? weekLabel(bounds.start, bounds.end) : `Week of ${currentWeekStart}`;
    return `<section class="agenda-view">${scheduleSummary(rr)}<section class="agenda-week panel empty-agenda-week"><div class="empty-state"><h3>No sessions scheduled for ${esc(wLbl)}</h3><p class="muted">No Morning Report sessions match your active filters for this week.</p><div class="card-actions" style="justify-content:center;gap:8px;margin-top:12px;"><button type="button" class="button secondary small" data-week-jump="${esc(getDefaultScheduleWeekStart())}">Jump to This week</button><button type="button" class="button secondary small" data-schedule-scope="all">View All history</button></div></div></section></section>`;
  }
- return `<section class="agenda-view">${scheduleSummary(rr)}${weeks.map(w=>{
+ const agendaContent = weeks.map(w=>{
    const dayGroups=new Map();
    for(const r of w.records){
      const d=recordDate(r)||'Date TBD';
@@ -6042,9 +6452,31 @@ function agendaView(rr){
      return `<div class="agenda-day-group"><div class="agenda-day-head"><h4>${esc(dayLabel)}</h4><span class="badge">${dayRecs.length} session${dayRecs.length===1?'':'s'}</span></div><div class="agenda-session-list">${dayRecs.map(r=>agendaCard(r)).join('')}</div></div>`;
    }).join('');
    return `<section class="agenda-week panel"><div class="agenda-week-head"><h3>${esc(weekLabel(w.start,w.end))}</h3><span>${w.records.length} sessions</span></div>${dayGroupsHtml}</section>`;
- }).join('')}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
+ }).join('');
+
+  const isMobile = typeof window !== 'undefined' && (window.innerWidth || 0) <= 760;
+  const isSingleWeek = weeks.length === 1 && mrScheduleRangeMode !== 'all';
+  const lowerStaffingTable = (!isMobile && isSingleWeek) ? `
+    <section class="agenda-staffing-section panel">
+      <div class="agenda-staffing-header">
+        <div>
+          <h3 class="agenda-staffing-title">Weekly Staffing Detail</h3>
+          <p class="muted" style="margin:2px 0 0 0;font-size:12px;">Operational role assignments and vacancy management for this week.</p>
+        </div>
+      </div>
+      <div class="matrix-card">
+        <div class="matrix-container">
+          <table class="matrix-table">
+            <thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead>
+            <tbody>${weeks.flatMap(w => w.records.map((r, i) => renderMatrixItem({type:'record', record:r}, i))).join('')}</tbody>
+          </table>
+        </div>
+      </div>
+    </section>` : '';
+
+ return `<section class="agenda-view">${scheduleSummary(rr)}${agendaContent}${lowerStaffingTable}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
 }
-function agendaCard(r,isUnresolved=false){return `<article class="agenda-card"><div class="agenda-card-date"><strong>${esc(recordDate(r)||dateValue(r)||'Date TBD')}</strong></div><div class="agenda-card-body"><div class="agenda-card-top"><span class="tag">${esc(r.fields.Type||'Morning Report')}</span><span class="muted agenda-times">${esc(SessionCore.formatSessionTime(r))}</span></div>${staffingGrid(r)}</div><div class="agenda-card-actions">${sessionNotice(r)}${calendarButton(r,'Morning Report',{compact:true})}<button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" data-star="${esc(r.id)}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record">${workspace.favorites.includes(r.id)?'★':'☆'}</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></article>`;}
+function agendaCard(r,isUnresolved=false){return `<article class="agenda-card"><div class="agenda-card-date"><strong>${esc(recordDate(r)||dateValue(r)||'Date TBD')}</strong></div><div class="agenda-card-body"><div class="agenda-card-top"><span class="tag">${esc(r.fields.Type||'Morning Report')}</span><span class="muted agenda-times">${esc(SessionCore.formatSessionTime(r))}</span></div>${staffingGrid(r)}</div><div class="agenda-card-actions">${sessionNotice(r)}<button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details">Details</button>${calendarButton(r,'Morning Report',{compact:true})}<button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" data-star="${esc(r.id)}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record">${workspace.favorites.includes(r.id)?'★':'☆'}</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></article>`;}
 function getPodcastSeries(title){
   if(!title)return '';
   const t=String(title).trim();
@@ -6223,12 +6655,11 @@ function quickAssignEditor(id){const r=records('Podcast Episodes').find(x=>x.id=
 function bindBoardEvents(t){document.querySelectorAll('[data-drag-id]').forEach(el=>{el.ondragstart=e=>e.dataTransfer.setData('text/plain',el.dataset.dragId);});document.querySelectorAll('[data-lane-stage]').forEach(lane=>{lane.ondragover=e=>{e.preventDefault();lane.classList.add('drag-over');};lane.ondragleave=()=>lane.classList.remove('drag-over');lane.ondrop=e=>{e.preventDefault();lane.classList.remove('drag-over');const id=e.dataTransfer.getData('text/plain');if(id)applyStageChange(id,t,lane.dataset.laneStage);};});document.querySelectorAll('[data-move-id]').forEach(b=>{b.onclick=()=>applyStageChange(b.dataset.moveId,t,b.dataset.targetStage);});document.querySelectorAll('.quick-editor-btn').forEach(b=>{b.onclick=()=>quickAssignEditor(b.dataset.recordId);});}
 
 function compoundSessionFilters(){
- let html=`<label>Search this section<input class="select" id="section-query" type="search" value="${esc(sectionQuery)}" placeholder="Search within filters"></label>`;
- if(!['Morning Report','CPS Academy VMRs'].includes(tab))return html;
+ if(!['Morning Report','CPS Academy VMRs'].includes(tab))return '';
  const rr=records(),types=[...new Set(rr.map(r=>r.fields.Type).filter(Boolean))].sort();
  const facilitators=[...new Set(rr.flatMap(r=>SessionCore.facilitatorNames(r.fields.Facilitator)).filter(Boolean))].sort();
- html+=`<label>Session type<select class="select" id="session-type"><option value="">All types</option>${types.map(v=>`<option value="${esc(v)}" ${sessionType===v?'selected':''}>${esc(v)}</option>`).join('')}</select></label><label>Facilitator<select class="select" id="session-facilitator"><option value="">All facilitators</option>${facilitators.map(v=>`<option value="${esc(v)}" ${sessionFacilitator===v?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`;
- if(tab==='Morning Report')html+=`<label class="compound-checkbox"><input id="gaps-only" type="checkbox" ${gapsOnly?'checked':''}> Unstaffed gaps only</label>`;
+ let html=`<label class="filter-field-label"><span>Session type</span><select class="select" id="session-type"><option value="">All types</option>${types.map(v=>`<option value="${esc(v)}" ${sessionType===v?'selected':''}>${esc(v)}</option>`).join('')}</select></label><label class="filter-field-label"><span>Facilitator</span><select class="select" id="session-facilitator"><option value="">All facilitators</option>${facilitators.map(v=>`<option value="${esc(v)}" ${sessionFacilitator===v?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`;
+ if(tab==='Morning Report')html+=`<label class="compound-checkbox"><input id="gaps-only" type="checkbox" ${gapsOnly?'checked':''}><span>Unstaffed gaps only</span></label>`;
  return html;
 }
 function bindCompoundSessionFilters(){
@@ -6240,24 +6671,16 @@ function bindCompoundSessionFilters(){
 
 let scheduleFiltersOpen=false;
 function arrangeScheduleFilters(){
- const bar=document.querySelector('.filter-bar');if(!bar||bar.dataset.arranged)return;bar.dataset.arranged='true';bar.classList.add('schedule-filter-bar','filter-toolbar','roster-toolbar');
- const search=bar.querySelector('#section-query')?.closest('label'),views=bar.querySelector('.segmented')||bar.querySelector('#view');
+ const bar=document.querySelector('.filter-bar');if(!bar)return;
  const details=bar.querySelector('.schedule-secondary-filters');
- if(details){details.classList.add('roster-filter');details.ontoggle=()=>{if(window.innerWidth<=760)scheduleFiltersOpen=details.open};}
- if(search){search.classList.add('schedule-quick-search','roster-search');search.querySelector('input').placeholder=['Morning Report','CPS Academy VMRs'].includes(tab)?'Search sessions':'Search this section';bar.append(search);}
- const chips=document.createElement('div');chips.className='schedule-filter-chips';chips.setAttribute('aria-label','Schedule views');
- const activeUser=typeof Identity!=='undefined'?Identity.getCurrentUser():null;
- const hasUser=Boolean(activeUser?.name||workspace.reporterName);
- const chipNames=tab==='Morning Report'?['Upcoming','This Week','Needs Volunteers','My Sessions']:tab==='CPS Academy VMRs'?['Upcoming','Needs Volunteers','My Sessions']:[];
- for(const name of chipNames){
-  const b=document.createElement('button');b.type='button';b.className='button secondary small';b.textContent=name;b.setAttribute('aria-pressed',String(filter===name));
-  if(name==='My Sessions'&&!hasUser){b.disabled=true;b.title='Sign in with a local profile or claim a role to enable My Sessions';}
-  b.onclick=()=>{filter=filter===name?'All':name;page=0;render()};chips.append(b);
+ if(details){details.ontoggle=()=>{if(window.innerWidth<=760)scheduleFiltersOpen=details.open};}
+ if((mode==='cards'||mode==='table')&&tab==='Morning Report'&&!document.querySelector('.schedule-health')){
+  const health=document.createElement('div');health.className='schedule-health';health.innerHTML=staffingHealthBadge(records('Morning Report'));bar.after(health);
  }
- if(chipNames.length)bar.append(chips);bar.append(details);if(views){views.classList.add('roster-view-switch');bar.append(views);}if((mode==='cards'||mode==='table')&&tab==='Morning Report'){const health=document.createElement('div');health.className='schedule-health';health.innerHTML=staffingHealthBadge(records('Morning Report'));bar.after(health);}
 }
 
 if(typeof window!=='undefined'&&window.matchMedia){window.matchMedia('(max-width:760px)').addEventListener('change',()=>{if(!document.querySelector('dialog[open]'))render()});}
+if(typeof window!=='undefined'){window.addEventListener('resize',()=>{const d=document.querySelector('.schedule-secondary-filters[open]');if(d&&window.positionFiltersPanel)window.positionFiltersPanel();});}
 if(typeof globalThis!=='undefined'){
   globalThis.RECORD_CATEGORY=RECORD_CATEGORY;
   globalThis.CRC_RETIRED_ROUNDS=CRC_RETIRED_ROUNDS;

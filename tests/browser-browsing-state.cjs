@@ -126,13 +126,14 @@ const { chromium } = require('playwright-core');
     await p.goto(base + '/#' + encodeURIComponent('CPS Academy VMRs'));
     await p.locator('#page h1').waitFor();
     await p.locator('#next').click();
-    await p.locator('#filter').selectOption('Upcoming');
-    await p.locator('#clear').click();
+    await p.locator('.schedule-secondary-filters').evaluate(el=>el.open=true);
+    await p.locator('#scope-select').selectOption('Pinned');
+    await p.locator('#secondary-clear-btn').click();
     await p.waitForTimeout(100);
 
     const clearedPagination = await p.locator('.pagination span').innerText();
     assert.ok(clearedPagination.includes('Page 1'), 'Clear filters must reset to Page 1');
-    const clearedFilter = await p.locator('#filter').inputValue();
+    const clearedFilter = await p.locator('#scope-select').inputValue();
     assert.equal(clearedFilter, 'All', 'Clear filters must reset filter to All');
 
     await ctx.close();
