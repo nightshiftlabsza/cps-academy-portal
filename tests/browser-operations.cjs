@@ -34,8 +34,8 @@ const KEY='cps-hub-workspace-v2';
    for(const child of children)assert(await p.locator(`[data-open="${child.id}"]`).count()>0,`split child ${child.id} visible in matrix`);
    await overflow('matrix');
    if(process.env.CPS_QA_SCREENSHOTS){require('node:fs').mkdirSync('screenshots',{recursive:true});await p.screenshot({path:`screenshots/operations-${width}.png`});}
-   await p.locator('[data-set-view="cards"]').click();
-   for(const child of children)assert(await p.locator(`[data-open="${child.id}"]`).count()>0,`split child ${child.id} visible in cards`);
+   await p.locator('[data-set-view="matrix"]').click();
+   for(const child of children)assert(await p.locator(`[data-open="${child.id}"]`).count()>0,`split child ${child.id} visible in matrix`);
    await open(children[0].id);await p.locator('[data-field="Presenter"]').fill('Local QA Session One');await p.locator('#dialog-primary').click();
    await p.reload();await p.locator('.schedule-secondary-filters').evaluate(el=>el.open=true);await p.locator('#scope-select').selectOption('All');await p.locator('#panel-date-from').fill('2026-10-26');await p.locator('#panel-date-to').fill('2026-10-26');
    await open(children[0].id);assert.equal(await p.locator('[data-field="Presenter"]').inputValue(),'Local QA Session One');await close();

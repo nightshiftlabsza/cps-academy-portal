@@ -140,7 +140,7 @@ test('Search aliases match "teams & leadership", "orgstructure", and member name
   assert(sandbox.tabAliases['OrgStructure'].includes('orgstructure'));
 });
 
-test('renderOrgRow outputs complete multiline text and action buttons', () => {
+test('renderOrgRow outputs buttonized responsibility, plain column labels, no actions or stars, and SLS pairings', () => {
   const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const sandbox = {
     esc: v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
@@ -149,18 +149,94 @@ test('renderOrgRow outputs complete multiline text and action buttons', () => {
     workspace: { edits: {}, favorites: [] }
   };
   vm.createContext(sandbox);
-  const slice = appCode.slice(appCode.indexOf('function renderOrgRow'), appCode.indexOf('function orgStructureView')) +
-    '; this.renderOrgRow = renderOrgRow;';
+  const slice = appCode.slice(appCode.indexOf('function formatSlsPairings'), appCode.indexOf('function parseBirthdayMonthDay')) +
+    '; this.formatSlsPairings = formatSlsPairings; this.renderOrgRow = renderOrgRow;';
   vm.runInContext(slice, sandbox);
 
   const slsRec = workbook['OrgStructure'].records.find(r => r.row === 36);
   const html = sandbox.renderOrgRow(slsRec);
 
   assert(html.includes('Spaced Learning Series (SLS)'));
+  assert(html.includes('org-resp-btn'));
   assert(html.includes('data-open="OrgStructure:36"'));
-  assert(html.includes('data-star="OrgStructure:36"'));
-  assert(html.includes('org-multiline-text'));
-  assert(html.includes('Jas, Vale, Mukund (audio editor), Elena, Anmol'));
-  assert(html.includes('Teamlet 1'));
-  assert(html.includes('Teamlet 4'));
+  assert(!html.includes('data-star'));
+  assert(!html.includes('org-cell-actions'));
+  assert(!html.includes('org-action-buttons'));
+  assert(html.includes('data-label="Responsibility / team"'));
+  assert(html.includes('data-label="Members"'));
+  assert(html.includes('data-label="Role"'));
+
+  // Assert all four correct source pairings and exact "None."
+  const sls = sandbox.formatSlsPairings(slsRec.fields.Members, slsRec.fields.Role);
+  assert.equal(sls.isMismatched, false);
+  assert.equal(sls.pairings.length, 4);
+  assert.equal(sls.pairings[0].role, 'Teamlet 1');
+  assert.equal(sls.pairings[0].members, 'Jas, Vale, Mukund (audio editor), Elena, Anmol');
+  assert.equal(sls.pairings[1].role, 'Teamlet 2');
+  assert.equal(sls.pairings[1].members, 'None.');
+  assert.equal(sls.pairings[2].role, 'Teamlet 3');
+  assert.equal(sls.pairings[2].members, 'Alec, Mengyu, Parisa, Lera, Ethan');
+  assert.equal(sls.pairings[3].role, 'Teamlet 4');
+  assert.equal(sls.pairings[3].members, 'Austin, Maryana, Oumaima, David, Zakariyya G');
+
+  assert(html.includes('Teamlet 1:'));
+  assert(html.includes('None.'));
+  assert(html.includes('Teamlet 4:'));
+});
+
+test('SLS pairing helper handles internal blank lines and unequal line counts without guessing', () => {
+  const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const sandbox = {
+    esc: v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
+    chip: (s, k) => `<span class="${k}">${s}</span>`,
+    source: r => r.source || '',
+    workspace: { edits: {}, favorites: [] }
+  };
+  vm.createContext(sandbox);
+  const slice = appCode.slice(appCode.indexOf('function formatSlsPairings'), appCode.indexOf('function parseBirthdayMonthDay')) +
+    '; this.formatSlsPairings = formatSlsPairings; this.renderOrgRow = renderOrgRow;';
+  vm.runInContext(slice, sandbox);
+
+  // 1. Internal blank line with matched count preserves positions
+  const blankLineResult = sandbox.formatSlsPairings(
+    'Jas, Vale\n\nAlec, Mengyu\nAustin',
+    'Teamlet 1\n\nTeamlet 3\nTeamlet 4'
+  );
+  assert.equal(blankLineResult.isMismatched, false);
+  assert.equal(blankLineResult.pairings.length, 4);
+  assert.equal(blankLineResult.pairings[0].role, 'Teamlet 1');
+  assert.equal(blankLineResult.pairings[0].members, 'Jas, Vale');
+  assert.equal(blankLineResult.pairings[1].role, '');
+  assert.equal(blankLineResult.pairings[1].members, '');
+  assert.equal(blankLineResult.pairings[2].role, 'Teamlet 3');
+  assert.equal(blankLineResult.pairings[2].members, 'Alec, Mengyu');
+
+  // 2. Unequal line counts trigger mismatch without invented roles or guessing
+  const unequalResult = sandbox.formatSlsPairings(
+    'Jas, Vale\nNone.\nAlec, Mengyu',
+    'Teamlet 1\nTeamlet 2\nTeamlet 3\nTeamlet 4'
+  );
+  assert.equal(unequalResult.isMismatched, true);
+  assert.equal(unequalResult.pairings.length, 0);
+  assert.equal(unequalResult.roleLines.length, 4);
+  assert.equal(unequalResult.memberLines.length, 3);
+
+  // 3. RenderOrgRow with unequal counts displays both original multiline fields separately with warning
+  const mockMismatchedRec = {
+    id: 'OrgStructure:36',
+    row: 36,
+    source: 'OrgStructure!A36:C36',
+    fields: {
+      'Team / responsibility': 'Spaced Learning Series (SLS)',
+      'Members': 'Jas, Vale\nNone.\nAlec, Mengyu',
+      'Role': 'Teamlet 1\nTeamlet 2\nTeamlet 3\nTeamlet 4'
+    }
+  };
+  const mismatchHtml = sandbox.renderOrgRow(mockMismatchedRec);
+  assert(mismatchHtml.includes('Line count mismatch'));
+  assert(mismatchHtml.includes('Role has 4 lines, Members has 3 lines'));
+  assert(mismatchHtml.includes('Jas, Vale\nNone.\nAlec, Mengyu'));
+  assert(mismatchHtml.includes('Teamlet 1\nTeamlet 2\nTeamlet 3\nTeamlet 4'));
+  assert(!mismatchHtml.includes('Unassigned'));
+  assert(!mismatchHtml.includes('No members listed'));
 });

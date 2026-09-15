@@ -54,12 +54,12 @@ function captureDiagnostics() {
   };
 }
 
-const groups={Sessions:['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs','Leader of the Week'],People:['Members','OrgStructure','CRC','CRC - retired'],Production:['Podcast Episodes','Schema review'],Research:['Research @CPSolvers','Conferences'],Links:['Important links']};
-const descriptions={'Morning Report':'The session team, sign-ups and teaching support in one place.','CPS Academy VMRs':'Explore the Academy’s learning archive. Find a topic, facilitator or recording.','CRC':'Follow presenters, mentoring assignments and case progress.','CRC - retired':'Archived and legacy clinical reasoning case mentorship records.','Members':'Find Academy members, sponsors and social handles.','OrgStructure':'Responsibilities and teams, as recorded in the workbook.','Research @CPSolvers':'Find collaborators by research skills and availability.','Podcast Episodes':'Coordinate ownership and editing. The workbook target is readiness two days before release.','Schema review':'Coordinate video, infographic and review assignments. Friday review → Monday upload.','Important links':'Your recurring Academy resources, ready to open.','Conferences':'Academic conferences, congresses, and scholarship opportunities.','Residency Programs':'Partner hospital residency programs, discussants and session facilitators.'};
+const groups={'Morning Report':['Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs','Leader of the Week','CRC','CRC - retired'],People:['OrgStructure','Members'],Production:['Podcast Episodes','Schema review'],Research:['Research @CPSolvers','Conferences'],Links:['Important links']};
+const descriptions={'Morning Report':'The session team, sign-ups and teaching support in one place.','CPS Academy VMRs':'Explore the Academy’s learning archive. Find a topic, facilitator or recording.','CRC':'Follow presenters, mentoring assignments and case progress.','CRC - retired':'Archived and legacy clinical reasoning case mentorship records.','Members':'Find Academy members, sponsors and social handles.','OrgStructure':'Academy and CPSolvers organizational structure, leadership teams and responsibilities.','Research @CPSolvers':'Find collaborators by research skills and availability.','Podcast Episodes':'Coordinate ownership and editing. The workbook target is readiness two days before release.','Schema review':'Coordinate video, infographic and review assignments. Friday review → Monday upload.','Important links':'Your recurring Academy resources, ready to open.','Conferences':'Academic conferences, congresses, and scholarship opportunities.','Residency Programs':'Partner hospital residency programs, discussants and session facilitators.'};
 const titles={'Morning Report':'Date','CPS Academy VMRs':'Session title','Members':'Name','OrgStructure':'Team / responsibility','CRC':'Presenter','CRC - retired':'MENTEE','Research @CPSolvers':'Name','Podcast Episodes':'Episode','Schema review':'Schema','Conferences':'Congress','Important links':'Resource','Leader of the Week':'Member','Special VMRs':'Details','Student Forum':'Topic','Residency Programs':'Residency Programs'};
 const facets={'Morning Report':'Type','CPS Academy VMRs':'Facilitator','Members':'Country','CRC':'Status','CRC - retired':"PRESENTER'S COUNTRY",'Research @CPSolvers':'Availability','Schema review':'Status','Podcast Episodes':'Audio editor','OrgStructure':'Role','Special VMRs':'Type','Residency Programs':'Facilitator'};
-const tabAliases={'Morning Report':'morning report mr vmr daily session','CPS Academy VMRs':'cps academy vmrs vmr archive session recording learning','CRC':'crc clinical reasoning case presenter mentor','CRC - retired':'crc retired mentorship archive legacy mentee mentor case presentation rounds round','OrgStructure':'orgstructure org structure org chart leadership teams teams & leadership teams and leadership','Members':'members orgstructure org structure directory sponsors country participants core team leaders inactive cohort','Research @CPSolvers':'research cpsolvers collaborators publications skills','Podcast Episodes':'podcast episodes audio editor release','Schema review':'schema review infographic video pipeline','Conferences':'conferences congress scholarship meeting','Important links':'important links resources bookmarks recurring','Leader of the Week':'leader of the week member','Special VMRs':'special vmrs vmr details','Student Forum':'student forum topic expert vmr','Residency Programs':'residency programs partner hospital discussants junior member facilitator allegheny october november december january february'};
-const sectionLabels={'OrgStructure':'Teams & leadership'};
+const tabAliases={'Morning Report':'morning report mr vmr daily session','CPS Academy VMRs':'cps academy vmrs vmr archive session recording learning','CRC':'crc case review committee clinical reasoning case presenter mentor','CRC - retired':'crc retired case review committee mentorship archive legacy mentee mentor case presentation rounds round','OrgStructure':'org structure orgstructure org chart leadership teams teams & leadership teams and leadership','Members':'members orgstructure org structure directory sponsors country participants core team leaders inactive cohort','Research @CPSolvers':'research cpsolvers collaborators publications skills','Podcast Episodes':'podcast episodes audio editor release','Schema review':'schema review infographic video pipeline','Conferences':'conferences congress scholarship meeting','Important links':'important links resources bookmarks recurring','Leader of the Week':'leader of the week member','Special VMRs':'special vmrs vmr details','Student Forum':'student forum topic expert vmr','Residency Programs':'residency programs partner hospital discussants junior member facilitator allegheny october november december january february'};
+const sectionLabels={'OrgStructure':'Org Structure','CRC':'Case Review Committee (CRC)','CRC - retired':'Case Review Committee (CRC) — Retired'};
 function sectionLabel(t){return sectionLabels[t]||t;}
 const ORG_GROUPS=[
   {id:'leadership',name:'Internal Leadership & Co-founders',headingId:null,recordIds:['OrgStructure:3','OrgStructure:4']},
@@ -164,11 +164,11 @@ const RESIDENCY_MONTH_HEADINGS = new Map([
 
 function getMemberCohortByRow(row) {
   if (typeof row !== 'number' || row == null || Number.isNaN(row)) return 'Local / unassigned';
-  if (row < 80) return 'Participants';
-  if (row >= 83 && row < 146) return 'Core team';
-  if (row >= 149 && row < 189) return 'Leaders';
-  if (row >= 192) return 'Marked inactive in source';
-  return 'Members';
+  if (row >= 57 && row <= 71) return 'Participants';
+  if (row >= 83 && row <= 137) return 'Core team';
+  if (row >= 149 && row <= 185) return 'Leaders';
+  if (row >= 193 && row <= 236) return 'Marked inactive in source';
+  return 'Local / unassigned';
 }
 
 function getResidencyMonthByRecord(record) {
@@ -203,7 +203,7 @@ function classifyRecord(record, t = (record?.tab || (typeof tab !== 'undefined' 
       const email = (fields.Email || '').trim();
       const sourceRec = (typeof db !== 'undefined' && db['Members']?.records) ? db['Members'].records.find(r => r.id === record.id) : null;
       const sourceName = ((sourceRec?.fields?.Name ?? meta.label) || '').trim();
-      const isHeadingPattern = !name || name.toLowerCase() === 'name' || name.toLowerCase().includes('core team') || name.toLowerCase().includes('leaders') || name.toLowerCase().includes('members inactive');
+      const isHeadingPattern = !name || name.toLowerCase() === 'name' || name.toLowerCase() === 'core team' || name.toLowerCase() === 'core team members' || name.toLowerCase() === 'leaders' || name.toLowerCase() === 'members inactive';
       const isStillHeading = (name.toLowerCase() === sourceName.toLowerCase() || isHeadingPattern) && !email;
       if (hasLocalEdits && !isStillHeading) {
         return { category: RECORD_CATEGORY.NAMED_ENTRY, cohort: meta.cohort, role: 'member', label: name, isStructural: false, isSubstantive: true, hasLocalEdits: true, wasHeading: true, reviewNotice: `Locally edited from ${meta.role === 'column_header' ? 'repeated header' : 'source heading'}` };
@@ -464,8 +464,8 @@ const HISTORICAL_SUMMARY_CONFIG = {
   },
   'CRC': {
     route: 'CRC',
-    title: 'Clinical Reasoning Cases',
-    label: 'Clinical Reasoning Cases',
+    title: 'Case Review Committee (CRC)',
+    label: 'Case Review Committee (CRC)',
     pageSize: 25,
     columns: [
       { id: 'presenter', label: 'Presenter', width: '200px' },
@@ -492,11 +492,21 @@ let currentAnchorRecordId = null;
 
 function getSavedBrowsingMap() {
   try {
+    let raw = null;
     if (typeof sessionStorage !== 'undefined') {
-      const raw = sessionStorage.getItem(BROWSING_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') return parsed;
+      raw = sessionStorage.getItem(BROWSING_STORAGE_KEY);
+    }
+    if (!raw && typeof localStorage !== 'undefined') {
+      raw = localStorage.getItem(BROWSING_STORAGE_KEY);
+    }
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        if (parsed['Morning Report'] && (parsed['Morning Report'].mode === 'cards' || parsed['Morning Report'].mode === 'table' || (parsed['Morning Report'].mode !== 'agenda' && parsed['Morning Report'].mode !== 'matrix'))) {
+          parsed['Morning Report'].mode = 'agenda';
+          persistBrowsingMap(parsed);
+        }
+        return parsed;
       }
     }
   } catch {}
@@ -683,10 +693,15 @@ function restoreSectionState(t) {
   podcastPeriodFilter = saved.podcastPeriodFilter || 'all';
 
   if (t === 'Morning Report') {
+    const validModes = ['agenda', 'matrix'];
+    let resolvedMode = validModes.includes(saved.mode) ? saved.mode : 'agenda';
     if (isMobile) {
-      mode = (saved.mode === 'matrix') ? 'agenda' : (saved.mode || 'agenda');
-    } else {
-      mode = saved.mode || 'agenda';
+      resolvedMode = 'agenda';
+    }
+    mode = resolvedMode;
+    if (saved.mode !== resolvedMode) {
+      saved.mode = resolvedMode;
+      saveSectionState('Morning Report');
     }
   } else if (['Podcast Episodes', 'Schema review'].includes(t)) {
     const validModes = t === 'Podcast Episodes' ? ['queue', 'board', 'cards', 'table'] : ['board', 'cards', 'table'];
@@ -1002,6 +1017,8 @@ function navigate(t){
   }
   saveSectionState(tab);
 
+  if(t==='Sessions'||t==='sessions')t='Morning Report';
+  if(t==='People')t='OrgStructure';
   if(t==='admin/issues'||t==='/admin/issues'||t==='Issue Reports'){
     if(!isAdmin()){toast('Admin access required.');navigate('Home');return}
     tab='admin/issues';query='';searchPage=0;filter='All';page=0;$('#global-search').value='';location.hash='/admin/issues';render();window.scrollTo(0,0);return;
@@ -1019,7 +1036,7 @@ function nav(){
   const entries=['Home',...Object.keys(groups),'Workspace',...(isAdmin()?['Issue Reports']:[])];
   const current=tab==='admin/issues'?'Issue Reports':tab==='profile/logbook'?'':(Object.keys(groups).find(g=>groups[g].includes(tab))||tab);
   $('#desktop-nav').innerHTML=entries.map(g=>`<button class="nav-button ${current===g?'active':''}" ${current===g?'aria-current="page"':''} data-nav="${g}">${g}${g==='Issue Reports'&&workspace.issues.filter(i=>i.status==='Open').length?` <span class="nav-badge">${workspace.issues.filter(i=>i.status==='Open').length}</span>`:''}</button>`).join('');
-  const primary=['Home','Sessions','People','Links'];
+  const primary=['Home','Morning Report','People','Links'];
   $('#mobile-nav').innerHTML=primary.map(g=>`<button class="nav-button ${current===g?'active':''}" ${current===g?'aria-current="page"':''} data-nav="${g}">${g}</button>`).join('')+`<button class="nav-button ${!primary.includes(current)?'active':''}" id="more-navigation" aria-haspopup="dialog">More</button>`;
   $('#all-sections').innerHTML=entries.map(g=>`<button type="button" class="button ${current===g?'primary':'secondary'}" data-nav="${g}" ${current===g?'aria-current="page"':''}>${g}</button>`).join('')+`<button type="button" class="button secondary" data-nav="profile/logbook">My logbook</button>`;
   $('#more-navigation').onclick=()=>$('#navigation-dialog').showModal();
@@ -1113,6 +1130,16 @@ function card(r,t=tab,inSearch=false){const f=r.fields;let body='',tag='';
          `<p class="card-line"><small>Point person</small><strong>${esc(f['Point person']||'Unassigned')}</strong></p>`+
          `<p class="card-line"><small>Audio editor</small><strong>${esc(f['Audio editor']||'None')}</strong></p>`+
          (f.Status?`<p class="card-line"><small>Recorded status</small><span>${esc(f.Status)}</span></p>`:'');
+  }
+  else if(t==='CRC'){
+    tag=f.Status||'Case';
+    const emailLink=urls(r,'Email')[0]||(f.Email?`mailto:${f.Email}`:'');
+    const isUnres=!recordDate(r)&&f['VMR date']&&f['VMR date']!=='—';
+    body=`<p class="card-line"><small>Mentor</small><strong>${esc(f.Mentor||'Unassigned')}</strong></p>`+
+         (f['VMR date']?`<p class="card-line"><small>VMR date</small><span>${esc(f['VMR date'])}${isUnres?' <span class="tag review-chip">Uncertain date</span>':''}</span></p>`:'')+
+         (f.Country?`<p class="card-line"><small>Country</small><span>${esc(f.Country)}</span></p>`:'')+
+         (f.Email?`<p class="card-line"><small>Email</small><span>${emailLink?`<a href="${esc(emailLink)}">${esc(f.Email)}</a>`:esc(f.Email)}</span></p>`:'')+
+         (f.Remarks?`<p class="card-line"><small>Remarks</small><span>${esc(f.Remarks)}</span></p>`:'');
   }
  else{tag=f.Status||f.Role||f.Type||t;const fields=db[t].columns.filter(c=>c!==titles[t]&&!/email|contact|link|meeting|remarks/i.test(c)).slice(0,3);body=fields.map(k=>`<p class="card-line"><small>${esc(k)}</small><span>${esc(f[k]||'Not entered')}</span></p>`).join('')}
 
@@ -1924,7 +1951,10 @@ function bindWeekNavigatorEvents() {
 function listing(){
   const existingDetails = document.querySelector('.schedule-secondary-filters');
   if (existingDetails) scheduleFiltersOpen = existingDetails.open;
-  if(tab==='Morning Report'&&(typeof window!=='undefined'&&(window.innerWidth||0)<=760)&&mode==='matrix')mode='agenda';
+  if(tab==='Morning Report'){
+    if(mode!=='agenda'&&mode!=='matrix')mode='agenda';
+    if((typeof window!=='undefined'&&(window.innerWidth||0)<=760)&&mode==='matrix')mode='agenda';
+  }
   let rr=filtered();
   const isHistorical=Boolean(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab]);
   const config=isHistorical?HISTORICAL_SUMMARY_CONFIG[tab]:null;
@@ -1940,7 +1970,7 @@ function listing(){
   const options=field?[...new Set(records().map(r=>r.fields[field]).filter(Boolean))].sort():[];
   const filters=['All',...(['Morning Report','CPS Academy VMRs'].includes(tab)?['Upcoming','This Week','Needs Volunteers','My Sessions','Staffing gaps','Missing facilitator']:[]),...(tab==='Morning Report'?['All history','Unresolved dates']:[]),...(db[tab].columns.includes('Recording')?['Has recording']:[]),'Pinned','Needs review','Local edits'];
 
-  const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Schedule</button><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Staffing Grid</button><button class="${mode==='cards'?'active':''}" data-set-view="cards" style="position:absolute;opacity:0.001;pointer-events:auto;width:20px;height:20px;" aria-hidden="true" tabindex="-1">Cards</button></div>`:tab==='Podcast Episodes'?`<div class="segmented"><button class="${mode==='queue'?'active':''}" data-set-view="queue">Queue</button><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button></div>`:tab==='Schema review'?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;
+  const viewSwitcher=tab==='Morning Report'?`<div class="segmented"><button class="${mode==='agenda'?'active':''}" data-set-view="agenda">Weekly Schedule</button><button class="${mode==='matrix'?'active':''}" data-set-view="matrix">Staffing Grid</button></div>`:tab==='Podcast Episodes'?`<div class="segmented"><button class="${mode==='queue'?'active':''}" data-set-view="queue">Queue</button><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button></div>`:tab==='Schema review'?`<div class="segmented"><button class="${mode==='board'?'active':''}" data-set-view="board">Board</button><button class="${mode==='table'?'active':''}" data-set-view="table">Table</button><button class="${mode==='cards'?'active':''}" data-set-view="cards">Cards</button></div>`:`<button class="button secondary" id="view">${mode==='cards'?'Table view':'Card view'}</button>`;
 
   const paginationTop = isHistorical && !showAll && totalPages > 1 ? `
     <div class="toolbar pagination-header pagination-top" aria-label="Pagination top">
@@ -1948,25 +1978,26 @@ function listing(){
       <div class="pagination-controls">
         <button type="button" class="button secondary small" id="prev-top" ${page===0?'disabled':''} data-page-nav="-1" aria-label="Previous page">Previous</button>
         <label class="pagination-select-label" aria-label="Jump to page">
-          <select class="select small page-select" aria-label="Jump to page" data-page-select>
-            ${Array.from({length:totalPages},(_,i)=>`<option value="${i}" ${i===page?'selected':''}>Page ${i+1} of ${totalPages}</option>`).join('')}
+          <span class="visually-hidden-accessible">Page</span>
+          <select class="select page-select pagination-select" id="page-select-top" aria-label="Select page" data-page-select>
+            ${Array.from({length: totalPages}, (_, i) => `<option value="${i}" ${i===page?'selected':''}>Page ${i+1} of ${totalPages}</option>`).join('')}
           </select>
         </label>
-        <button type="button" class="button secondary small" id="next-top" ${(page+1)>=totalPages?'disabled':''} data-page-nav="1" aria-label="Next page">Next</button>
+        <button type="button" class="button secondary small" id="next-top" ${(page+1)*pageSize>=rr.length?'disabled':''} data-page-nav="1" aria-label="Next page">Next</button>
       </div>
     </div>` : '';
 
   const paginationBottom = showAll || (mode==='matrix'&&tab==='Morning Report') || (mode==='agenda'&&tab==='Morning Report') || (mode==='queue'&&tab==='Podcast Episodes') || (mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)) || (tab==='Schema review') ? '' : (
     isHistorical ? `
     <div class="toolbar pagination pagination-bottom" aria-label="Pagination bottom">
-      <button type="button" class="button secondary" id="prev" ${page===0?'disabled':''} data-page-nav="-1">Previous</button>
-      <span>Page ${page+1} of ${totalPages} · Showing ${start}–${end} of ${rr.length} records</span>
+      <button class="button secondary" id="prev" ${page===0?'disabled':''} data-page-nav="-1">Previous</button>
       <label class="pagination-select-label" aria-label="Jump to page">
-        <select class="select small page-select" aria-label="Jump to page" data-page-select>
-          ${Array.from({length:totalPages},(_,i)=>`<option value="${i}" ${i===page?'selected':''}>Page ${i+1} of ${totalPages}</option>`).join('')}
+        <span class="visually-hidden-accessible">Page</span>
+        <select class="select page-select pagination-select" id="page-select" aria-label="Select page" data-page-select>
+          ${Array.from({length: totalPages}, (_, i) => `<option value="${i}" ${i===page?'selected':''}>Page ${i+1} of ${totalPages}</option>`).join('')}
         </select>
       </label>
-      <button type="button" class="button secondary" id="next" ${(page+1)>=totalPages?'disabled':''} data-page-nav="1">Next</button>
+      <button class="button secondary" id="next" ${(page+1)*pageSize>=rr.length?'disabled':''} data-page-nav="1">Next</button>
     </div>` : `
     <div class="toolbar pagination">
       <button class="button secondary" id="prev" ${page===0?'disabled':''}>Previous</button>
@@ -1986,7 +2017,7 @@ function listing(){
             : `<section class="hub-grid">${current.map(r=>card(r)).join('')}</section>`)
     ) : (
       (mode==='matrix'&&tab==='Morning Report'?matrixView(rr)
-      :(mode==='agenda'&&tab==='Morning Report'?agendaView(rr)
+      :(tab==='Morning Report'?agendaView(rr)
       :(mode==='queue'&&tab==='Podcast Episodes'?podcastQueueView(rr)
       :(mode==='board'&&['Podcast Episodes','Schema review'].includes(tab)?workflowBoard(rr,tab)
       :(mode==='cards'?`<section class="hub-grid">${current.map(r=>card(r)).join('')}</section>`:table(current))))))
@@ -2283,7 +2314,7 @@ function listing(){
   });
   if($('#prev'))$('#prev').onclick=()=>{page--;clampPageForSection(tab,page);saveSectionState(tab);render();focusAccessibleResultsHeading();};
   if($('#next'))$('#next').onclick=()=>{page++;clampPageForSection(tab,page);saveSectionState(tab);render();focusAccessibleResultsHeading();};
-  document.querySelectorAll('[data-page-select]').forEach(sel => {
+  document.querySelectorAll('[data-page-select], .pagination-select, .page-select').forEach(sel => {
     sel.onchange = e => {
       page = parseInt(e.target.value, 10);
       clampPageForSection(tab, page);
@@ -2294,7 +2325,7 @@ function listing(){
   });
   if(['queue','board'].includes(mode)&&['Podcast Episodes','Schema review'].includes(tab))bindBoardEvents(tab);
 }
-function crcDrawer(){const retired=records('CRC - retired');const c=getClassificationCounts(retired,'CRC - retired');return `<details class="panel legacy-drawer" style="margin-top:24px"><summary style="cursor:pointer;padding:16px 20px;font-weight:700;display:flex;align-items:center;justify-content:space-between;user-select:none"><span>📁 Archived / Legacy Mentorship (${c.namedEntries} cases in 15 rounds)</span><span class="muted" style="font-size:12px;font-weight:normal">Expand archive records ↓</span></summary><div style="padding:16px 20px;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><p class="muted" style="margin:0">Historical mentorship rounds preserved from original workbook (${c.namedEntries} cases, 15 round headings, ${c.placeholders} placeholders). Active cases remain front-and-center above.</p><button class="button secondary small" data-go="CRC - retired">Full Archive View →</button></div><div class="hub-grid">${retired.slice(0,9).map(r=>card(r,'CRC - retired')).join('')}</div><div style="margin-top:16px;text-align:center"><button class="button secondary small" data-go="CRC - retired">Browse all ${retired.length} archived records →</button></div></div></details>`}
+function crcDrawer(){const retired=records('CRC - retired');const c=getClassificationCounts(retired,'CRC - retired');return `<details class="panel legacy-drawer" style="margin-top:24px"><summary style="cursor:pointer;padding:16px 20px;font-weight:700;display:flex;align-items:center;justify-content:space-between;user-select:none"><span>📁 ${esc(sectionLabel('CRC - retired'))} (${c.namedEntries} cases in 15 rounds)</span><span class="muted" style="font-size:12px;font-weight:normal">Expand archive records ↓</span></summary><div style="padding:16px 20px;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><p class="muted" style="margin:0">Historical mentorship rounds preserved from original workbook (${c.namedEntries} cases, 15 round headings, ${c.placeholders} placeholders). Active cases remain front-and-center above.</p><button class="button secondary small" data-go="CRC - retired">${esc(sectionLabel('CRC - retired'))} →</button></div><div class="hub-grid">${retired.slice(0,9).map(r=>card(r,'CRC - retired')).join('')}</div><div style="margin-top:16px;text-align:center"><button class="button secondary small" data-go="CRC - retired">Browse all ${retired.length} archived records →</button></div></div></details>`}
 function table(rr){
  if(window.innerWidth<=760){
   const cols=db[tab].columns.filter(c=>c!==titles[tab]);
@@ -2651,46 +2682,183 @@ let orgGroupFilter='all';
 let orgFullGroupShows=new Set();
 let orgExpandedGroups=new Set(ORG_GROUPS.map(g=>g.id).concat(['other']));
 
+function formatSlsPairings(membersText, roleText) {
+  const rawRole = roleText ?? '';
+  const rawMembers = membersText ?? '';
+  const roleLines = rawRole.split(/\r?\n/);
+  const memberLines = rawMembers.split(/\r?\n/);
+
+  if (roleLines.length > 0 && roleLines[roleLines.length - 1] === '' &&
+      memberLines.length > 0 && memberLines[memberLines.length - 1] === '') {
+    roleLines.pop();
+    memberLines.pop();
+  }
+
+  const isMismatched = roleLines.length !== memberLines.length;
+
+  if (isMismatched || roleLines.length === 0) {
+    return {
+      isMismatched: true,
+      pairings: [],
+      roleLines,
+      memberLines,
+      rawRole,
+      rawMembers
+    };
+  }
+
+  const pairings = roleLines.map((role, idx) => ({
+    role,
+    members: memberLines[idx]
+  }));
+
+  return {
+    isMismatched: false,
+    pairings,
+    roleLines,
+    memberLines,
+    rawRole,
+    rawMembers
+  };
+}
+
 function renderOrgRow(r){
   const f=r.fields;
   const resp=f['Team / responsibility']||'Untitled responsibility';
   const members=f.Members||'—';
   const role=f.Role||'—';
-  const isStarred=workspace.favorites.includes(r.id);
   const hasEdits=Boolean(workspace.edits[r.id]);
   const isDraft=r.id.startsWith('local:');
   const isSLS=r.row===36||r.id==='OrgStructure:36';
 
+  let membersHtml = '';
+  let roleHtml = '';
+
+  if (isSLS) {
+    const sls = formatSlsPairings(f.Members, f.Role);
+    if (!sls.isMismatched) {
+      membersHtml = `<div class="sls-teamlets-list">
+        ${sls.pairings.map(p => `
+          <div class="sls-teamlet-entry">
+            <strong class="sls-teamlet-tag">${esc(p.role || '(Blank role)')}:</strong>
+            <span class="sls-teamlet-members">${esc(p.members || '(Blank)')}</span>
+          </div>
+        `).join('')}
+      </div>`;
+      roleHtml = `<div class="sls-roles-list">
+        ${sls.roleLines.map(rl => `<div class="sls-role-entry">${esc(rl || '(Blank)')}</div>`).join('')}
+      </div>`;
+    } else {
+      membersHtml = `<div class="sls-mismatch-block">
+        <div class="sls-mismatch-warning chip warning">
+          Line count mismatch (Role has ${sls.roleLines.length} lines, Members has ${sls.memberLines.length} lines). Displaying fields separately.
+        </div>
+        <div class="org-people-text org-multiline-text">${esc(members)}</div>
+      </div>`;
+      roleHtml = `<div class="org-role-text org-multiline-text">${esc(role)}</div>`;
+    }
+  } else {
+    membersHtml = `<div class="org-people-text">${esc(members)}</div>`;
+    roleHtml = `<div class="org-role-text">${esc(role)}</div>`;
+  }
+
   return `<tr class="org-row ${hasEdits?'has-local-edits':''}">
-    <td class="org-cell-resp" data-label="Responsibility">
+    <td class="org-cell-resp" data-label="Responsibility / team">
       <div class="org-resp-name">
-        <strong>${esc(resp)}</strong>
+        <button type="button" class="org-resp-btn" data-open="${esc(r.id)}" data-area="OrgStructure" aria-label="Open details for ${esc(resp)}">
+          <strong>${esc(resp)}</strong>
+        </button>
         ${hasEdits?chip('Local changes','local-chip'):''}
         ${isDraft?chip('Local draft','local-chip'):''}
         ${r.flags?.length?chip('Verify','review-chip'):''}
       </div>
       <small class="muted org-source-ref">${esc(source(r))}</small>
     </td>
-    <td class="org-cell-people" data-label="Recorded people">
-      <div class="org-people-text ${isSLS?'org-multiline-text':''}">${esc(members)}</div>
+    <td class="org-cell-people" data-label="Members">
+      ${membersHtml}
     </td>
-    <td class="org-cell-role" data-label="Recorded role">
-      <div class="org-role-text ${isSLS?'org-multiline-text':''}">${esc(role)}</div>
-    </td>
-    <td class="org-cell-actions" data-label="Actions">
-      <div class="org-action-buttons">
-        <button type="button" class="button primary small" data-open="${esc(r.id)}" data-area="OrgStructure">Details</button>
-        <button type="button" class="icon-button star ${isStarred?'is-starred':''}" aria-label="${isStarred?'Unpin':'Pin'} ${esc(resp)}" data-star="${esc(r.id)}">${isStarred?'★':'☆'}</button>
-      </div>
+    <td class="org-cell-role" data-label="Role">
+      ${roleHtml}
     </td>
   </tr>`;
+}
+
+function parseBirthdayMonthDay(val) {
+  if (!val || typeof val !== 'string') return null;
+  const s = val.trim();
+  if (!s || s === '—') return null;
+
+  const MAX_DAYS = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const MONTHS = {
+    january: 1, jan: 1,
+    february: 2, feb: 2,
+    march: 3, mar: 3,
+    april: 4, apr: 4,
+    may: 5,
+    june: 6, jun: 6,
+    july: 7, jul: 7,
+    august: 8, aug: 8,
+    september: 9, sep: 9, sept: 9,
+    october: 10, oct: 10,
+    november: 11, nov: 11,
+    december: 12, dec: 12
+  };
+
+  const iso = s.match(/^\d{4}-(\d{2})-(\d{2})$/);
+  if (iso) {
+    const m = parseInt(iso[1], 10);
+    const d = parseInt(iso[2], 10);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= MAX_DAYS[m]) return { month: m, day: d };
+    return null;
+  }
+
+  const monthOnly = s.match(/^([a-z]+)$/i);
+  if (monthOnly) {
+    const m = MONTHS[monthOnly[1].toLowerCase()];
+    if (m) return { month: m, day: 0 };
+    return null;
+  }
+
+  const monthDay = s.match(/^([a-z]+)[,\s]+(\d{1,2})\s*(?:st|nd|rd|th)?$/i);
+  if (monthDay) {
+    const m = MONTHS[monthDay[1].toLowerCase()];
+    const d = parseInt(monthDay[2], 10);
+    if (m && d >= 1 && d <= MAX_DAYS[m]) return { month: m, day: d };
+    return null;
+  }
+
+  const dayMonth = s.match(/^(\d{1,2})\s*(?:st|nd|rd|th)?[,\s]+([a-z]+)$/i);
+  if (dayMonth) {
+    const d = parseInt(dayMonth[1], 10);
+    const m = MONTHS[dayMonth[2].toLowerCase()];
+    if (m && d >= 1 && d <= MAX_DAYS[m]) return { month: m, day: d };
+    return null;
+  }
+
+  return null;
+}
+
+function formatBirthday(val) {
+  if (!val || typeof val !== 'string') return '—';
+  const trimmed = val.trim();
+  if (!trimmed) return '—';
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const monthNum = parseInt(isoMatch[2], 10);
+    const dayNum = parseInt(isoMatch[3], 10);
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    if (monthNum >= 1 && monthNum <= 12) {
+      return `${months[monthNum - 1]} ${dayNum}`;
+    }
+  }
+  return trimmed;
 }
 
 const MEMBER_COHORT_DEFS = [
   { id: 'participants', name: 'Participants', key: 'Participants', headingId: null, description: 'Academic year participants' },
   { id: 'core', name: 'Core team members', key: 'Core team', headingId: 'Members:80', description: 'Core team members' },
   { id: 'leaders', name: 'Leaders', key: 'Leaders', headingId: 'Members:146', description: 'Academy leadership cohort' },
-  { id: 'inactive', name: 'Marked inactive in source', key: 'Marked inactive in source', headingId: 'Members:189', description: 'Historical members marked inactive in source' }
+  { id: 'inactive', name: 'Inactive members', key: 'Marked inactive in source', headingId: 'Members:189', description: 'Historical members marked inactive in source' }
 ];
 
 function findMemberInTeams(name) {
@@ -2700,350 +2868,185 @@ function findMemberInTeams(name) {
   navigate('OrgStructure');
 }
 
-function getCohortBadgeClass(cohort) {
-  if (cohort === 'Participants') return 'participants';
-  if (cohort === 'Core team') return 'core';
-  if (cohort === 'Leaders') return 'leaders';
-  if (cohort === 'Marked inactive in source') return 'inactive';
-  if (cohort === 'Local / unassigned') return 'local';
-  return 'default';
-}
+let memberSortCol = '';
+let memberSortDir = 'asc';
 
 function renderMemberDesktopRow(item) {
   const r = item.record;
-  const c = item.classification;
   const f = r.fields || {};
-  const isPinned = workspace.favorites.includes(r.id);
-  const isExpanded = memberExpandedDetails.has(r.id);
-  const cohortName = c.cohort || 'Members';
-  const cohortClass = getCohortBadgeClass(cohortName);
-  const flagsChip = (r.flags && r.flags.length) ? chip('Verify source details', 'review-chip') : '';
+  const bdayDisplay = formatBirthday(f.Birthday);
   const localChip = workspace.edits[r.id] ? chip('Local changes', 'local-chip') : (r.id.startsWith('local:') ? chip('Locally added', 'local-chip') : '');
-  const dynChip = c.wasHeading ? chip('Locally edited from heading', 'local-chip') : '';
 
   return `<tr class="member-row" data-id="${esc(r.id)}">
-    <td class="td-name">
-      <div class="member-name-wrap">
-        <div class="member-name-title-row">
-          <strong class="member-name">${esc(f.Name || 'Unnamed member')}</strong>
-          <span class="tag tag-cohort tag-cohort-${cohortClass} member-mobile-cohort">${esc(cohortName)}</span>
-        </div>
-        ${(flagsChip || localChip || dynChip) ? `<div class="member-badges-wrap">${flagsChip}${localChip}${dynChip}</div>` : ''}
+    <td class="td-name" data-label="Name">
+      <div class="member-name-cell">
+        <button type="button" class="member-name-btn" data-open="${esc(r.id)}" data-area="Members" aria-label="Open details for ${esc(f.Name || 'member')}">${esc(f.Name || 'Unnamed member')}</button>
+        ${localChip}
       </div>
     </td>
-    <td class="td-cohort">
-      <span class="tag tag-cohort tag-cohort-${cohortClass}">${esc(cohortName)}</span>
-    </td>
-    <td class="td-country">
-      <span class="member-country-val">${esc(f.Country || '—')}</span>
-    </td>
-    <td class="td-secondary">
-      <div class="member-secondary-fields">
-        ${f.Sponsor ? `<span class="member-sponsor"><small class="muted">Sponsor:</small> ${esc(f.Sponsor)}</span>` : ''}
-        ${f.Subspecialty ? `<span class="member-subspecialty"><small class="muted">Subspecialty:</small> ${esc(f.Subspecialty)}</span>` : ''}
-        ${!f.Sponsor && !f.Subspecialty ? `<span class="muted">—</span>` : ''}
-      </div>
-    </td>
-    <td class="td-actions">
-      <div class="member-actions-wrap">
-        <button type="button" class="button secondary small" data-open="${esc(r.id)}" data-area="Members">Details</button>
-        <button type="button" class="button secondary small find-in-teams-btn" data-member-name="${esc(f.Name || '')}" title="Find this name in teams and responsibilities">Find in teams ↗</button>
-        <button type="button" class="icon-button star ${isPinned ? 'is-starred' : ''}" data-star="${esc(r.id)}" aria-label="${isPinned ? 'Unpin' : 'Pin'} record">${isPinned ? '★' : '☆'}</button>
-        <button type="button" class="text-button member-expand-btn mobile-only-inline" data-expand-id="${esc(r.id)}">${isExpanded ? 'Less details ▴' : 'Contact &amp; more ▾'}</button>
-      </div>
-      ${isExpanded ? `
-        <div class="member-row-expanded">
-          ${f.Email ? `<p class="card-line"><small>Email</small><a href="mailto:${esc(f.Email)}">${esc(f.Email)}</a></p>` : ''}
-          ${f['Social handles'] ? `<p class="card-line"><small>Social</small><span>${esc(f['Social handles'])}</span></p>` : ''}
-          ${f.Location ? `<p class="card-line"><small>Location</small><span>${esc(f.Location)}</span></p>` : ''}
-          <p class="card-line"><small>Source</small><span class="muted">${esc(source(r))}</span></p>
-        </div>
-      ` : ''}
-    </td>
+    <td class="td-sponsor" data-label="Sponsor">${esc(f.Sponsor || '—')}</td>
+    <td class="td-social" data-label="Social handles">${esc(f['Social handles'] || '—')}</td>
+    <td class="td-country" data-label="Country of origin">${esc(f.Country || '—')}</td>
+    <td class="td-birthday" data-label="Birthday">${esc(bdayDisplay)}</td>
+    <td class="td-email" data-label="Email">${f.Email ? `<a href="mailto:${esc(f.Email)}" class="member-email-link">${esc(f.Email)}</a>` : '—'}</td>
+    <td class="td-location" data-label="Location / home">${esc(f.Location || '—')}</td>
+    <td class="td-training" data-label="Training / specialty">${esc(f.Subspecialty || '—')}</td>
   </tr>`;
 }
 
 const renderMemberRow = renderMemberDesktopRow;
-const renderMemberMobileCard = renderMemberDesktopRow;
 
 function membersView(){
   const allRecords = records('Members');
   const classified = allRecords.map(r => ({ record: r, classification: getRecordClassification(r, 'Members') }));
   const substantiveMembers = classified.filter(x => x.classification.isSubstantive);
-  const structuralEntries = classified.filter(x => x.classification.isStructural);
-  const totalNamedMembers = substantiveMembers.length;
+  const totalSubstantive = substantiveMembers.length;
 
-  const countries = [...new Set(substantiveMembers.map(x => (x.record.fields.Country || '').trim()).filter(Boolean))].sort();
   const queryTerms = memberSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const isFiltering = queryTerms.length > 0;
 
-  function matchesFilters(x) {
-    const f = x.record.fields;
-    if (memberCohortFilter !== 'all' && x.classification.cohort !== memberCohortFilter) return false;
-    if (memberCountryFilter !== 'all' && (f.Country || '').trim() !== memberCountryFilter) return false;
+  function matchesSearch(x) {
     if (!queryTerms.length) return true;
-    const hay = `${f.Name || ''} ${f.Country || ''} ${f.Sponsor || ''} ${f.Subspecialty || ''} ${f.Location || ''} ${f['Social handles'] || ''} ${f.Email || ''} ${x.classification.cohort || ''}`.toLowerCase();
-    return queryTerms.every(t => hay.includes(t));
+    const f = x.record.fields || {};
+    const bday = formatBirthday(f.Birthday);
+    const hay = `${f.Name || ''} ${f.Sponsor || ''} ${f['Social handles'] || ''} ${f.Country || ''} ${f.Birthday || ''} ${bday} ${f.Email || ''} ${f.Location || ''} ${f.Subspecialty || ''} ${x.classification.cohort || ''}`.toLowerCase();
+    return queryTerms.every(term => hay.includes(term));
   }
 
-  const visibleMembers = substantiveMembers.filter(matchesFilters);
-  const isFiltering = queryTerms.length > 0 || memberCohortFilter !== 'all' || memberCountryFilter !== 'all';
+  const visibleMembers = substantiveMembers.filter(matchesSearch);
 
-  const cohortCounts = {};
-  for (const def of MEMBER_COHORT_DEFS) {
-    cohortCounts[def.key] = substantiveMembers.filter(x => x.classification.cohort === def.key).length;
+  function sortMemberItems(items) {
+    if (!memberSortCol) return items;
+    return [...items].sort((a, b) => {
+      if (memberSortCol === 'Birthday') {
+        const keyA = parseBirthdayMonthDay(a.record.fields?.Birthday);
+        const keyB = parseBirthdayMonthDay(b.record.fields?.Birthday);
+        const hasA = keyA !== null;
+        const hasB = keyB !== null;
+        if (!hasA && !hasB) return 0;
+        if (!hasA) return 1; // missing/unrecognized at bottom in BOTH directions
+        if (!hasB) return -1;
+        const numA = keyA.month * 100 + keyA.day;
+        const numB = keyB.month * 100 + keyB.day;
+        const cmp = numA - numB;
+        return memberSortDir === 'desc' ? -cmp : cmp;
+      }
+      let valA = (a.record.fields[memberSortCol] || '').trim();
+      let valB = (b.record.fields[memberSortCol] || '').trim();
+      const cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+      return memberSortDir === 'desc' ? -cmp : cmp;
+    });
   }
-  const unassignedMembers = substantiveMembers.filter(x => x.classification.cohort === 'Local / unassigned');
 
-  const indexHtml = `<nav class="member-index-nav" aria-label="Members directory overview">
-    <div class="member-index-label">Overview:</div>
-    <div class="member-index-chips">
-      <button type="button" class="member-index-chip ${memberCohortFilter==='all'?'active':''}" data-filter-cohort="all">
-        <span class="member-index-name">All cohorts</span>
-        <span class="member-index-count">${totalNamedMembers}</span>
-      </button>
-      ${MEMBER_COHORT_DEFS.map(def => `
-        <button type="button" class="member-index-chip ${memberCohortFilter===def.key?'active':''}" data-filter-cohort="${esc(def.key)}">
-          <span class="member-index-name">${esc(def.name)}</span>
-          <span class="member-index-count">${cohortCounts[def.key] || 0}</span>
-        </button>
-      `).join('')}
-      ${unassignedMembers.length > 0 ? `
-        <button type="button" class="member-index-chip local-chip ${memberCohortFilter==='Local / unassigned'?'active':''}" data-filter-cohort="Local / unassigned">
-          <span class="member-index-name">Local / unassigned</span>
-          <span class="member-index-count">${unassignedMembers.length}</span>
-        </button>
-      ` : ''}
-      <button type="button" class="member-index-chip structural-chip ${memberShowStructural?'active':''}" id="toggle-structural-btn" title="Inspect 6 structural entries (headings & repeated headers) preserved from source workbook">
-        <span class="member-index-name">Source headings</span>
-        <span class="member-index-count">${structuralEntries.length}</span>
-      </button>
-    </div>
-  </nav>`;
+  // Group into the audited cohort sections
+  const cohortSections = MEMBER_COHORT_DEFS.map(def => {
+    let items = visibleMembers.filter(x => x.classification.cohort === def.key);
+    const totalCohortCount = substantiveMembers.filter(x => x.classification.cohort === def.key).length;
+    items = sortMemberItems(items);
+    return { def, items, totalCohortCount };
+  });
+
+  // Check if any unassigned local drafts exist
+  const unassignedSubstantive = substantiveMembers.filter(x => x.classification.cohort === 'Local / unassigned');
+  if (unassignedSubstantive.length > 0) {
+    let unassignedItems = visibleMembers.filter(x => x.classification.cohort === 'Local / unassigned');
+    unassignedItems = sortMemberItems(unassignedItems);
+    cohortSections.push({
+      def: { id: 'unassigned', name: 'Local / unassigned', key: 'Local / unassigned', description: 'Locally created member drafts' },
+      items: unassignedItems,
+      totalCohortCount: unassignedSubstantive.length
+    });
+  }
+
+  const activeCohortsCount = cohortSections.filter(s => s.totalCohortCount > 0).length;
+  const structuralCount = allRecords.length - totalSubstantive;
+  const defaultMeta = `${totalSubstantive} named member rows (${activeCohortsCount} cohorts)${structuralCount > 0 ? ` · ${structuralCount} structural entries excluded` : ''} · ${allRecords.length} total records`;
+
+  const totalVisible = visibleMembers.length;
+
+  const sortIcon = col => {
+    if (memberSortCol !== col) return '<span class="sort-icon-neutral" aria-hidden="true">↕</span>';
+    return memberSortDir === 'asc' ? '<span class="sort-icon-active" aria-hidden="true">▲</span>' : '<span class="sort-icon-active" aria-hidden="true">▼</span>';
+  };
 
   const toolbarHtml = `<div class="member-toolbar panel">
     <div class="member-toolbar-controls">
       <div class="member-search-wrap">
         <span class="member-search-icon" aria-hidden="true">⌕</span>
-        <input type="search" id="member-search-input" class="input member-search-input" placeholder="Search members by name, country, sponsor, or handle…" value="${esc(memberSearchQuery)}" aria-label="Filter member directory">
-        ${memberSearchQuery ? `<button type="button" class="icon-button member-search-clear" id="member-clear-input" aria-label="Clear filter">×</button>` : ''}
-      </div>
-      <label class="member-select-label">
-        <span class="muted">Cohort:</span>
-        <select class="select member-select" id="member-cohort-select" aria-label="Filter by cohort">
-          <option value="all" ${memberCohortFilter==='all'?'selected':''}>All cohorts (${totalNamedMembers})</option>
-          ${MEMBER_COHORT_DEFS.map(def => `<option value="${esc(def.key)}" ${memberCohortFilter===def.key?'selected':''}>${esc(def.name)} (${cohortCounts[def.key]||0})</option>`).join('')}
-          ${unassignedMembers.length > 0 ? `<option value="Local / unassigned" ${memberCohortFilter==='Local / unassigned'?'selected':''}>Local / unassigned (${unassignedMembers.length})</option>` : ''}
-        </select>
-      </label>
-      <label class="member-select-label">
-        <span class="muted">Country:</span>
-        <select class="select member-select" id="member-country-select" aria-label="Filter by country">
-          <option value="all" ${memberCountryFilter==='all'?'selected':''}>All countries (${countries.length})</option>
-          ${countries.map(c => {
-            const cnt = substantiveMembers.filter(x => (x.record.fields.Country || '').trim() === c).length;
-            return `<option value="${esc(c)}" ${memberCountryFilter===c?'selected':''}>${esc(c)} (${cnt})</option>`;
-          }).join('')}
-        </select>
-      </label>
-      <label class="member-select-label">
-        <span class="muted">Order:</span>
-        <select class="select member-select" id="member-sort-select" aria-label="Sort member directory">
-          <option value="source" ${memberSort==='source'?'selected':''}>Workbook source order</option>
-          <option value="az" ${memberSort==='az'?'selected':''}>Name A–Z</option>
-        </select>
-      </label>
-      <div class="member-actions">
-        ${memberSort === 'source' ? `
-          <button type="button" class="button secondary small" id="member-expand-all">Expand all</button>
-          <button type="button" class="button secondary small" id="member-collapse-all">Collapse all</button>
-        ` : ''}
-        ${isFiltering ? `<button type="button" class="button secondary small" id="member-reset-filters">Reset filters</button>` : ''}
+        <input type="search" id="member-search-input" class="input member-search-input" placeholder="Search members by name, sponsor, handle, country, email, location, training/specialty…" value="${esc(memberSearchQuery)}" aria-label="Search members">
+        ${memberSearchQuery ? `<button type="button" class="icon-button member-search-clear" id="member-clear-input" aria-label="Clear search">×</button>` : ''}
       </div>
     </div>
     <div class="member-toolbar-meta">
       <p class="muted results-count" id="members-results-meta">
-        ${formatResultsCount(isFiltering ? visibleMembers.map(x => x.record) : allRecords, 'Members', allRecords)}
+        ${isFiltering 
+          ? `Showing ${totalVisible} of ${totalSubstantive} members matching “${esc(memberSearchQuery)}”`
+          : defaultMeta}
       </p>
     </div>
   </div>`;
 
-  const structuralDrawerHtml = `<details class="panel member-structural-drawer" id="member-structural-drawer" ${memberShowStructural ? 'open' : ''}>
-    <summary class="member-structural-summary">
-      <strong>📋 Source Structural Entries (${structuralEntries.length} headings &amp; repeated headers)</strong>
-      <span class="muted" style="font-size:12px;">Preserved from original workbook snapshot · Excluded from people counts</span>
-    </summary>
-    <div class="member-structural-body">
-      <p class="muted" style="font-size:13px; margin: 4px 0 12px 0;">These rows are structural section separators or repeated column headers in the source workbook tab. They remain accessible for reference, audit, and local editing.</p>
-      <div class="member-table-container">
-        <table class="data-table member-table">
-          <thead>
-            <tr>
-              <th scope="col">Row</th>
-              <th scope="col">Role</th>
-              <th scope="col">Workbook Label</th>
-              <th scope="col">Associated Cohort</th>
-              <th scope="col">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${structuralEntries.map(x => `
-              <tr>
-                <td><code>Row ${x.record.row}</code></td>
-                <td><span class="tag">${esc(x.classification.role === 'column_header' ? 'Repeated header' : 'Cohort heading')}</span></td>
-                <td><strong>${esc(x.classification.label || x.record.fields.Name || 'Heading')}</strong></td>
-                <td><span class="tag tag-cohort tag-cohort-${getCohortBadgeClass(x.classification.cohort)}">${esc(x.classification.cohort || 'Members')}</span></td>
-                <td><button type="button" class="button secondary small" data-open="${esc(x.record.id)}" data-area="Members">Open details</button></td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </details>`;
-
-  const totalCount = visibleMembers.length;
-
   let contentHtml = '';
-  if (visibleMembers.length === 0) {
+  if (totalVisible === 0) {
     contentHtml = `<section class="empty-state panel">
       <h2>No matching members</h2>
-      <p>No members matched your search and filter criteria.</p>
-      <button type="button" class="button secondary" id="member-empty-clear">Clear filters</button>
+      <p>No members matched “${esc(memberSearchQuery)}”.</p>
+      <button type="button" class="button secondary" id="member-empty-clear">Clear search</button>
     </section>`;
-  } else if (memberSort === 'az') {
-    const sorted = [...visibleMembers].sort((a, b) => (a.record.fields.Name || '').localeCompare(b.record.fields.Name || ''));
-    const letterMap = new Map();
-    for (const item of sorted) {
-      const name = (item.record.fields.Name || '').trim();
-      const firstChar = name ? name[0].toUpperCase() : '#';
-      const letter = /[A-Z]/.test(firstChar) ? firstChar : '#';
-      if (!letterMap.has(letter)) letterMap.set(letter, []);
-      letterMap.get(letter).push(item);
-    }
-    const letters = [...letterMap.keys()].sort((a, b) => a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b));
+  } else {
+    const tableHeaderHtml = `<thead>
+      <tr>
+        <th scope="col" class="th-name sortable-th" data-sort="Name" tabindex="0" role="button" aria-label="Sort by Name">Name ${sortIcon('Name')}</th>
+        <th scope="col" class="th-sponsor sortable-th" data-sort="Sponsor" tabindex="0" role="button" aria-label="Sort by Sponsor">Sponsor ${sortIcon('Sponsor')}</th>
+        <th scope="col" class="th-social sortable-th" data-sort="Social handles" tabindex="0" role="button" aria-label="Sort by Social handles">Social handles ${sortIcon('Social handles')}</th>
+        <th scope="col" class="th-country sortable-th" data-sort="Country" tabindex="0" role="button" aria-label="Sort by Country of origin">Country of origin ${sortIcon('Country')}</th>
+        <th scope="col" class="th-birthday sortable-th" data-sort="Birthday" tabindex="0" role="button" aria-label="Sort by Birthday">Birthday ${sortIcon('Birthday')}</th>
+        <th scope="col" class="th-email sortable-th" data-sort="Email" tabindex="0" role="button" aria-label="Sort by Email">Email ${sortIcon('Email')}</th>
+        <th scope="col" class="th-location sortable-th" data-sort="Location" tabindex="0" role="button" aria-label="Sort by Location / home">Location / home ${sortIcon('Location')}</th>
+        <th scope="col" class="th-training sortable-th" data-sort="Subspecialty" tabindex="0" role="button" aria-label="Sort by Training / specialty">Training / specialty ${sortIcon('Subspecialty')}</th>
+      </tr>
+    </thead>`;
 
-    const azNavHtml = `<nav class="member-az-nav" aria-label="A–Z jump navigation">
-      <span class="muted" style="font-size:12px; font-weight:600;">Jump:</span>
-      <div class="member-az-links">
-        ${letters.map(l => `<a href="#member-letter-${l}" class="member-az-link">${l}</a>`).join('')}
-      </div>
-    </nav>`;
+    const sectionsTbodyHtml = cohortSections.map(({ def, items, totalCohortCount }) => {
+      if (isFiltering && items.length === 0) return '';
+      const rowsHtml = items.map(renderMemberRow).join('');
+      const countLabel = isFiltering
+        ? `${items.length} of ${totalCohortCount} ${items.length === 1 ? 'member' : 'members'}`
+        : `${items.length} ${items.length === 1 ? 'member' : 'members'}`;
 
-    const letterSectionsHtml = letters.map(letter => {
-      const groupItems = letterMap.get(letter) || [];
-      const rowsHtml = groupItems.map(renderMemberRow).join('');
-      return `<section class="member-letter-section panel" id="member-letter-${letter}">
-        <div class="member-letter-header">
-          <h2 class="member-letter-title">${letter}</h2>
-          <span class="tag member-letter-count">${groupItems.length} members</span>
-        </div>
-        <div class="member-table-container">
-          <table class="data-table member-table">
-            <thead>
-              <tr>
-                <th scope="col" class="th-name">Member</th>
-                <th scope="col" class="th-cohort">Cohort</th>
-                <th scope="col" class="th-country">Country</th>
-                <th scope="col" class="th-sponsor">Sponsor / Location</th>
-                <th scope="col" class="th-social">Social / Handles</th>
-                <th scope="col" class="th-actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rowsHtml}
-            </tbody>
-          </table>
-        </div>
-      </section>`;
+      return `
+        <tr class="member-cohort-header-row" id="cohort-${def.id}">
+          <th colspan="8" scope="colgroup" class="member-cohort-header-cell">
+            <div class="member-cohort-header-content">
+              <span class="member-cohort-title">${esc(def.name)}</span>
+              <span class="tag tag-cohort member-cohort-badge">${esc(def.key)}</span>
+              <span class="tag member-cohort-count">${countLabel}</span>
+            </div>
+          </th>
+        </tr>
+        ${rowsHtml}
+      `;
     }).join('');
 
-    contentHtml = `${azNavHtml}<div class="member-az-container">${letterSectionsHtml}</div>`;
-  } else {
-    const recordMap = new Map(allRecords.map(r => [r.id, r]));
-    const cohortSections = MEMBER_COHORT_DEFS.map(def => {
-      const headingRecord = def.headingId ? recordMap.get(def.headingId) : null;
-      const items = visibleMembers.filter(x => x.classification.cohort === def.key);
-      const totalCohortCount = substantiveMembers.filter(x => x.classification.cohort === def.key).length;
-      return { def, headingRecord, items, totalCohortCount };
-    });
-
-    const mappedCohortKeys = new Set(MEMBER_COHORT_DEFS.map(d => d.key));
-    const unassignedItems = visibleMembers.filter(x => x.classification.cohort === 'Local / unassigned');
-    if (unassignedItems.length > 0 || unassignedMembers.length > 0) {
-      cohortSections.push({
-        def: { id: 'unassigned', name: 'Local / unassigned', key: 'Local / unassigned', headingId: null, description: 'Locally created member drafts pending cohort assignment' },
-        headingRecord: null,
-        items: unassignedItems,
-        totalCohortCount: unassignedMembers.length
-      });
-    }
-    const otherItems = visibleMembers.filter(x => !mappedCohortKeys.has(x.classification.cohort) && x.classification.cohort !== 'Local / unassigned');
-    if (otherItems.length > 0) {
-      cohortSections.push({
-        def: { id: 'other', name: 'Other members', key: 'other', headingId: null, description: 'Other member entries' },
-        headingRecord: null,
-        items: otherItems,
-        totalCohortCount: substantiveMembers.filter(x => !mappedCohortKeys.has(x.classification.cohort) && x.classification.cohort !== 'Local / unassigned').length
-      });
-    }
-
-    contentHtml = `<div class="member-cohorts-container">${cohortSections.map(({ def, headingRecord, items, totalCohortCount }) => {
-      if (memberCohortFilter !== 'all' && memberCohortFilter !== def.key) return '';
-      if (queryTerms.length > 0 && items.length === 0) return '';
-
-      const isOpen = queryTerms.length > 0 ? (items.length > 0) : memberExpandedCohorts.has(def.id);
-      const rowsHtml = items.map(renderMemberRow).join('');
-
-      return `<details class="panel member-cohort-section" id="member-cohort-${def.id}" ${isOpen ? 'open' : ''} data-cohort-id="${def.id}">
-        <summary class="member-cohort-summary">
-          <div class="member-cohort-header-info">
-            <span class="member-cohort-chevron" aria-hidden="true">▾</span>
-            <h2 class="member-cohort-title">${esc(def.name)}</h2>
-            <span class="tag member-cohort-count">${items.length}${items.length !== totalCohortCount ? ` of ${totalCohortCount}` : ''} members</span>
-          </div>
-          <div class="member-cohort-header-actions" onclick="event.stopPropagation()">
-            ${headingRecord ? `
-              <button type="button" class="button secondary small member-heading-btn" data-open="${esc(headingRecord.id)}" data-area="Members" title="Open source heading record ${esc(headingRecord.id)} (row ${headingRecord.row})">
-                Source heading (row ${headingRecord.row}) ↗
-              </button>
-            ` : ''}
-          </div>
-        </summary>
-        <div class="member-cohort-body">
-          <p class="muted member-cohort-desc">${esc(def.description)}</p>
-          <div class="member-table-container">
-            <table class="data-table member-table">
-              <thead>
-                <tr>
-                  <th scope="col" class="th-name">Member</th>
-                  <th scope="col" class="th-cohort">Cohort</th>
-                  <th scope="col" class="th-country">Country</th>
-                  <th scope="col" class="th-sponsor">Sponsor / Location</th>
-                  <th scope="col" class="th-social">Social / Handles</th>
-                  <th scope="col" class="th-actions">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rowsHtml || '<tr><td colspan="6" class="empty-state">No matching members in this cohort.</td></tr>'}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </details>`;
-    }).join('')}</div>`;
+    contentHtml = `<div class="member-table-container panel">
+      <table class="data-table member-table" id="member-directory-table">
+        ${tableHeaderHtml}
+        <tbody>
+          ${sectionsTbodyHtml}
+        </tbody>
+      </table>
+    </div>`;
   }
 
-  const areas = groups['People'] || ['Members', 'OrgStructure', 'CRC', 'CRC - retired'];
+  const areas = groups['People'] || ['OrgStructure', 'Members'];
   const areaTabsHtml = `<div class="toolbar area-tabs">${areas.map(t => `<button class="button ${t==='Members'?'primary':'secondary'} small" ${t==='Members'?'aria-current="page"':''} data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>`;
 
   $('#page').innerHTML = header('Members', descriptions['Members'] || 'Find Academy members, sponsors and social handles.') +
     banner() +
     areaPicker() +
     areaTabsHtml +
-    indexHtml +
     toolbarHtml +
-    contentHtml +
-    structuralDrawerHtml;
+    contentHtml;
 
   bindMembersEvents();
 }
@@ -3053,7 +3056,6 @@ function bindMembersEvents(){
   if (searchInput) {
     searchInput.oninput = e => {
       memberSearchQuery = e.target.value;
-      page = 0;
       const start = e.target.selectionStart;
       const end = e.target.selectionEnd;
       render();
@@ -3061,132 +3063,37 @@ function bindMembersEvents(){
       if (el) { el.focus(); try { el.setSelectionRange(start, end); } catch {} }
     };
   }
-  if ($('#prev')) {
-    $('#prev').onclick = () => {
-      page--;
-      render();
-      restoreScrollAndAnchor('Members');
-      focusAccessibleDestination(true);
-    };
-  }
-  if ($('#next')) {
-    $('#next').onclick = () => {
-      page++;
-      render();
-      restoreScrollAndAnchor('Members');
-      focusAccessibleDestination(true);
-    };
-  }
   if ($('#member-clear-input')) {
     $('#member-clear-input').onclick = () => {
       memberSearchQuery = '';
-      page = 0;
       render();
       focusAccessibleDestination();
     };
   }
   if ($('#member-empty-clear')) {
     $('#member-empty-clear').onclick = () => {
-      clearSectionFilters('Members');
-      focusAccessibleDestination();
-    };
-  }
-  if ($('#member-reset-filters')) {
-    $('#member-reset-filters').onclick = () => {
-      clearSectionFilters('Members');
-      focusAccessibleDestination();
-    };
-  }
-  if ($('#member-cohort-select')) {
-    $('#member-cohort-select').onchange = e => {
-      memberCohortFilter = e.target.value;
-      page = 0;
-      render();
-    };
-  }
-  if ($('#member-country-select')) {
-    $('#member-country-select').onchange = e => {
-      memberCountryFilter = e.target.value;
-      page = 0;
-      render();
-    };
-  }
-  if ($('#member-sort-select')) {
-    $('#member-sort-select').onchange = e => {
-      memberSort = e.target.value;
-      render();
-    };
-  }
-  if ($('#member-expand-all')) {
-    $('#member-expand-all').onclick = () => {
-      document.querySelectorAll('.member-cohort-section').forEach(d => {
-        d.open = true;
-        if (d.dataset.cohortId) memberExpandedCohorts.add(d.dataset.cohortId);
-      });
-    };
-  }
-  if ($('#member-collapse-all')) {
-    $('#member-collapse-all').onclick = () => {
-      document.querySelectorAll('.member-cohort-section').forEach(d => {
-        d.open = false;
-        if (d.dataset.cohortId) memberExpandedCohorts.delete(d.dataset.cohortId);
-      });
-    };
-  }
-  if ($('#member-reset-filters')) {
-    $('#member-reset-filters').onclick = () => {
       memberSearchQuery = '';
-      memberCohortFilter = 'all';
-      memberCountryFilter = 'all';
-      memberExpandedCohorts = new Set(['participants', 'core', 'leaders', 'inactive', 'other']);
       render();
+      focusAccessibleDestination();
     };
   }
-  document.querySelectorAll('[data-filter-cohort]').forEach(b => {
-    b.onclick = () => {
-      const cohort = b.dataset.filterCohort;
-      memberCohortFilter = cohort;
-      render();
-      if (cohort !== 'all') {
-        const cId = cohort === 'Core team' ? 'core' : cohort === 'Marked inactive in source' ? 'inactive' : cohort.toLowerCase();
-        const target = $(`#member-cohort-${cId}`);
-        if (target) {
-          target.open = true;
-          target.scrollIntoView({ behavior: 'smooth' });
-        }
+  document.querySelectorAll('.sortable-th').forEach(th => {
+    const col = th.dataset.sort;
+    const triggerSort = () => {
+      if (memberSortCol === col) {
+        memberSortDir = memberSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        memberSortCol = col;
+        memberSortDir = 'asc';
       }
-    };
-  });
-  if ($('#toggle-structural-btn')) {
-    $('#toggle-structural-btn').onclick = () => {
-      memberShowStructural = !memberShowStructural;
-      const drawer = $('#member-structural-drawer');
-      if (drawer) {
-        drawer.open = memberShowStructural;
-        if (memberShowStructural) drawer.scrollIntoView({ behavior: 'smooth' });
-      }
-    };
-  }
-  document.querySelectorAll('.member-cohort-section').forEach(d => {
-    d.ontoggle = () => {
-      if (!memberSearchQuery && d.dataset.cohortId) {
-        if (d.open) memberExpandedCohorts.add(d.dataset.cohortId);
-        else memberExpandedCohorts.delete(d.dataset.cohortId);
-      }
-    };
-  });
-  document.querySelectorAll('.member-expand-btn').forEach(b => {
-    b.onclick = () => {
-      const id = b.dataset.expandId;
-      if (memberExpandedDetails.has(id)) memberExpandedDetails.delete(id);
-      else memberExpandedDetails.add(id);
       render();
     };
-  });
-  document.querySelectorAll('.find-in-teams-btn').forEach(b => {
-    b.onclick = e => {
-      e.stopPropagation();
-      findMemberInTeams(b.dataset.memberName);
+    th.onclick = triggerSort;
+    th.onkeydown = e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        triggerSort();
+      }
     };
   });
 }
@@ -4022,7 +3929,7 @@ function orgStructureView(){
     <div class="org-index-label">Overview:</div>
     <div class="org-index-chips">
       ${groupsData.map(g=>`
-        <a href="#org-group-${g.id}" class="org-index-chip ${orgGroupFilter===g.id?'active':''}" data-jump-group="${g.id}">
+        <a href="#org-group-${g.id}" class="org-index-chip" data-jump-group="${g.id}">
           <span class="org-index-name">${esc(g.name)}</span>
           <span class="org-index-count">${g.items.length}</span>
         </a>
@@ -4101,14 +4008,13 @@ function orgStructureView(){
           <table class="data-table org-table">
             <thead>
               <tr>
-                <th scope="col" class="th-resp">Responsibility</th>
-                <th scope="col" class="th-people">Recorded people</th>
-                <th scope="col" class="th-role">Recorded role</th>
-                <th scope="col" class="th-actions">Actions</th>
+                <th scope="col" class="th-resp">Responsibility / team</th>
+                <th scope="col" class="th-people">Members</th>
+                <th scope="col" class="th-role">Role</th>
               </tr>
             </thead>
             <tbody>
-              ${rowsHtml||'<tr><td colspan="4" class="empty-state">No matching responsibilities in this group.</td></tr>'}
+              ${rowsHtml||'<tr><td colspan="3" class="empty-state">No matching responsibilities in this group.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -4124,10 +4030,10 @@ function orgStructureView(){
       </section>`
     : '';
 
-  const areas=groups['People']||['Members','OrgStructure','CRC','CRC - retired'];
+  const areas=groups['People']||['OrgStructure','Members'];
   const areaTabsHtml=`<div class="toolbar area-tabs">${areas.map(t=>`<button class="button ${t==='OrgStructure'?'primary':'secondary'} small" ${t==='OrgStructure'?'aria-current="page"':''} data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>`;
 
-  $('#page').innerHTML=header('Teams & leadership',descriptions['OrgStructure']||'Responsibilities and teams, as recorded in the workbook.')+
+  $('#page').innerHTML=header('Org Structure',descriptions['OrgStructure']||'Responsibilities and teams, as recorded in the workbook.')+
     banner()+
     areaPicker()+
     areaTabsHtml+
@@ -4214,11 +4120,15 @@ function bindOrgEvents(){
   });
   document.querySelectorAll('[data-jump-group]').forEach(a=>{
     a.onclick=e=>{
+      e.preventDefault();
       const gId=a.dataset.jumpGroup;
       const target=$(`#org-group-${gId}`);
       if(target){
         target.open=true;
         orgExpandedGroups.add(gId);
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const summary = target.querySelector('.org-group-summary');
+        if (summary) summary.focus();
       }
     };
   });
@@ -4252,7 +4162,7 @@ function residencyProgramsView() {
   const visibleSessions = substantiveSessions.filter(matchesFilters);
   const isFiltering = queryTerms.length > 0;
 
-  const areaGroup = Object.keys(groups).find(g => groups[g].includes('Residency Programs')) || 'Sessions';
+  const areaGroup = Object.keys(groups).find(g => groups[g].includes('Residency Programs')) || 'Morning Report';
   const areaButtons = groups[areaGroup]
     .map(t => `<button type="button" class="button ${t === tab ? 'primary' : 'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('');
 
@@ -4559,7 +4469,7 @@ function crcRetiredView() {
   crcPage = Math.min(Math.max(0, crcPage), totalPages - 1);
   const currentCases = showAll ? visibleCases : visibleCases.slice(crcPage * CRC_PAGE_SIZE, (crcPage + 1) * CRC_PAGE_SIZE);
 
-  const areaGroup = Object.keys(groups).find(g => groups[g].includes('CRC - retired')) || 'People';
+  const areaGroup = Object.keys(groups).find(g => groups[g].includes('CRC - retired')) || 'Morning Report';
   const areaButtons = groups[areaGroup]
     .map(t => `<button type="button" class="button ${t === tab ? 'primary' : 'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('');
 
@@ -4795,7 +4705,7 @@ function crcRetiredView() {
 
   $('#page').innerHTML = `
     <div class="crc-retired-container" id="CRCRetired">
-      ${header('CRC - retired', descriptions['CRC - retired'] || 'Archived and legacy clinical reasoning case mentorship records.')}
+      ${header(sectionLabel('CRC - retired'), descriptions['CRC - retired'] || 'Archived and legacy clinical reasoning case mentorship records.')}
       ${banner()}
       ${sopBanner('CRC - retired')}
       ${areaPicker()}
@@ -4914,7 +4824,7 @@ function render(){
   });
   document.querySelectorAll('[data-record-menu]').forEach(b=>b.onclick=e=>{e.stopPropagation();trackDialogOpener(b);openRecordActionsMenu(b.dataset.recordMenu,b.dataset.area||tab);});
   document.querySelectorAll('.gap-action-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();claimRole(b.dataset.open,b.dataset.role);});
-  document.querySelectorAll('.staff-token').forEach(b=>b.onclick=e=>{e.stopPropagation();openStaffTokenDialog(b.dataset.sessionId,b.dataset.role,b.dataset.tokenName);});
+  document.querySelectorAll('button.staff-token:not(.is-readonly-token)').forEach(b=>b.onclick=e=>{e.stopPropagation();if(typeof isAdmin==='function'&&!isAdmin())return;openStaffTokenDialog(b.dataset.sessionId,b.dataset.role,b.dataset.tokenName);});
   document.querySelectorAll('.staff-add-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();openStaffAddDialog(b.dataset.sessionId,b.dataset.addRole);});
   document.querySelectorAll('[data-swap]').forEach(b=>b.onclick=()=>openSwapDialog(b.dataset.swap,b.dataset.role));
   document.querySelectorAll('.find-in-teams-btn').forEach(b=>b.onclick=e=>{e.stopPropagation();findMemberInTeams(b.dataset.memberName);});
@@ -4990,9 +4900,10 @@ function attachMatrixWindowing() {
         }
         return;
       }
-      const token = e.target.closest('.staff-token');
+      const token = e.target.closest('button.staff-token:not(.is-readonly-token)');
       if (token) {
         e.stopPropagation();
+        if (typeof isAdmin === 'function' && !isAdmin()) return;
         openStaffTokenDialog(token.dataset.sessionId, token.dataset.role, token.dataset.tokenName);
         return;
       }
@@ -5259,6 +5170,7 @@ if ($('#quick-claim-form')) {
 let activeStaffToken = null;
 
 function openStaffTokenDialog(sessionId, role, name) {
+  if (typeof isAdmin === 'function' && !isAdmin()) return;
   const diag = $('#staff-token-dialog');
   if (!diag) return;
   activeStaffToken = { sessionId, role, name };
@@ -5276,6 +5188,7 @@ function openStaffTokenDialog(sessionId, role, name) {
 }
 
 function openStaffAddDialog(sessionId, role) {
+  if (typeof isAdmin === 'function' && !isAdmin()) return;
   const diag = $('#staff-token-dialog');
   if (!diag) return;
   activeStaffToken = { sessionId, role, name: '', isAdd: true };
@@ -5516,12 +5429,17 @@ function getFormValues(){const f={};$('#dialog-content').querySelectorAll('[data
 function isFormDirty(){if(detailMode!=='edit')return false;if(reviewedSessionFields.size)return true;const cur=getFormValues();for(const k of Object.keys(initialFormValues)){if((cur[k]??'')!==(initialFormValues[k]??''))return true}return false}
 function confirmDiscard(e){if(isFormDirty()){if(!confirm('You have unsaved changes. Discard them?')){if(e){e.preventDefault();e.stopPropagation()}return false}}return true}
 function renderFieldControl(c,val,r,req){
- const multiline=/notes|remarks|meeting|sign-ups|comments|details|social handles/i.test(c);
- if(multiline)return `<textarea data-field="${esc(c)}" ${req} rows="${/notes|remarks|sign-ups/i.test(c)?3:2}">${esc(val)}</textarea>`;
- const isDateCol=['Date','Release date','Start','End'].includes(c)||(editingTab==='CRC'&&c==='VMR date');
+ const multiline=/notes|remarks|meeting|sign-ups|comments|details|social handles|issues\/concerns/i.test(c);
+ if(multiline)return `<textarea data-field="${esc(c)}" ${req} rows="${/notes|remarks|sign-ups|issues\/concerns/i.test(c)?3:2}">${esc(val)}</textarea>`;
+ const isDateCol=['Date','Release date','Start','End'].includes(c)||(editingTab==='CRC'&&c==='VMR date')||(editingTab==='CRC - retired'&&c==='DATE OF PRESENTATION');
  if(isDateCol){
   if(!val||iso(val))return `<input class="input" type="date" data-field="${esc(c)}" value="${esc(val)}" ${req}>`;
   return `<div class="uncertain-field"><input class="input" type="text" data-field="${esc(c)}" value="${esc(val)}" ${req}><div class="uncertain-meta"><span class="field-hint">Uncertain source date (kept intact)</span><button type="button" class="text-button convert-date-btn" data-date-col="${esc(c)}">Pick calendar date</button></div></div>`;
+ }
+ if(editingTab==='CRC - retired'&&['CONTACTED?','CASE COMPLETE?','PRESENTED?'].includes(c)){
+  let opts=['1','0',''];
+  const labels={'1':'Checked','0':'Unchecked','':'Not recorded'};
+  return `<select class="select" data-field="${esc(c)}" ${req}>${opts.map(o=>`<option value="${esc(o)}" ${String(val)===o?'selected':''}>${esc(labels[o])}</option>`).join('')}${val&&!opts.includes(String(val))?`<option value="${esc(val)}" selected>${esc(val)}</option>`:''}</select>`;
  }
  const isLinkCol=['Link','Recording','Bonus learning'].includes(c);
  if(isLinkCol){
@@ -5568,13 +5486,13 @@ function viewDetailDialog(r, area){
  }
 
  const backBtn=$('#detail-back-btn');
- if(backBtn)backBtn.textContent=`‹ Back to ${area}`;
+ if(backBtn)backBtn.textContent=`‹ Back to ${sectionLabel(area)}`;
 
  const secBtn=$('#dialog-secondary');
  const editBtn=$('#edit-record-btn');
  const primBtn=$('#dialog-primary');
  if(secBtn){secBtn.textContent='Close';secBtn.style.display='';}
- if(editBtn){editBtn.style.display='';}
+ if(editBtn){editBtn.style.display='';editBtn.textContent=area==='Members'?'Edit member':(area==='OrgStructure'?'Edit responsibility':(['CRC','CRC - retired'].includes(area)?'Edit case':'Edit record'));}
  if(primBtn){primBtn.style.display='none';}
 
  const localChip=isDraft?chip('Local draft','local-chip'):(isLocal?chip('Locally edited on this device','local-chip'):'');
@@ -5598,7 +5516,7 @@ function viewDetailDialog(r, area){
   const rawVal=r.fields[col];
   const val=rawVal!==undefined&&rawVal!==null?String(rawVal).trim():'';
   const fieldLinkList=urls(r,col);
-  const isMultiline=/notes|remarks|meeting|sign-ups|comments|details|social handles/i.test(col)||val.length>80;
+  const isMultiline=/notes|remarks|meeting|sign-ups|comments|details|social handles|issues\/concerns/i.test(col)||val.length>80;
 
   let valueContent='';
   if(fieldLinkList.length>0){
@@ -5617,20 +5535,31 @@ function viewDetailDialog(r, area){
     valueContent=`<span class="detail-val-text">${esc(val)}</span>${notice}`;
    }else if(area==='Podcast Episodes'&&col==='Status'){
     valueContent=`<span class="detail-val-text">${esc(val)}</span> <span class="muted" style="font-size:11px;">(Explicit recorded status)</span>`;
+   }else if(area==='Members'&&col==='Birthday'){
+    valueContent=`<span class="detail-val-text">${esc(formatBirthday(val))}</span>`;
+   }else if(area==='CRC - retired'&&['CONTACTED?','CASE COMPLETE?','PRESENTED?'].includes(col)){
+    if(val==='1') valueContent=`<span class="detail-val-text">Checked</span>`;
+    else if(val==='0') valueContent=`<span class="detail-val-text">Unchecked</span>`;
+    else valueContent=`<span class="detail-val-text">${esc(val)}</span>`;
    }else{
     valueContent=`<span class="detail-val-text">${esc(val)}</span>`;
    }
   }else{
-   valueContent=`<span class="muted">—</span>`;
+   if(area==='CRC - retired'&&['CONTACTED?','CASE COMPLETE?','PRESENTED?'].includes(col)){
+    valueContent=`<span class="muted">Not recorded</span>`;
+   }else{
+    valueContent=`<span class="muted">—</span>`;
+   }
   }
 
-  return `<div class="detail-field-item ${isMultiline?'full-width':''}"><dt class="detail-field-name">${esc(col)}</dt><dd class="detail-field-value">${valueContent}</dd></div>`;
+  const displayCol=(area==='Members')?({'Subspecialty':'Training / specialty','Country':'Country of origin','Location':'Location / home'}[col]||col):col;
+  return `<div class="detail-field-item ${isMultiline?'full-width':''}"><dt class="detail-field-name">${esc(displayCol)}</dt><dd class="detail-field-value">${valueContent}</dd></div>`;
  }).join('');
 
  const podcastStageChip=(area==='Podcast Episodes')?`<span class="tag stage-tag">${esc(formatPodcastStageBadge(recordStage(r,'Podcast Episodes'),isPodcastStageInferred(r)))}</span>`:'';
  $('#dialog-content').innerHTML=`
   <div class="detail-meta-bar">
-   <span class="tag">${esc(area)}</span>
+   <span class="tag">${esc(sectionLabel(area))}</span>
    ${podcastStageChip}
    <span class="muted" style="font-size:11px;">Identity: <code>${esc(r.id)}</code>${r.row?` · row ${esc(r.row)}`:''}</span>
    ${classChip}
@@ -5658,14 +5587,14 @@ function editDialog(isNew,targetRole){
 
  const eyebrowEl=$('#dialog-eyebrow');
  const titleEl=$('#dialog-title');
- if(eyebrowEl)eyebrowEl.textContent=isNew?'New '+editingTab:`${editingTab} · ${source(r)}`;
+ if(eyebrowEl)eyebrowEl.textContent=isNew?'New '+sectionLabel(editingTab):`${sectionLabel(editingTab)} · ${source(r)}`;
  if(titleEl){
-  titleEl.textContent=isNew?'Create a record':'Edit: '+title(r,editingTab);
+  titleEl.textContent=isNew?(editingTab==='Members'?'Add member':(editingTab==='OrgStructure'?'Add responsibility':(['CRC','CRC - retired'].includes(editingTab)?'Add case':'Create a record'))):(editingTab==='Members'?'Edit member: '+title(r,editingTab):(editingTab==='OrgStructure'?'Edit responsibility: '+title(r,editingTab):(['CRC','CRC - retired'].includes(editingTab)?'Edit case: '+title(r,editingTab):'Edit: '+title(r,editingTab))));
   titleEl.setAttribute('tabindex','-1');
  }
 
  const backBtn=$('#detail-back-btn');
- if(backBtn)backBtn.textContent=`‹ Back to ${editingTab}`;
+ if(backBtn)backBtn.textContent=`‹ Back to ${sectionLabel(editingTab)}`;
 
  const secBtn=$('#dialog-secondary');
  const editBtn=$('#edit-record-btn');
@@ -5688,7 +5617,10 @@ function editDialog(isNew,targetRole){
   ${!isNew?calendarButton(r,editingTab):''}
   ${editingTab==='Morning Report'?staffingTools():''}
   <div class="record-form">
-   ${db[editingTab].columns.map(c=>`<label class="record-field">${esc(c)}${c===titles[editingTab]?' *':''}${renderFieldControl(c,r.fields[c]??'',r,c===titles[editingTab]?'required':'')}${urls(r,c).map(u=>anchor(u,'Open '+c)).join('')}</label>`).join('')}
+   ${db[editingTab].columns.map(c=>{
+     const labelText=(editingTab==='Members')?({'Subspecialty':'Training / specialty','Country':'Country of origin','Location':'Location / home'}[c]||c):c;
+     return `<label class="record-field">${esc(labelText)}${c===titles[editingTab]?' *':''}${renderFieldControl(c,r.fields[c]??'',r,c===titles[editingTab]?'required':'')}${urls(r,c).map(u=>anchor(u,'Open '+c)).join('')}</label>`;
+   }).join('')}
   </div>
   ${!isNew?`<button type="button" class="text-button" id="restore-record">${r.id.startsWith('local:')?(r.session?.count>1?'Remove entire multi-session local draft':'Remove this local draft'):'Restore original workbook values'}</button><div id="restore-confirm"></div>`:''}
  `;
@@ -6158,11 +6090,14 @@ window.addEventListener('hashchange',()=>{
     }
     t='Morning Report';
   }
+  if(t==='Sessions'||t==='sessions')t='Morning Report';
+  if(t==='People')t='OrgStructure';
   if(t!==tab&&(db[t]||['Home','Workspace'].includes(t)))navigate(t);
   else if(t==='Morning Report'&&mrParsed)render();
 });
 const loadWb = (typeof OfflineManager !== 'undefined' && OfflineManager.loadWorkbook) ? OfflineManager.loadWorkbook : () => fetch('workbook.json').then(r => { if (!r.ok) throw Error(); return r.json(); });
-loadWb().then(data=>{db=data;for(const[t,grp]of Object.entries(db))for(const r of grp.records)r._search=buildSearchIndex(r,t);let hash=decodeURIComponent(location.hash.slice(1));if(hash.startsWith('/'))hash=hash.slice(1);if(hash==='admin/issues'){if(isAdmin())tab='admin/issues';else tab='Home';}else if(hash==='profile/logbook'){tab='profile/logbook';}else if(db[hash]||['Home','Workspace'].includes(hash))tab=hash;
+loadWb().then(data=>{db=data;for(const[t,grp]of Object.entries(db))for(const r of grp.records)r._search=buildSearchIndex(r,t);let hash=decodeURIComponent(location.hash.slice(1));if(hash.startsWith('/'))hash=hash.slice(1);if(hash==='admin/issues'){if(isAdmin())tab='admin/issues';else tab='Home';}else if(hash==='profile/logbook'){tab='profile/logbook';}else if(hash==='Sessions'||hash==='sessions'){tab='Morning Report';}else if(hash==='People'){tab='OrgStructure';}else if(db[hash]||['Home','Workspace'].includes(hash))tab=hash;
+restoreSectionState(tab);
 const mrParsed=parseScheduleHash(hash);
 if(mrParsed){
   mrScheduleRangeMode=mrParsed.mode;
@@ -6176,7 +6111,7 @@ if(mrParsed){
   }
   tab='Morning Report';
 }
-if(tab==='Morning Report')mode='agenda';else if(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab])mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'cards':'table';sort=tab==='CPS Academy VMRs'?'date':'source';if(!mrParsed)filter=tab==='Morning Report'?'Upcoming':'All';render();if(storageIssue)toast('Browser storage could not be read. Export changes before leaving.')}).catch(()=>{
+if(tab==='Morning Report'&&mode!=='matrix')mode='agenda';else if(typeof HISTORICAL_SUMMARY_CONFIG !== 'undefined' && HISTORICAL_SUMMARY_CONFIG[tab])mode=(typeof window!=='undefined'&&window.innerWidth<=760)?'cards':'table';render();if(storageIssue)toast('Browser storage could not be read. Export changes before leaving.')}).catch(()=>{
   $('#page').innerHTML='<div class="empty-state"><h1>Could not load the workbook</h1><p>You appear to be offline without a cached copy, or the network request failed.</p><div style="margin-top:16px;"><button class="button primary" onclick="location.reload()">Retry connection</button></div></div>';
 });
 
@@ -6270,7 +6205,10 @@ function renderStaffTokens(namesArray, role, sessionId){
   const noteMatch=name.match(/^([^(]+)(\([^)]+\))$/);
   const main=noteMatch?noteMatch[1].trim():name;
   const note=noteMatch?` <span class="staff-token-note">${esc(noteMatch[2])}</span>`:'';
-  return `<button type="button" class="staff-token${isTP ? ' tp-token' : ''}${!userIsAdmin ? ' is-readonly-token' : ''}" data-token-name="${esc(name)}" data-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="${userIsAdmin ? `Click to swap or remove ${esc(main)}` : esc(main)}">${prefix}<span class="staff-token-name">${esc(main)}</span>${note}</button>`;
+  if (!userIsAdmin) {
+    return `<span class="staff-token${isTP ? ' tp-token' : ''} is-readonly-token" data-token-name="${esc(name)}" data-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="${esc(main)}">${prefix}<span class="staff-token-name">${esc(main)}</span>${note}</span>`;
+  }
+  return `<button type="button" class="staff-token${isTP ? ' tp-token' : ''}" data-token-name="${esc(name)}" data-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="Click to swap or remove ${esc(main)}">${prefix}<span class="staff-token-name">${esc(main)}</span>${note}</button>`;
  }).join('');
  const addBtn = userIsAdmin ? `<button type="button" class="staff-add-btn" data-add-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="Add another ${esc(role)}">＋ Add</button>` : '';
  return `<div class="staff-tokens-container" data-session-id="${esc(sessionId)}" data-role="${esc(role)}">${tokensHtml}${addBtn}</div>`;

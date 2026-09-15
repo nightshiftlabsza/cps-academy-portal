@@ -34,6 +34,26 @@ const { chromium } = require('playwright-core');
       const docOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1);
       assert.ok(docOverflow, `Horizontal overflow detected at ${width}px: scrollWidth=${await page.evaluate(() => document.documentElement.scrollWidth)}, innerWidth=${width}`);
 
+      // Confirm all eight fields remain visible on mobile
+      if (width === 390) {
+        const sampleCard = page.locator('.member-row').first();
+        const expectedFields = [
+          '.td-name',
+          '.td-sponsor',
+          '.td-social',
+          '.td-country',
+          '.td-birthday',
+          '.td-email',
+          '.td-location',
+          '.td-training'
+        ];
+        for (const selector of expectedFields) {
+          const el = sampleCard.locator(selector);
+          assert.equal(await el.count(), 1, `${selector} must exist on mobile card`);
+          assert.ok(await el.isVisible(), `${selector} must be visible on mobile card`);
+        }
+      }
+
       await context.close();
       assert.deepEqual(errors, []);
     }
@@ -44,96 +64,198 @@ const { chromium } = require('playwright-core');
     await p.goto(base + '/#Members');
     await p.locator('#page h1').waitFor();
 
-    // Overview index chips
-    const indexChips = p.locator('.member-index-chip');
-    assert.equal(await indexChips.count(), 6, 'Expected 6 overview chips (All, 4 cohorts, Source headings)');
+    // Verify 4 cohort section headers exist in continuous table
+    const partSection = p.locator('#cohort-participants');
+    const coreSection = p.locator('#cohort-core');
+    const leadersSection = p.locator('#cohort-leaders');
+    const inactiveSection = p.locator('#cohort-inactive');
 
-    // Verify 4 cohorts exist
-    const partSection = p.locator('#member-cohort-participants');
-    const coreSection = p.locator('#member-cohort-core');
-    const leadersSection = p.locator('#member-cohort-leaders');
-    const inactiveSection = p.locator('#member-cohort-inactive');
+    assert.equal(await partSection.count(), 1, 'Participants cohort header must exist');
+    assert.equal(await coreSection.count(), 1, 'Core team cohort header must exist');
+    assert.equal(await leadersSection.count(), 1, 'Leaders cohort header must exist');
+    assert.equal(await inactiveSection.count(), 1, 'Marked inactive cohort header must exist');
 
-    assert.equal(await partSection.count(), 1, 'Participants cohort section must exist');
-    assert.equal(await coreSection.count(), 1, 'Core team cohort section must exist');
-    assert.equal(await leadersSection.count(), 1, 'Leaders cohort section must exist');
-    assert.equal(await inactiveSection.count(), 1, 'Marked inactive cohort section must exist');
+    // Verify exact cohort member counts in DOM
+    const memberRows = p.locator('.member-row');
+    assert.equal(await memberRows.count(), 148, 'Must render exactly 148 visible substantive member rows');
 
-    // Source heading buttons on cohort headers
-    const coreHeadingBtn = p.locator('#member-cohort-core .member-heading-btn');
-    assert.equal(await coreHeadingBtn.count(), 1, 'Core team must link to source heading');
-    await coreHeadingBtn.click();
-    await p.locator('#detail-dialog[open]').waitFor();
-    const dialogTitle = await p.locator('#dialog-title').innerText();
-    assert.equal(dialogTitle, 'Core team members', 'Dialog title must match heading record');
-    await p.keyboard.press('Escape');
+    // Verify all 6 structural records are excluded from visible directory
+    const structuralIds = ['Members:80', 'Members:82', 'Members:146', 'Members:148', 'Members:189', 'Members:191'];
+    for (const sid of structuralIds) {
+      assert.equal(await p.locator(`.member-row[data-id="${sid}"]`).count(), 0, `${sid} must be excluded from table rows`);
+    }
 
-    // In-view name search: "Julia"
+    // Verify legacy controls are completely gone
+    assert.equal(await p.locator('#member-cohort-select').count(), 0, 'No cohort dropdown filter wall');
+    assert.equal(await p.locator('#member-country-select').count(), 0, 'No country dropdown filter wall');
+    assert.equal(await p.locator('#member-sort-select').count(), 0, 'No sort dropdown filter wall');
+    assert.equal(await p.locator('.member-index-chip').count(), 0, 'No legacy index chips');
+    assert.equal(await p.locator('#prev, #next, .pagination').count(), 0, 'No pagination');
+    assert.equal(await p.locator('[data-star]').count(), 0, 'No stars');
+    assert.equal(await p.locator('.member-actions-wrap, th:has-text("Action")').count(), 0, 'No Action column');
+    assert.equal(await p.locator('button:has-text("Open details")').count(), 0, 'No repeated Open details buttons');
+
+    // Verify 8 column headers
+    const ths = p.locator('.member-table thead th');
+    assert.equal(await ths.count(), 8, 'Must have exactly 8 desktop columns');
+    const thTexts = (await ths.allInnerTexts()).map(t => t.toLowerCase());
+    assert.ok(thTexts.some(t => t.includes('name')));
+    assert.ok(thTexts.some(t => t.includes('sponsor')));
+    assert.ok(thTexts.some(t => t.includes('social handles')));
+    assert.ok(thTexts.some(t => t.includes('country of origin')));
+    assert.ok(thTexts.some(t => t.includes('birthday')));
+    assert.ok(thTexts.some(t => t.includes('email')));
+    assert.ok(thTexts.some(t => t.includes('location / home')));
+    assert.ok(thTexts.some(t => t.includes('training / specialty')));
+
+    // Birthday sorting: ascending and descending order, missing values at bottom
+    const bdayHeader = p.locator('.sortable-th[data-sort="Birthday"]');
+    await bdayHeader.click();
+    await p.waitForTimeout(150);
+
+    const partRowsAsc = p.locator('#cohort-participants ~ tr.member-row');
+    const partCount = 15;
+    const firstPartBdayAsc = await partRowsAsc.first().locator('.td-birthday').innerText();
+    const lastPartBdayAsc = await partRowsAsc.nth(partCount - 1).locator('.td-birthday').innerText();
+    assert.equal(lastPartBdayAsc, '—', 'Missing birthday must sort to bottom of cohort in ascending sort');
+
+    await bdayHeader.click();
+    await p.waitForTimeout(150);
+
+    const partRowsDesc = p.locator('#cohort-participants ~ tr.member-row');
+    const firstPartBdayDesc = await partRowsDesc.first().locator('.td-birthday').innerText();
+    const lastPartBdayDesc = await partRowsDesc.nth(partCount - 1).locator('.td-birthday').innerText();
+    assert.notEqual(firstPartBdayAsc, firstPartBdayDesc, 'Descending sort must invert dates relative to ascending sort');
+    assert.equal(lastPartBdayDesc, '—', 'Missing birthday must remain at bottom of cohort in descending sort');
+
+    // Reset sort by clicking Name
+    const nameHeader = p.locator('.sortable-th[data-sort="Name"]');
+    await nameHeader.click();
+    await p.waitForTimeout(100);
+
+    // In-view search: "Julia"
     const searchInput = p.locator('#member-search-input');
     await searchInput.fill('Julia');
     await p.waitForTimeout(100);
 
-    const inactiveText = await inactiveSection.innerText();
-    assert.ok(inactiveText.includes('Julia Schlender'), 'Search should locate Julia Schlender in inactive cohort');
+    const filteredRowCount = await p.locator('.member-row').count();
+    assert.ok(filteredRowCount > 0 && filteredRowCount < 148, 'Search should reduce visible rows');
+    const tableText = await p.locator('#member-directory-table').innerText();
+    assert.ok(tableText.includes('Julia Schlender'), 'Search locates Julia Schlender');
     const resultsCountSearch = await p.locator('.results-count').innerText();
-    assert.ok(resultsCountSearch.includes('Showing'), 'Results count must indicate filtered results');
+    assert.ok(resultsCountSearch.includes('Julia'), 'Results meta reflects search query');
+
+    // Search preservation: closing detail modal preserves search query and filtered count
+    const juliaBtn = p.locator('.member-name-btn').first();
+    await juliaBtn.click();
+    await p.locator('#detail-dialog[open]').waitFor();
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(100);
+
+    assert.equal(await searchInput.inputValue(), 'Julia', 'Search query preserved after closing detail modal');
+    assert.equal(await p.locator('.member-row').count(), filteredRowCount, 'Filtered row count preserved after closing modal');
+
+    // Search preservation: saving an edit preserves search query and filtered count
+    await juliaBtn.click();
+    await p.locator('#detail-dialog[open]').waitFor();
+    await p.locator('#edit-record-btn').click();
+    await p.locator('#dialog-primary').waitFor();
+    await p.locator('#dialog-primary').click();
+    await p.waitForTimeout(150);
+
+    assert.equal(await searchInput.inputValue(), 'Julia', 'Search query preserved after saving record');
+    assert.equal(await p.locator('.member-row').count(), filteredRowCount, 'Filtered row count preserved after saving record');
 
     // Clear search
     await p.locator('#member-clear-input').click();
     assert.equal(await searchInput.inputValue(), '');
+    assert.equal(await p.locator('.member-row').count(), 148, 'Clearing search restores 148 rows');
 
-    // Cohort filter dropdown: select Leaders
-    await p.locator('#member-cohort-select').selectOption('Leaders');
-    const leadersFilteredCount = await p.locator('.results-count').innerText();
-    assert.ok(leadersFilteredCount.includes('Showing 36 named rows'), `Expected 36 Leaders: ${leadersFilteredCount}`);
+    // Scroll preservation: closing details preserves scroll position
+    await p.evaluate(() => window.scrollTo(0, 1000));
+    await p.waitForTimeout(100);
 
-    // Reset filters
-    await p.locator('#member-reset-filters').click();
-    assert.equal(await p.locator('#member-cohort-select').inputValue(), 'all');
+    const scrolledMemberBtn = p.locator('.member-row .member-name-btn').nth(25);
+    await scrolledMemberBtn.click();
+    await p.locator('#detail-dialog[open]').waitFor();
+    const scrollWhenOpened = await p.evaluate(() => window.scrollY);
+    assert.ok(scrollWhenOpened > 800, 'Page must be scrolled down when modal opened');
 
-    // Country filter: select Spain
-    await p.locator('#member-country-select').selectOption('Spain');
-    const spainFilteredCount = await p.locator('.results-count').innerText();
-    assert.ok(spainFilteredCount.includes('Showing'), 'Filtered count line should appear for Spain');
-    await p.locator('#member-reset-filters').click();
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(100);
 
-    // Sort order: Name A–Z
-    await p.locator('#member-sort-select').selectOption('az');
-    const azNav = p.locator('.member-az-nav');
-    assert.equal(await azNav.count(), 1, 'A–Z jump navigation must appear');
-    await p.locator('#member-sort-select').selectOption('source');
+    const scrollAfterClose = await p.evaluate(() => window.scrollY);
+    assert.ok(Math.abs(scrollAfterClose - scrollWhenOpened) < 50, `Scroll preserved on modal close: opened=${scrollWhenOpened}, afterClose=${scrollAfterClose}`);
 
-    // Star/Pin toggle
-    const starBtn = p.locator('[data-star="Members:57"]').first();
-    await starBtn.click();
-    assert.ok(await starBtn.evaluate(el => el.classList.contains('is-starred')), 'Star button toggles active');
+    // Scroll preservation after saving an edit
+    await scrolledMemberBtn.click();
+    await p.locator('#detail-dialog[open]').waitFor();
+    const scrollBeforeSave = await p.evaluate(() => window.scrollY);
+    await p.locator('#edit-record-btn').click();
+    await p.locator('#dialog-primary').waitFor();
+    await p.locator('#dialog-primary').click();
+    await p.waitForTimeout(150);
 
-    // Find this name in teams button
-    const findInTeamsBtn = p.locator('.find-in-teams-btn[data-member-name="Marino Rodriguez"]').first();
-    assert.equal(await findInTeamsBtn.count(), 1, 'Find in teams button must exist');
-    await findInTeamsBtn.click();
+    const scrollAfterSave = await p.evaluate(() => window.scrollY);
+    assert.ok(Math.abs(scrollAfterSave - scrollBeforeSave) < 50, `Scroll preserved after saving: beforeSave=${scrollBeforeSave}, afterSave=${scrollAfterSave}`);
 
-    // Verifies navigation to Teams & leadership with search query prefilled
-    await p.locator('#page h1:has-text("Teams & leadership")').waitFor();
-    const orgQuery = await p.locator('#org-search-input').inputValue();
-    assert.equal(orgQuery, 'Marino Rodriguez', 'Find in teams pre-fills exact name query in OrgStructure');
+    // Interaction: clicking member Name opens details modal
+    const firstMemberBtn = p.locator('.member-name-btn').first();
+    const firstName = (await firstMemberBtn.innerText()).trim();
+    await firstMemberBtn.click();
+    await p.locator('#detail-dialog[open]').waitFor();
 
-    // Return to Members and verify structural drawer
-    await p.goto(base + '/#Members');
-    await p.locator('#page h1:has-text("Members")').waitFor();
-    await p.locator('#toggle-structural-btn').click();
-    const drawer = p.locator('#member-structural-drawer');
-    assert.ok(await drawer.evaluate(el => el.open), 'Structural drawer toggles open');
-    const drawerText = await drawer.innerText();
-    assert.ok(drawerText.includes('Row 80'), 'Drawer includes Row 80');
-    assert.ok(drawerText.includes('Row 82'), 'Drawer includes Row 82');
-    assert.ok(drawerText.includes('Row 146'), 'Drawer includes Row 146');
-    assert.ok(drawerText.includes('Row 148'), 'Drawer includes Row 148');
-    assert.ok(drawerText.includes('Row 189'), 'Drawer includes Row 189');
-    assert.ok(drawerText.includes('Row 191'), 'Drawer includes Row 191');
+    const dialogTitle = await p.locator('#dialog-title').innerText();
+    assert.ok(dialogTitle.includes(firstName), `Dialog title must include ${firstName}`);
+
+    const editBtn = p.locator('#edit-record-btn');
+    assert.equal(await editBtn.innerText(), 'Edit member', 'Modal button must be labeled "Edit member"');
+
+    // Verify detail labels in modal
+    const modalText = (await p.locator('#dialog-content').innerText()).toLowerCase();
+    assert.ok(modalText.includes('country of origin'), 'Modal displays Country of origin');
+    assert.ok(modalText.includes('training / specialty'), 'Modal displays Training / specialty');
+    assert.ok(modalText.includes('location / home'), 'Modal displays Location / home');
+    assert.ok(modalText.includes('birthday'), 'Modal displays Birthday');
+
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(100);
+
+    // Edit a member, save, reload, and verify persistence
+    const targetMemberBtn = p.locator('.member-row[data-id="Members:57"] .member-name-btn');
+    await targetMemberBtn.click();
+    await p.locator('#detail-dialog[open]').waitFor();
+
+    await p.locator('#edit-record-btn').click();
+    await p.locator('#dialog-primary').waitFor();
+
+    const locInput = p.locator('#dialog-content [data-field="Location"]');
+    await locInput.fill('Chicago, IL (Verified Local Edit)');
+    await p.locator('#dialog-primary').click();
+    await p.waitForTimeout(200);
+
+    const updatedRow = p.locator('.member-row[data-id="Members:57"]');
+    assert.ok(await updatedRow.locator('.local-chip').count() > 0, 'Local changes chip present before reload');
+    assert.ok((await updatedRow.locator('.td-location').innerText()).includes('Verified Local Edit'), 'Updated location present before reload');
+
+    // Reload page and verify persistence
+    await p.reload();
+    await p.locator('#page h1').waitFor();
+    const reloadedRow = p.locator('.member-row[data-id="Members:57"]');
+    assert.ok(await reloadedRow.locator('.local-chip').count() > 0, 'Local changes chip persists after reload');
+    assert.ok((await reloadedRow.locator('.td-location').innerText()).includes('Verified Local Edit'), 'Edited location persists after reload');
+
+    // Clean up test edit by restoring original workbook values
+    await reloadedRow.locator('.member-name-btn').click();
+    await p.locator('#detail-dialog[open]').waitFor();
+    await p.locator('#edit-record-btn').click();
+    await p.locator('#restore-record').waitFor();
+    await p.locator('#restore-record').click();
+    await p.locator('#confirm-restore').click();
+    await p.waitForTimeout(200);
 
     await ctx.close();
-    console.log('browser-members-directory: all 1440, 820, 390, 320px responsive, cohort, heading, search, filter, and cross-reference checks passed.');
+    console.log('browser-members-directory: all 1440, 820, 390, 320px responsive, cohort, heading, search, filter, birthday sorting, edit persistence, scroll preservation, and mobile field checks passed.');
   } finally {
     await browser.close();
     await new Promise(r => server.close(r));

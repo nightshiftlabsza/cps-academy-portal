@@ -45,10 +45,10 @@ test('Members reconciliation accounts for 148 named rows and 6 structural entrie
   assert.equal(counts.unknowns, 0, 'No unknowns in clean snapshot Members');
 
   // Verify cohort breakdown
-  assert.equal(counts.cohortCounts['Participants'], 14, '14 named rows in Participants cohort');
+  assert.equal(counts.cohortCounts['Participants'], 15, '15 named rows in Participants cohort');
   assert.equal(counts.cohortCounts['Core team'], 54, '54 named rows in Core team cohort');
   assert.equal(counts.cohortCounts['Leaders'], 36, '36 named rows in Leaders cohort');
-  assert.equal(counts.cohortCounts['Marked inactive in source'], 44, '44 named rows marked inactive in source');
+  assert.equal(counts.cohortCounts['Marked inactive in source'], 43, '43 named rows marked inactive in source');
 
   // Verify all 6 structural IDs
   const structuralIds = ['Members:80', 'Members:82', 'Members:146', 'Members:148', 'Members:189', 'Members:191'];

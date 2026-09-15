@@ -78,6 +78,18 @@ test('renderStaffTokens outputs interactive token buttons, notes, and add button
   assert(html.includes('data-add-role="Facilitator"'), 'Add button has role attribute');
 });
 
+test('renderStaffTokens outputs read-only static spans for non-admins', () => {
+  const h = createHarness();
+  h.isAdmin = () => false;
+  const tokens = ['Alice', 'Bob'];
+  const html = h.renderStaffTokens(tokens, 'Facilitator', 'session:123');
+
+  assert(html.includes('<span class="staff-token is-readonly-token"'), 'Static span rendered instead of button');
+  assert(!html.includes('<button type="button" class="staff-token'), 'No button rendered for token');
+  assert(!html.includes('class="staff-add-btn"'), 'No add button rendered for non-admin');
+  assert(!html.includes('Click to swap or remove'), 'No swap or remove prompt in title');
+});
+
 test('swapStaffToken updates target person, preserves co-staff, and persists to workspace.edits', () => {
   const h = createHarness();
   const session = {

@@ -53,8 +53,20 @@ const { chromium } = require('playwright-core');
     await p.waitForTimeout(100);
 
     // Verify Page 2 is displayed
-    let paginationText = await p.locator('.pagination span').innerText();
+    let paginationText = await p.locator('#page-select option:checked').innerText();
     assert.ok(paginationText.includes('Page 2'), `Expected Page 2 in VMRs: ${paginationText}`);
+
+    // Verify dropdown page selection changes page
+    await p.locator('#page-select').selectOption('2');
+    await p.waitForTimeout(100);
+    const page3Text = await p.locator('#page-select option:checked').innerText();
+    assert.ok(page3Text.includes('Page 3'), `Expected Page 3 after dropdown selection: ${page3Text}`);
+
+    // Verify top dropdown page selection changes page back to Page 2
+    await p.locator('#page-select-top').selectOption('1');
+    await p.waitForTimeout(100);
+    paginationText = await p.locator('#page-select option:checked').innerText();
+    assert.ok(paginationText.includes('Page 2'), `Expected Page 2 after top dropdown selection: ${paginationText}`);
 
     // Click a record to set anchor
     const firstOpenBtn = p.locator('[data-open]').first();
@@ -64,8 +76,7 @@ const { chromium } = require('playwright-core');
 
     // B. Navigate to OrgStructure
     await p.locator('#desktop-nav [data-nav="People"]').click();
-    await p.locator('[data-go="OrgStructure"]').first().click();
-    await p.locator('#page h1:has-text("Teams & leadership")').waitFor();
+    await p.locator('#page h1:has-text("Org Structure")').waitFor();
 
     // Expand a group in OrgStructure
     const orgGroup = p.locator('#org-group-journal');
@@ -75,11 +86,10 @@ const { chromium } = require('playwright-core');
 
     // C. Browser Back -> should return to CPS Academy VMRs Page 2
     await p.goBack();
-    await p.goBack();
     await p.locator('#page h1:has-text("CPS Academy VMRs")').waitFor();
     await p.waitForTimeout(150);
 
-    paginationText = await p.locator('.pagination span').innerText();
+    paginationText = await p.locator('#page-select option:checked').innerText();
     assert.ok(paginationText.includes('Page 2'), `Expected restored Page 2 after Back navigation: ${paginationText}`);
 
     // D. Global search from filtered view -> Return restores originating view
@@ -131,7 +141,7 @@ const { chromium } = require('playwright-core');
     await p.locator('#secondary-clear-btn').click();
     await p.waitForTimeout(100);
 
-    const clearedPagination = await p.locator('.pagination span').innerText();
+    const clearedPagination = await p.locator('#page-select option:checked').innerText();
     assert.ok(clearedPagination.includes('Page 1'), 'Clear filters must reset to Page 1');
     const clearedFilter = await p.locator('#scope-select').inputValue();
     assert.equal(clearedFilter, 'All', 'Clear filters must reset filter to All');

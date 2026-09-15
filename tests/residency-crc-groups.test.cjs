@@ -147,3 +147,44 @@ test('Retired CRC: locally edited placeholder is promoted to substantive case an
   assert.equal(counts.namedEntries, 401, 'Substantive case count must increment to 401');
   assert.equal(counts.placeholders, 1, 'Placeholder count must decrement to 1');
 });
+
+test('Phase 4: groups structure renames Sessions to Morning Report, moves CRC, and restricts People', () => {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  const slice = appCode.slice(
+    appCode.indexOf('const groups='),
+    appCode.indexOf('const recordSearchCache = new Map();')
+  ) + '; this.groups = groups; this.sectionLabels = sectionLabels; this.sectionLabel = sectionLabel; this.ORG_GROUPS = ORG_GROUPS;';
+  vm.runInContext(slice, sandbox);
+
+  // 1. Morning Report top-level group
+  assert.ok(sandbox.groups['Morning Report'], 'Top-level group must be named "Morning Report"');
+  assert.equal(sandbox.groups['Sessions'], undefined, '"Sessions" key must no longer exist in groups');
+  assert.deepEqual([...sandbox.groups['Morning Report']], [
+    'Morning Report',
+    'CPS Academy VMRs',
+    'Special VMRs',
+    'Student Forum',
+    'Residency Programs',
+    'Leader of the Week',
+    'CRC',
+    'CRC - retired'
+  ], 'Morning Report group must contain all 6 session sections plus active CRC and retired CRC');
+
+  // 2. People group restricted to OrgStructure (first) and Members (second)
+  assert.deepEqual([...sandbox.groups['People']], ['OrgStructure', 'Members'], 'People group must contain only OrgStructure (1st) and Members (2nd)');
+
+  // 3. Visible labels
+  assert.equal(sandbox.sectionLabel('CRC'), 'Case Review Committee (CRC)');
+  assert.equal(sandbox.sectionLabel('CRC - retired'), 'Case Review Committee (CRC) — Retired');
+  assert.equal(sandbox.sectionLabel('OrgStructure'), 'Org Structure');
+
+  // 4. Case Review Committee Leadership remains strictly within OrgStructure VMR
+  const vmrGroup = sandbox.ORG_GROUPS.find(g => g.id === 'vmr');
+  assert.ok(vmrGroup, 'VMR group must exist in ORG_GROUPS');
+  assert.ok(vmrGroup.recordIds.includes('OrgStructure:9'), 'OrgStructure:9 (Case Review Committee Leadership) must remain in VMR group');
+  const crcLeadershipRec = workbook['OrgStructure'].records.find(r => r.id === 'OrgStructure:9');
+  assert.ok(crcLeadershipRec);
+  assert.equal(crcLeadershipRec.fields['Team / responsibility'], 'Case Review Committee Leadership');
+});
+

@@ -372,3 +372,15 @@ test('Storage isolation: sessionStorage mirror uses cps-browsing-state-v1 and le
   assert.equal(h.localStorage.getItem('cps-hub-workspace-v2'), null);
   assert.equal(h.localStorage.getItem('cps-hub-backup-v2'), null);
 });
+
+test('Migration: legacy cards and table modes for Morning Report are migrated to agenda', () => {
+  const h = createHarness();
+  h.sessionStorage.setItem(h.BROWSING_STORAGE_KEY, JSON.stringify({
+    'Morning Report': { mode: 'cards', filter: 'All history' }
+  }));
+  h.restoreSectionState('Morning Report');
+  assert.equal(h.getStateVariables().mode, 'agenda');
+  const stored = JSON.parse(h.sessionStorage.getItem(h.BROWSING_STORAGE_KEY));
+  assert.equal(stored['Morning Report'].mode, 'agenda');
+});
+

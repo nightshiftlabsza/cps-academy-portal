@@ -328,7 +328,7 @@ test('Defect 9: Schedule convention describes "Monday–Sunday, using workbook d
   assert.ok(!navHtml.includes('UTC source date'), 'Week navigator must not label source dates as UTC');
 });
 
-test('Defect 10: Retain reconciled member cohort counts (148 named rows: 14 Participants, 54 Core, 36 Leaders, 44 Inactive; 6 structural = 154 total)', () => {
+test('Defect 10: Retain reconciled member cohort counts (148 named rows: 15 Participants, 54 Core, 36 Leaders, 43 Inactive; 6 structural = 154 total)', () => {
   const h = createFullHarness({ currentTab: 'Members' });
   const memberRecords = h.records('Members');
   assert.equal(memberRecords.length, 154, 'Total member records must be 154');
@@ -338,10 +338,10 @@ test('Defect 10: Retain reconciled member cohort counts (148 named rows: 14 Part
   assert.equal(counts.namedEntries, 148, 'Named entries must be 148');
   assert.equal(counts.sourceHeadings, 6, 'Structural entries must be 6');
 
-  assert.equal(counts.cohortCounts['Participants'], 14, 'Participants cohort must be 14');
+  assert.equal(counts.cohortCounts['Participants'], 15, 'Participants cohort must be 15');
   assert.equal(counts.cohortCounts['Core team'], 54, 'Core team cohort must be 54');
   assert.equal(counts.cohortCounts['Leaders'], 36, 'Leaders cohort must be 36');
-  assert.equal(counts.cohortCounts['Marked inactive in source'], 44, 'Inactive cohort must be 44');
+  assert.equal(counts.cohortCounts['Marked inactive in source'], 43, 'Inactive cohort must be 43');
 });
 
 // ─── Issue 1 regression: historical week jump must stay bounded ───────────────

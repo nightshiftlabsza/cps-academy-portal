@@ -34,6 +34,14 @@ const { chromium } = require('playwright-core');
         `CRC - retired overflow at ${width}px`
       );
 
+      // Active CRC view
+      await page.goto(base + '/#CRC');
+      await page.locator('#page h1').waitFor();
+      assert.ok(
+        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+        `Active CRC overflow at ${width}px`
+      );
+
       await context.close();
       assert.deepEqual(errors, [], `Errors at ${width}px: ${errors.join(', ')}`);
     }
@@ -114,6 +122,70 @@ const { chromium } = require('playwright-core');
 
     await ctx.close();
     await mobCtx.close();
+
+    // 5. Phase 4 Navigation & CRC Verification
+    const navCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const np = await navCtx.newPage();
+
+    // A. Desktop navigation buttons
+    await np.goto(base + '/#Home');
+    await np.locator('#page h1').waitFor();
+    const mrNavBtn = np.locator('#desktop-nav [data-nav="Morning Report"]');
+    assert.equal(await mrNavBtn.count(), 1, 'Desktop nav must contain "Morning Report" button');
+    assert.equal(await np.locator('#desktop-nav [data-nav="Sessions"]').count(), 0, 'Desktop nav must not contain "Sessions" button');
+
+    // B. Direct link #Sessions redirects to Morning Report
+    await np.goto(base + '/#Sessions');
+    await np.locator('#page h1').waitFor();
+    const currentH1 = await np.locator('#page h1').innerText();
+    assert.equal(currentH1, 'Morning Report', 'Direct route #Sessions must redirect to Morning Report');
+
+    // C. Area tabs on Morning Report include both active and retired CRC with consistent labels
+    const mrTabs = await np.locator('.area-tabs button').allInnerTexts();
+    assert.deepEqual(mrTabs, [
+      'Morning Report',
+      'CPS Academy VMRs',
+      'Special VMRs',
+      'Student Forum',
+      'Residency Programs',
+      'Leader of the Week',
+      'Case Review Committee (CRC)',
+      'Case Review Committee (CRC) — Retired'
+    ], 'Morning Report group must contain all 8 sections with consistent labels');
+
+    // D. People group contains strictly Org Structure and Members
+    await np.locator('#desktop-nav [data-nav="People"]').click();
+    await np.waitForTimeout(100);
+    await np.locator('#page h1').waitFor();
+    const peopleH1 = await np.locator('#page h1').innerText();
+    assert.equal(peopleH1, 'Org Structure', 'Clicking People must open Org Structure as first/default');
+    const peopleTabs = await np.locator('.area-tabs button').allInnerTexts();
+    assert.deepEqual(peopleTabs, ['Org Structure', 'Members'], 'People area tabs must contain only Org Structure and Members');
+
+    // E. Navigate to active CRC via tab and verify title
+    await np.goto(base + '/#CRC');
+    await np.locator('#page h1').waitFor();
+    const crcH1 = await np.locator('#page h1').innerText();
+    assert.equal(crcH1, 'Case Review Committee (CRC)', 'Active CRC view must display consistent label');
+
+    // F. Navigate to retired CRC via tab and verify title
+    await np.goto(base + '/#CRC%20-%20retired');
+    await np.locator('#page h1').waitFor();
+    const crcRetH1 = await np.locator('#page h1').innerText();
+    assert.equal(crcRetH1, 'Case Review Committee (CRC) — Retired', 'Retired CRC view must display consistent label');
+
+    // G. Mobile bottom nav verification
+    const mobNavCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const mnp = await mobNavCtx.newPage();
+    await mnp.goto(base + '/#Home');
+    await mnp.locator('#page h1').waitFor();
+    const mobMrBtn = mnp.locator('#mobile-nav [data-nav="Morning Report"]');
+    assert.equal(await mobMrBtn.count(), 1, 'Mobile nav must have "Morning Report" button');
+    assert.equal(await mnp.locator('#mobile-nav [data-nav="Sessions"]').count(), 0, 'Mobile nav must not have "Sessions" button');
+
+    await navCtx.close();
+    await mobNavCtx.close();
+
     console.log('browser-residency-crc-groups: All responsive and functional checks passed successfully.');
   } finally {
     await browser.close();
