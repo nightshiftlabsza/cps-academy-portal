@@ -31,6 +31,15 @@ function createServer(){return http.createServer((req,res)=>{
      return;
    }
  }
+ if(name==='api/sync-webhook'){
+   try {
+     const handler = require('../api/sync-webhook.js');
+     return handler(req, res);
+   } catch (e) {
+     res.writeHead(500).end(JSON.stringify({ error: 'SERVER_ERROR', message: e.message }));
+     return;
+   }
+ }
  if(!['GET','HEAD'].includes(req.method)){res.writeHead(405).end();return}
  if(!allowed.has(name)){res.writeHead(404).end('Not found');return}
  fs.readFile(path.join(root,name),(error,data)=>{if(error){res.writeHead(500).end('File unavailable');return}const headers={'Content-Type':types[path.extname(name)]+'; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};if(name==='sw.js')headers['Service-Worker-Allowed']='/';res.writeHead(200,headers);res.end(req.method==='HEAD'?undefined:data)});

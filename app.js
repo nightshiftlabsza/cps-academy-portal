@@ -6296,6 +6296,8 @@ async function silentBackgroundReconcile() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        schemaVersion: 1,
+        operation: 'readSnapshot',
         requestId: `poll-${Date.now()}`,
         knownSnapshotHash: lastKnownHash || undefined
       })
@@ -6303,7 +6305,7 @@ async function silentBackgroundReconcile() {
     if (!res.ok) return;
     const data = await res.json();
     if (data && data.snapshotHash) {
-      if (lastKnownHash && data.snapshotHash !== lastKnownHash && data.workbook) {
+      if (data.modified !== false && data.workbook) {
         for (const [t, grp] of Object.entries(data.workbook)) {
           if (db[t]) {
             db[t] = grp;
@@ -6592,7 +6594,7 @@ function staffingSlot(r,role){
   const val=staffingRoleValue(r,role);
   const tokens=tokenizeStaff(val);
   if(tokens.length)return `<div class="matrix-slot-assigned staffing-people${isTP ? ' tp-assigned-slot' : ''}">${renderStaffTokens(tokens,role,r.id)}</div>`;
-  return `<span class="matrix-slot-assigned staffing-people" title="${esc(val)}">${isTP ? '📝 ' : ''}${esc(val||'Not scheduled')}</span>`;
+  return `<span class="matrix-slot-assigned staffing-people" title="${esc(val)}">${esc(val||'Not scheduled')}</span>`;
  }
  const timing=SessionCore.parseSessionTime(r);
  const isUncertain=(r.flags&&r.flags.some(f=>/moved|rescheduled|tentative|uncertain|verify|tbd/i.test(f)))||(r.session?.unresolved&&r.session.unresolved.length>0)||/moved|tentative|\?|tbd/i.test(r.fields.Date||'')||timing.status!=='resolved';
@@ -6656,19 +6658,150 @@ function matrixView(rr){
  const windowToggleHtml = flatItems.length > threshold ? `<div class="window-toggle-bar" style="display:none;" aria-hidden="true"><button type="button" id="matrix-window-toggle-btn">Load all records</button></div>` : '';
  return `<section class="matrix-view">${scheduleSummary(rr)}${windowToggleHtml}<div class="matrix-card"><div class="matrix-container"><table class="matrix-table"><thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows||'<tr><td colspan="7">No dated sessions match these filters.</td></tr>'}</tbody></table></div></div>${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates</h2>${unresolved.map(r=>agendaCard(r,true)).join('')}</section>`:''}</section>`;
 }
+function getNextSevenVMRs(){
+ const todayStr=typeof today==='function'?today():'2026-09-15';
+ const allMr=records('Morning Report');
+ const allSplit=allMr.flatMap(r=>typeof SessionCore!=='undefined'?SessionCore.splitMorningReport(r):[r]);
+ const upcoming=allSplit.filter(r=>{
+  const d=recordDate(r);
+  return d&&d>=todayStr;
+ }).sort((a,b)=>(recordDate(a)||'').localeCompare(recordDate(b)||''));
+ if(upcoming.length>=7)return upcoming.slice(0,7);
+ if(upcoming.length>0)return upcoming;
+ const allResolved=allSplit.filter(r=>Boolean(recordDate(r))).sort((a,b)=>(recordDate(a)||'').localeCompare(recordDate(b)||''));
+ return allResolved.slice(-7);
+}
+function mrFilledStats(sessionList){
+ let total=0,filled=0;
+ for(const r of sessionList){
+  for(const role of ['Facilitator','Presenter','Scribe','Teaching Points']){
+   total++;
+   if(!mrGaps(r).includes(role))filled++;
+  }
+ }
+ const pct=total?Math.round(filled/total*100):0;
+ return {filled,total,pct};
+}
+function editorialCardRail(r){
+ const gaps=mrGaps(r);
+ const fac=(r.fields.Facilitator||'').trim();
+ if(/canceled|cancelled/i.test(fac))return 'rail-canceled';
+ const d=SessionCore.parseDate(dateValue(r));
+ const urgency=getStaffingUrgency(d);
+ if(urgency==='urgent')return 'rail-urgent';
+ if(gaps.length>0)return 'rail-warning';
+ return '';
+}
+function editorialCardStatus(r){
+ const gaps=mrGaps(r);
+ if(gaps.length===0)return `<span class="mr-card-status-tag status-ready"><span class="mr-card-status-dot" style="background:var(--brand)"></span> Ready</span>`;
+ const d=SessionCore.parseDate(dateValue(r));
+ const urgency=getStaffingUrgency(d);
+ const dotBg=urgency==='urgent'?'var(--urgent-fg)':'var(--warning-fg)';
+ const label=gaps.length===1?'1 Slot Open':`${gaps.length} Slots Open`;
+ return `<span class="mr-card-status-tag status-open"><span class="mr-card-status-dot" style="background:${dotBg}"></span> ${label}</span>`;
+}
+function editorialCard(r){
+ const dStr=recordDate(r);
+ let dayNum='?',wday='TBD',mon='',timeStr=SessionCore.formatSessionTime(r);
+ if(dStr){
+  const dObj=new Date(dStr+'T12:00:00Z');
+  if(!Number.isNaN(dObj.getTime())){
+   dayNum=dObj.getUTCDate();
+   wday=dObj.toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'}).toUpperCase();
+   mon=dObj.toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'}).toUpperCase();
+  }
+ }
+ const railClass=editorialCardRail(r);
+ const gaps=mrGaps(r);
+ const sessionType=r.fields.Type||'Morning Report';
+ const statusHtml=editorialCardStatus(r);
+ const titleText=r.fields['Topic / Case']||title(r,'Morning Report')||sessionType;
+ const staffingCells=['Facilitator','Presenter','Scribe','Teaching Points'].map(role=>{
+  const isVacant=gaps.includes(role);
+  return `<div class="mr-role-cell"><span class="mr-role-label${isVacant?' role-vacant':''}">${role==='Teaching Points'?'TEACHING PTS':role.toUpperCase()}</span><div class="mr-role-value">${staffingSlot(r,role)}</div></div>`;
+ }).join('');
+ return `<article class="mr-card" data-record-id="${esc(r.id)}">
+  <div class="mr-card-rail ${railClass}"></div>
+  <div class="mr-card-tier1">
+   <div class="mr-card-date">
+    <div class="mr-card-day-num${gaps.length?' day-warning':''}">${dayNum}</div>
+    <div class="mr-card-day-meta">
+     <span class="mr-card-weekday">${esc(wday)}</span>
+     <span class="mr-card-month">${esc(mon)}</span>
+     <div class="mr-card-time">${esc(timeStr)}</div>
+    </div>
+   </div>
+   <span class="mr-card-type-tag">${esc(sessionType)}</span>
+   ${statusHtml}
+   <h3 class="mr-card-title">${esc(titleText)}</h3>
+   <div class="mr-card-tags"></div>
+  </div>
+  <div class="mr-card-content">
+   <div class="mr-card-tags"><span class="mr-card-type-tag">${esc(sessionType)}</span>${statusHtml}</div>
+   <h3 class="mr-card-title">${esc(titleText)}</h3>
+  </div>
+  <div class="mr-card-staffing">${staffingCells}</div>
+  <div class="mr-card-actions">
+   ${sessionNotice(r)}
+   <button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details">Details</button>
+   <button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button>
+  </div>
+ </article>`;
+}
 function agendaView(rr){
  const {weeks,unresolved}=scheduleGroups(rr);
  if(mrScheduleRangeMode==='unresolved'){
    const unres = rr.filter(r=>!recordDate(r));
    return `<section class="agenda-view">${scheduleSummary(rr)}<section class="panel unresolved-panel"><h2>Unresolved source dates (${unres.length})</h2><p class="muted">These records have spreadsheet errors, TBD values, or unrecognised date strings in the source workbook. They are excluded from calendar weeks until reviewed.</p><div class="agenda-session-list">${unres.map(r=>agendaCard(r,true)).join('')}</div></section></section>`;
  }
- if(!weeks.length&&!unresolved.length){
-   const currentWeekStart = mrScheduleWeekStart || getDefaultScheduleWeekStart();
-   const bounds = typeof SessionCore !== 'undefined' && SessionCore.getWeekBounds ? SessionCore.getWeekBounds(currentWeekStart) : null;
-   const wLbl = bounds ? weekLabel(bounds.start, bounds.end) : `Week of ${currentWeekStart}`;
-   return `<section class="agenda-view">${scheduleSummary(rr)}<section class="agenda-week panel empty-agenda-week"><div class="empty-state"><h3>No sessions scheduled for ${esc(wLbl)}</h3><p class="muted">No Morning Report sessions match your active filters for this week.</p><div class="card-actions" style="justify-content:center;gap:8px;margin-top:12px;"><button type="button" class="button secondary small" data-week-jump="${esc(getDefaultScheduleWeekStart())}">Jump to This week</button><button type="button" class="button secondary small" data-schedule-scope="all">View All history</button></div></div></section></section>`;
+ if(!weeks.length&&!unresolved.length&&mrScheduleRangeMode==='all'){
+   return `<section class="agenda-view">${scheduleSummary(rr)}<section class="panel empty-state"><h3>No sessions found</h3><p class="muted">No Morning Report sessions match your active filters.</p></section></section>`;
  }
- const agendaContent = weeks.map(w=>{
+
+ // Next 7 VMRs stream (crosses week boundaries, always chronologically next 7)
+ const next7=getNextSevenVMRs();
+ const stats=mrFilledStats(next7);
+ const next7Html=next7.length?`
+  <section class="mr-meta-strip">
+   <h1>Virtual Morning Report (VMR)</h1>
+   <div class="mr-filled-badge"><span class="mr-filled-dot"></span><span>Filled: <strong>${stats.filled}/${stats.total}</strong> (${stats.pct}%)</span></div>
+  </section>
+  <section style="display:flex;flex-direction:column;gap:10px;">
+   <div class="mr-section-head">
+    <h2>Next 7 VMR Sessions</h2>
+    <div class="mr-legend">
+     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--brand)"></span> Confirmed</span>
+     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--warning-fg)"></span> Open Slot</span>
+    </div>
+   </div>
+   <div class="mr-stream">${next7.map(r=>editorialCard(r)).join('')}</div>
+  </section>`:'';
+
+ // Weekly staffing table (week-scoped, from current week selection)
+ const isMobile = typeof window !== 'undefined' && (window.innerWidth || 0) <= 760;
+ const isSingleWeek = mrScheduleRangeMode !== 'all';
+ const weekRows = weeks.length ? weeks.flatMap(w => w.records.map((r, i) => renderMatrixItem({type:'record', record:r}, i))).join('') : '<tr><td colspan="7" style="text-align:center;padding:16px;">No dated sessions scheduled for this week.</td></tr>';
+ const lowerStaffingTable = (!isMobile && isSingleWeek) ? `
+   <section class="agenda-staffing-section panel">
+     <div class="agenda-staffing-header">
+       <div>
+         <h3 class="agenda-staffing-title">Weekly Staffing Detail</h3>
+         <p class="muted" style="margin:2px 0 0 0;font-size:12px;">Operational role assignments and vacancy management for this week.</p>
+       </div>
+     </div>
+     <div class="matrix-card">
+       <div class="matrix-container">
+         <table class="matrix-table">
+           <thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead>
+           <tbody>${weekRows}</tbody>
+         </table>
+       </div>
+     </div>
+   </section>` : '';
+
+ // Full week-by-week historical archive view
+ const weekContent = (mrScheduleRangeMode === 'all') ? weeks.map(w=>{
    const dayGroups=new Map();
    for(const r of w.records){
      const d=recordDate(r)||'Date TBD';
@@ -6681,31 +6814,13 @@ function agendaView(rr){
      return `<div class="agenda-day-group"><div class="agenda-day-head"><h4>${esc(dayLabel)}</h4><span class="badge">${dayRecs.length} session${dayRecs.length===1?'':'s'}</span></div><div class="agenda-session-list">${dayRecs.map(r=>agendaCard(r)).join('')}</div></div>`;
    }).join('');
    return `<section class="agenda-week panel"><div class="agenda-week-head"><h3>${esc(weekLabel(w.start,w.end))}</h3><span>${w.records.length} sessions</span></div>${dayGroupsHtml}</section>`;
- }).join('');
+ }).join('') : '';
 
-  const isMobile = typeof window !== 'undefined' && (window.innerWidth || 0) <= 760;
-  const isSingleWeek = weeks.length === 1 && mrScheduleRangeMode !== 'all';
-  const lowerStaffingTable = (!isMobile && isSingleWeek) ? `
-    <section class="agenda-staffing-section panel">
-      <div class="agenda-staffing-header">
-        <div>
-          <h3 class="agenda-staffing-title">Weekly Staffing Detail</h3>
-          <p class="muted" style="margin:2px 0 0 0;font-size:12px;">Operational role assignments and vacancy management for this week.</p>
-        </div>
-      </div>
-      <div class="matrix-card">
-        <div class="matrix-container">
-          <table class="matrix-table">
-            <thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead>
-            <tbody>${weeks.flatMap(w => w.records.map((r, i) => renderMatrixItem({type:'record', record:r}, i))).join('')}</tbody>
-          </table>
-        </div>
-      </div>
-    </section>` : '';
-
- return `<section class="agenda-view">${scheduleSummary(rr)}${agendaContent}${lowerStaffingTable}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
+ return `<section class="agenda-view">${scheduleSummary(rr)}${next7Html}${lowerStaffingTable}${weekContent}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
 }
-function agendaCard(r,isUnresolved=false){return `<article class="agenda-card"><div class="agenda-card-date"><strong>${esc(recordDate(r)||dateValue(r)||'Date TBD')}</strong></div><div class="agenda-card-body"><div class="agenda-card-top"><span class="tag">${esc(r.fields.Type||'Morning Report')}</span><span class="muted agenda-times">${esc(SessionCore.formatSessionTime(r))}</span></div>${staffingGrid(r)}</div><div class="agenda-card-actions">${sessionNotice(r)}<button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details">Details</button>${calendarButton(r,'Morning Report',{compact:true})}<button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" data-star="${esc(r.id)}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record">${workspace.favorites.includes(r.id)?'★':'☆'}</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></article>`;}
+function agendaCard(r,isUnresolved=false){
+ return `<article class="agenda-card"><div class="agenda-card-date"><strong>${esc(recordDate(r)||dateValue(r)||'Date TBD')}</strong></div><div class="agenda-card-body"><div class="agenda-card-top"><span class="tag">${esc(r.fields.Type||'Morning Report')}</span><span class="muted agenda-times">${esc(SessionCore.formatSessionTime(r))}</span></div>${staffingGrid(r)}</div><div class="agenda-card-actions">${sessionNotice(r)}<button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details">Details</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></article>`;
+}
 function getPodcastSeries(title){
   if(!title)return '';
   const t=String(title).trim();
