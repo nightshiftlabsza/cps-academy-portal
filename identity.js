@@ -69,21 +69,87 @@
   }
 
   function getCurrentUser() {
-    // Disable mock adapter on non-loopback origins.
-    // Production identity remains unavailable until a real provider is integrated.
-    if (!isLoopbackOrigin()) {
-      return null;
+    // 1. Check persistent authentication (shared with Scheduler)
+    if (typeof localStorage !== 'undefined') {
+      try {
+        if (localStorage.getItem('isAuthenticated') === 'true') {
+          const email = localStorage.getItem('userEmail') || '';
+          const name = localStorage.getItem('userName') || (email ? email.split('@')[0] : 'Member');
+          const role = localStorage.getItem('userRole') || 'member';
+          const id = localStorage.getItem('userId') || `mem-${email.replace(/[^a-z0-9]+/g, '-')}`;
+          return {
+            id,
+            name,
+            email,
+            role,
+            isMock: false,
+            isAuthenticated: true,
+            productionAuthorized: true
+          };
+        }
+      } catch {}
     }
-    const stored = getRawStored();
-    if (!stored || !stored.id) {
-      return null;
+
+    // 2. Check local mock storage (loopback testing only)
+    if (isLoopbackOrigin()) {
+      const stored = getRawStored();
+      if (stored && stored.id) {
+        return {
+          ...stored,
+          isMock: true,
+          productionAuthorized: false,
+          isLocalTestProfile: true
+        };
+      }
     }
-    return {
-      ...stored,
-      isMock: true,
-      productionAuthorized: false,
-      isLocalTestProfile: true
-    };
+
+    return null;
+  }
+
+  async function login(email, password) {
+    let res;
+    try {
+      res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+    } catch (e) {
+      throw new Error('Could not connect to server. Please check your network or restart npm start.');
+    }
+    if (!res.ok) {
+      if (res.status === 405 || res.status === 404) {
+        throw new Error('Server running outdated code. Please stop and restart npm start in your terminal.');
+      }
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Login failed');
+    }
+    const data = await res.json();
+    if (data && data.success && data.user) {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('isAuthenticated', 'true');
+        localStorage.setItem('userEmail', data.user.email);
+        localStorage.setItem('userName', data.user.name);
+        localStorage.setItem('userRole', data.user.role);
+        localStorage.setItem('userId', data.user.id);
+      }
+      const user = getCurrentUser();
+      notify(user);
+      return user;
+    }
+    throw new Error('Unexpected login response');
+  }
+
+  function logout() {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('isAuthenticated');
+      localStorage.removeItem('userEmail');
+      localStorage.removeItem('userName');
+      localStorage.removeItem('userRole');
+      localStorage.removeItem('userId');
+    }
+    clearMockUser();
+    notify(null);
   }
 
   function setMockUser(profile) {
@@ -128,14 +194,11 @@
   }
 
   function isProductionAuthorized(user) {
-    // A mock profile cannot establish production authorization.
     if (!user || user.isMock) return false;
-    return false;
+    return Boolean(user.isAuthenticated);
   }
 
   // Development profile preset loader.
-  // Profile email is supplied through local configuration / session storage;
-  // synthetic identities are used in tests.
   function getDevelopmentProfile() {
     return {
       id: 'zg',
@@ -145,6 +208,8 @@
 
   return {
     getCurrentUser,
+    login,
+    logout,
     setMockUser,
     clearMockUser,
     subscribe,

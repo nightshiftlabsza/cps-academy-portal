@@ -4,6 +4,33 @@ const allowed=new Set(['index.html','session-core.js','search-core.js','identity
 const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json'};
 function createServer(){return http.createServer((req,res)=>{
  let name;try{name=decodeURIComponent(new URL(req.url,'http://localhost').pathname).replace(/^\//,'')||'index.html'}catch{res.writeHead(400).end();return}
+ if(name==='api/login'){
+   try {
+     const handler = require('../api/login.js');
+     return handler(req, res);
+   } catch (e) {
+     res.writeHead(500).end(JSON.stringify({ error: 'SERVER_ERROR', message: e.message }));
+     return;
+   }
+ }
+ if(name==='api/mutate'){
+   try {
+     const handler = require('../api/mutate.js');
+     return handler(req, res);
+   } catch (e) {
+     res.writeHead(500).end(JSON.stringify({ error: 'SERVER_ERROR', message: e.message }));
+     return;
+   }
+ }
+ if(name==='api/sync'){
+   try {
+     const handler = require('../api/sync.js');
+     return handler(req, res);
+   } catch (e) {
+     res.writeHead(500).end(JSON.stringify({ error: 'SERVER_ERROR', message: e.message }));
+     return;
+   }
+ }
  if(!['GET','HEAD'].includes(req.method)){res.writeHead(405).end();return}
  if(!allowed.has(name)){res.writeHead(404).end('Not found');return}
  fs.readFile(path.join(root,name),(error,data)=>{if(error){res.writeHead(500).end('File unavailable');return}const headers={'Content-Type':types[path.extname(name)]+'; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};if(name==='sw.js')headers['Service-Worker-Allowed']='/';res.writeHead(200,headers);res.end(req.method==='HEAD'?undefined:data)});

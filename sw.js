@@ -118,18 +118,13 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE_NAME);
-      const cached = await cache.match(req);
-      if (cached) {
-        fetch(req).then((networkRes) => {
-          if (networkRes.ok) cache.put(req, networkRes);
-        }).catch(() => {});
-        return cached;
-      }
       try {
         const networkRes = await fetch(req);
         if (networkRes.ok) cache.put(req, networkRes.clone());
         return networkRes;
       } catch (err) {
+        const cached = await cache.match(req);
+        if (cached) return cached;
         if (req.mode === 'navigate') {
           const fallback = await cache.match('/index.html');
           if (fallback) return fallback;

@@ -1741,7 +1741,8 @@ mark.search-match { background: #fef08a; color: #713f12; padding: 1px 3px; borde
   font-size: 14px;
   color: var(--muted);
 }
-.mobile-prefs-btn {
+.mobile-prefs-btn,
+.mobile-auth-btn {
   display: none;
 }
 @media (max-width: 760px) {
@@ -1761,7 +1762,8 @@ mark.search-match { background: #fef08a; color: #713f12; padding: 1px 3px; borde
     text-align: center;
     padding: 8px 0;
   }
-  .mobile-prefs-btn {
+  .mobile-prefs-btn,
+  .mobile-auth-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -4648,3 +4650,39 @@ details[open] > .member-cohort-summary .member-cohort-chevron {
     display: none;
   }
 }
+
+/* Full-page Login Gate */
+.login-gate {
+  position: fixed;
+  inset: 0;
+  background: var(--bg, #0b1924);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 16px;
+}
+.login-card {
+  background: var(--surface, #142c3f);
+  border: 1px solid var(--line, rgba(255,255,255,0.1));
+  border-radius: 12px;
+  width: 100%;
+  max-width: 400px;
+  padding: 32px 24px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+}
+.login-brand { text-align: center; margin-bottom: 24px; }
+.login-brand .brand-mark { margin: 0 auto 12px; font-size: 1.25rem; }
+.gate-form .form-group { margin-bottom: 16px; }
+.gate-form label { display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.875rem; }
+.gate-form input { width: 100%; box-sizing: border-box; }
+.login-submit-btn { width: 100%; margin-top: 8px; justify-content: center; }
+.auth-error { color: var(--danger, #e53e3e); font-size: 0.875rem; margin-bottom: 12px; text-align: center; }
+
+html.not-authenticated .app-shell {
+  display: none !important;
+}
+html.not-authenticated .login-gate {
+  display: flex !important;
+}
+

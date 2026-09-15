@@ -42,11 +42,38 @@
           get: () => ({ ...prefs })
         };
         apply();
+        try {
+          if (localStorage.getItem('isAuthenticated') !== 'true') {
+            root.classList.add('not-authenticated');
+          }
+        } catch {}
       })();
     </script>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <div id="login-gate" class="login-gate" style="display:none;">
+      <div class="login-card">
+        <div class="login-brand">
+          <div class="brand-mark" aria-hidden="true">CPS</div>
+          <h2>CPS Academy Hub</h2>
+          <p class="muted">Sign in to access the Academy operating hub</p>
+        </div>
+        <form id="gate-login-form" class="gate-form">
+          <div class="form-group">
+            <label for="gate-email">Email</label>
+            <input type="email" id="gate-email" class="input" placeholder="Enter your email" required autocomplete="email" />
+          </div>
+          <div class="form-group">
+            <label for="gate-password">Password</label>
+            <input type="password" id="gate-password" class="input" placeholder="••••••••" required autocomplete="current-password" />
+          </div>
+          <div id="gate-error-msg" class="auth-error" style="display:none;"></div>
+          <button type="submit" id="gate-submit-btn" class="button primary login-submit-btn">Sign In</button>
+        </form>
+      </div>
+    </div>
+
     <div class="app-shell">
       <aside class="sidebar" aria-label="Primary navigation">
         <div class="brand">
@@ -64,6 +91,9 @@
           <div><strong id="profile-name">Zakariyya</strong><span id="profile-role">VMR Leadership</span><span id="profile-identity-badge" class="tag small local-profile-tag" style="display:none;margin-top:2px;">Local test profile</span></div>
           <button class="icon-button" id="profile-options-btn" aria-label="Local profile and developer preferences">⚙</button>
         </div>
+        <div style="padding:0 12px 10px;">
+          <button type="button" class="button secondary small" id="auth-trigger-btn" style="width:100%;">Sign In</button>
+        </div>
       </aside>
 
       <main class="main">
@@ -75,6 +105,7 @@
             <kbd>⌘ K</kbd>
           </div>
           <div class="top-actions">
+            <button type="button" class="button secondary small mobile-auth-btn" id="mobile-auth-btn">Sign in</button>
             <button class="icon-button notification-button" aria-label="Notifications">◌<span></span></button>
             <button class="icon-button mobile-prefs-btn" id="mobile-prefs-btn" aria-label="Workspace and profile preferences">⚙</button>
             <button class="button primary" id="new-item-button"><span aria-hidden="true">＋</span> New item</button>
@@ -334,12 +365,49 @@
       </form>
     </dialog>
 
+    <dialog id="auth-dialog" class="dialog" aria-labelledby="auth-dialog-title">
+      <form class="dialog-card" id="auth-dialog-form" onsubmit="return false;">
+        <div class="dialog-head">
+          <div><p class="eyebrow">CPS Academy</p><h2 id="auth-dialog-title">Sign In</h2></div>
+          <button class="icon-button" value="cancel" id="auth-dialog-close" aria-label="Close">×</button>
+        </div>
+        <div id="auth-signed-out-view">
+          <p class="muted" style="margin-bottom:12px;">Sign in with your Academy email and the CPS shared password.</p>
+          <div class="form-group" style="margin-bottom:12px;">
+            <label for="auth-email-input" style="display:block;font-weight:700;margin-bottom:4px;">Email</label>
+            <input type="email" id="auth-email-input" class="input" placeholder="Enter your email" required style="width:100%;box-sizing:border-box;" />
+          </div>
+          <div class="form-group" style="margin-bottom:16px;">
+            <label for="auth-password-input" style="display:block;font-weight:700;margin-bottom:4px;">Password</label>
+            <input type="password" id="auth-password-input" class="input" placeholder="••••••••" required style="width:100%;box-sizing:border-box;" />
+          </div>
+          <div id="auth-error-msg" style="color:var(--danger,#e53e3e);font-size:0.875rem;margin-bottom:12px;display:none;"></div>
+          <div class="dialog-actions">
+            <button type="button" class="button secondary" id="auth-cancel-btn">Cancel</button>
+            <button type="submit" class="button primary" id="auth-submit-btn">Sign In</button>
+          </div>
+        </div>
+        <div id="auth-signed-in-view" style="display:none;">
+          <p style="margin-bottom:8px;">Currently signed in as:</p>
+          <div style="background:var(--surface,#f7fafc);padding:12px;border-radius:8px;margin-bottom:16px;border:1px solid var(--line,#e2e8f0);">
+            <strong id="auth-user-name" style="display:block;font-size:1.05rem;"></strong>
+            <span id="auth-user-email" class="muted" style="display:block;font-size:0.875rem;"></span>
+            <span id="auth-user-role" class="tag small" style="margin-top:6px;display:inline-block;"></span>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" class="button secondary" id="auth-signed-in-close-btn">Close</button>
+            <button type="button" class="button primary" id="auth-logout-btn" style="background:#e53e3e;border-color:#e53e3e;">Sign Out</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
     <script src="session-core.js"></script>
     <script src="search-core.js"></script>
     <script src="identity.js"></script>
     <script src="offline.js"></script>
     <script src="logbook.js"></script>
     <script src="windowed-list.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js?v=2026-09-15-sync"></script>
   </body>
 </html>

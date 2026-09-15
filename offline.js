@@ -57,6 +57,29 @@
     try {
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       const timeoutId = controller ? setTimeout(() => controller.abort(), 3500) : null;
+
+      // 1. Attempt live Google Sheets sync first
+      try {
+        const syncRes = await fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schemaVersion: 1,
+            operation: 'readSnapshot',
+            requestId: 'load-' + Date.now()
+          }),
+          signal: controller?.signal
+        });
+        if (syncRes.ok) {
+          const syncData = await syncRes.json();
+          if (syncData && syncData.workbook && syncData.workbook['Morning Report']) {
+            if (timeoutId) clearTimeout(timeoutId);
+            return syncData.workbook;
+          }
+        }
+      } catch {}
+
+      // 2. Fall back to static snapshot if sync is unconfigured or offline
       const res = await fetch('workbook.json', { signal: controller?.signal });
       if (timeoutId) clearTimeout(timeoutId);
 

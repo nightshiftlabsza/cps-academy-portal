@@ -985,22 +985,28 @@ function getResourceActionLabel(url){if(!url)return 'Open resource';if(/presenta
 function getResourceSubtitle(r){const linkField=(r.fields.Link||'').trim();if(!linkField||/^https?:\/\//i.test(linkField))return '';return linkField;}
 function isAdmin(){return Boolean(workspace.isAdmin||workspace.role==='Super admin'||workspace.role==='admin'||workspace.profile==='@admin')}
 function updateProfileDisplay(){
-  const r=$('#profile-role');
-  if(r)r.textContent=isAdmin()?'Super admin (@admin)':'VMR Leadership';
-  const t=$('#admin-toggle');
-  if(t)t.checked=isAdmin();
   const user=typeof Identity!=='undefined'?Identity.getCurrentUser():null;
+  const isAdm=isAdmin()||user?.role==='admin';
+  const r=$('#profile-role');
+  if(r)r.textContent=isAdm?'Super admin (@admin)':(user?.role==='member'?'Academy Member':'Public Access');
+  const t=$('#admin-toggle');
+  if(t)t.checked=isAdm;
   const pName=$('#profile-name'),pAvatar=$('#profile-avatar'),badge=$('#profile-identity-badge'),statusEl=$('#mock-profile-status');
+  const authTrigger=$('#auth-trigger-btn'),mobileAuth=$('#mobile-auth-btn');
   if(user){
     if(pName)pName.textContent=user.name;
     if(pAvatar){const parts=user.name.split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase();pAvatar.textContent=parts||'ZG';}
-    if(badge){badge.style.display='inline-block';badge.textContent='Local test profile';}
-    if(statusEl)statusEl.textContent=`Active: ${user.name} (Local test profile)`;
+    if(badge){badge.style.display='inline-block';badge.textContent=user.isMock?'Local test profile':'Signed in';}
+    if(statusEl)statusEl.textContent=`Active: ${user.name} (${user.isMock?'Local test profile':'Verified member'})`;
+    if(authTrigger)authTrigger.textContent='Account / Sign Out';
+    if(mobileAuth)mobileAuth.textContent='Account';
   }else{
-    if(pName)pName.textContent='No local profile';
+    if(pName)pName.textContent='Guest';
     if(pAvatar)pAvatar.textContent='--';
     if(badge)badge.style.display='none';
-    if(statusEl)statusEl.textContent='No local test profile selected (Signed out).';
+    if(statusEl)statusEl.textContent='Signed out.';
+    if(authTrigger)authTrigger.textContent='Sign In';
+    if(mobileAuth)mobileAuth.textContent='Sign in';
   }
 }
 function setAdminMode(active){mutate(w=>{w.isAdmin=Boolean(active);w.role=active?'Super admin':'VMR Leadership'});updateProfileDisplay();if(!isAdmin()&&(tab==='admin/issues'||tab==='Admin Issues'))navigate('Home');else render();toast(isAdmin()?'Super admin mode enabled':'Switched to standard member profile')}
@@ -4799,6 +4805,7 @@ function crcRetiredView() {
 }
 
 function render(){
+  if(typeof enforceAuthGate==='function'&&!enforceAuthGate())return;
   nav();
   updateProfileDisplay();
   if(query.trim())globalResults();
@@ -5074,7 +5081,46 @@ function claimRole(sessionId, role) {
       timestamp: Date.now()
     };
     render();
-    toast(`Assigned ${user.name} as ${role} (Local test profile). Saved on this device.`, { undo: true });
+    if (user && user.isAuthenticated && !user.isMock) {
+      toast(`Assigned ${user.name} as ${role}. Syncing to Google Sheets...`, { undo: true });
+      if (typeof fetch === 'function') {
+        const targetStableId = r.stableId || r.parentId || r.id;
+        fetch('/api/mutate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dataset: 'Morning Report',
+            stableId: targetStableId,
+            field: changedField,
+            value: newValue,
+            expectedPreviousValue: prevValue,
+            user: {
+              name: user.name,
+              email: user.email,
+              isAuthenticated: true
+            }
+          })
+        })
+        .then(async res => {
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            if (res.status === 409) {
+              toast(`Could not claim: ${errData.message || 'Slot already taken in Google Sheets'}`);
+              undoClaim();
+            } else {
+              toast(`Saved locally. Note: Google Sheets sync: ${errData.message || res.statusText}`);
+            }
+          } else {
+            toast(`Synced to Google Sheets: ${user.name} claimed ${role}`);
+          }
+        })
+        .catch(err => {
+          console.warn('Google Sheets mutation failed:', err);
+        });
+      }
+    } else {
+      toast(`Assigned ${user.name} as ${role} (Local test profile). Saved on this device.`, { undo: true });
+    }
     return { success: true, sessionId: r.id, role, field: changedField, value: newValue };
   }
   return { success: false };
@@ -5114,7 +5160,32 @@ function undoClaim() {
 
   lastClaim = null;
   render();
-  toast(`Undid ${role} claim. Saved on this device.`);
+
+  const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+  if (user && user.isAuthenticated && !user.isMock && typeof fetch === 'function') {
+    fetch('/api/mutate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dataset: 'Morning Report',
+        stableId: sessionId,
+        field: field,
+        value: previousValue || '',
+        expectedPreviousValue: claimedValue,
+        user: {
+          name: user.name,
+          email: user.email,
+          isAuthenticated: true
+        }
+      })
+    })
+    .then(async res => {
+      if (res.ok) toast(`Cleared ${role} from Google Sheets.`);
+    })
+    .catch(err => console.warn('Undo sync error:', err));
+  }
+
+  toast(`Undid ${role} claim.`);
   return true;
 }
 
@@ -6047,7 +6118,146 @@ if($('#appearance-mode'))$('#appearance-mode').onchange=e=>{if(window.cpsAppeara
 if($('#admin-toggle'))$('#admin-toggle').onchange=e=>setAdminMode(e.target.checked);
 if($('#activate-mock-profile-btn'))$('#activate-mock-profile-btn').onclick=()=>{if(typeof Identity!=='undefined'){Identity.setMockUser(Identity.getDevelopmentProfile());updateProfileDisplay();render();toast('Local test profile active: Zakariyya G');}};
 if($('#clear-mock-profile-btn'))$('#clear-mock-profile-btn').onclick=()=>{if(typeof Identity!=='undefined'){Identity.clearMockUser();updateProfileDisplay();render();toast('Local test profile cleared.');}};
-if($('#nav-logbook-btn'))$('#nav-logbook-btn').onclick=()=>{($('#admin-prefs-dialog')?.close());navigate('profile/logbook');};
+function openAuthDialog() {
+  const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+  const dialog = $('#auth-dialog');
+  if (!dialog) return;
+  const outView = $('#auth-signed-out-view');
+  const inView = $('#auth-signed-in-view');
+  const errEl = $('#auth-error-msg');
+  if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+
+  if (user && user.isAuthenticated && !user.isMock) {
+    if (outView) outView.style.display = 'none';
+    if (inView) inView.style.display = 'block';
+    if ($('#auth-user-name')) $('#auth-user-name').textContent = user.name;
+    if ($('#auth-user-email')) $('#auth-user-email').textContent = user.email;
+    if ($('#auth-user-role')) $('#auth-user-role').textContent = user.role === 'admin' ? 'Admin' : 'Academy Member';
+  } else {
+    if (outView) outView.style.display = 'block';
+    if (inView) inView.style.display = 'none';
+    if ($('#auth-email-input')) $('#auth-email-input').value = '';
+    if ($('#auth-password-input')) $('#auth-password-input').value = '';
+  }
+  dialog.showModal();
+}
+
+if ($('#auth-trigger-btn')) $('#auth-trigger-btn').onclick = openAuthDialog;
+if ($('#mobile-auth-btn')) $('#mobile-auth-btn').onclick = openAuthDialog;
+if ($('#auth-cancel-btn')) $('#auth-cancel-btn').onclick = () => $('#auth-dialog')?.close();
+if ($('#auth-dialog-close')) $('#auth-dialog-close').onclick = () => $('#auth-dialog')?.close();
+if ($('#auth-signed-in-close-btn')) $('#auth-signed-in-close-btn').onclick = () => $('#auth-dialog')?.close();
+
+function enforceAuthGate() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return true;
+  const gate = document.getElementById('login-gate');
+  const shell = document.querySelector('.app-shell');
+  if (!gate && !shell) return true;
+
+  const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+  const isAuth = Boolean(user && user.isAuthenticated);
+
+  if (document.documentElement && document.documentElement.classList && typeof document.documentElement.classList.toggle === 'function') {
+    document.documentElement.classList.toggle('not-authenticated', !isAuth);
+  }
+  if (!isAuth) {
+    if (gate) gate.style.display = 'flex';
+    if (shell) shell.style.display = 'none';
+    return false;
+  } else {
+    if (gate) gate.style.display = 'none';
+    if (shell) shell.style.display = '';
+    return true;
+  }
+}
+
+const gateForm = document.getElementById('gate-login-form');
+if (gateForm) {
+  gateForm.onsubmit = async (e) => {
+    if (e) e.preventDefault();
+    const emailInput = document.getElementById('gate-email');
+    const passInput = document.getElementById('gate-password');
+    const btn = document.getElementById('gate-submit-btn');
+    const errEl = document.getElementById('gate-error-msg');
+    const email = emailInput?.value?.trim() || '';
+    const pass = passInput?.value || '';
+
+    if (!email || !pass) {
+      if (errEl) { errEl.textContent = 'Please enter both email and password.'; errEl.style.display = 'block'; }
+      return;
+    }
+
+    if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Signing in...'; }
+
+    try {
+      if (typeof Identity !== 'undefined' && Identity.login) {
+        const user = await Identity.login(email, pass);
+        enforceAuthGate();
+        updateProfileDisplay();
+        render();
+        toast(`Welcome back, ${user.name}`);
+      }
+    } catch (err) {
+      if (errEl) {
+        errEl.textContent = err.message || 'Incorrect email or password.';
+        errEl.style.display = 'block';
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
+    }
+  };
+}
+
+const authDialogForm = document.getElementById('auth-dialog-form');
+if (authDialogForm) {
+  authDialogForm.onsubmit = async (e) => {
+    if (e) e.preventDefault();
+    const emailInput = document.getElementById('auth-email-input');
+    const passInput = document.getElementById('auth-password-input');
+    const submitBtn = document.getElementById('auth-submit-btn');
+    const errEl = document.getElementById('auth-error-msg');
+    const email = emailInput?.value?.trim() || '';
+    const pass = passInput?.value || '';
+
+    if (!email || !pass) {
+      if (errEl) { errEl.textContent = 'Please enter both email and password.'; errEl.style.display = 'block'; }
+      return;
+    }
+
+    if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Signing in...'; }
+
+    try {
+      if (typeof Identity !== 'undefined' && Identity.login) {
+        const user = await Identity.login(email, pass);
+        document.getElementById('auth-dialog')?.close();
+        enforceAuthGate();
+        updateProfileDisplay();
+        render();
+        toast(`Signed in as ${user.name}`);
+      }
+    } catch (err) {
+      if (errEl) { errEl.textContent = err.message || 'Incorrect email or password.'; errEl.style.display = 'block'; }
+    } finally {
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Sign In'; }
+    }
+  };
+}
+
+if ($('#auth-logout-btn')) {
+  $('#auth-logout-btn').onclick = () => {
+    if (typeof Identity !== 'undefined') Identity.logout();
+    $('#auth-dialog')?.close();
+    enforceAuthGate();
+    updateProfileDisplay();
+    render();
+    toast('Signed out successfully.');
+  };
+}
+
+enforceAuthGate();
+
 bindSwapEvents();
 if(typeof Identity!=='undefined'){
   Identity.subscribe(user=>{

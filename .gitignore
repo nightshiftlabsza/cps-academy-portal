@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+credentials/
+*service-account*.json
 *.pem
 *.key
 *.p12
