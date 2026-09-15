@@ -130,18 +130,21 @@ function createSyncHandler(options = {}) {
       return sendError(503, 'SYNC_NOT_CONFIGURED', 'Snapshot sync is not configured on this server');
     }
 
+    let authUser = null;
     // 6. Authentication validation
     if (typeof authValidator === 'function') {
       const authResult = await authValidator(req);
       if (!authResult || !authResult.authorized) {
         return sendError(401, 'UNAUTHORIZED', authResult?.message || 'Authentication failed');
       }
+      authUser = authResult.user || null;
     } else {
       // Default: require config.authToken
       const authHeader = req.headers['authorization'] || '';
       if (!config.authToken || authHeader !== `Bearer ${config.authToken}`) {
         return sendError(401, 'UNAUTHORIZED', 'Missing or invalid authorization token');
       }
+      authUser = { role: 'admin' };
     }
 
     // 7. Sheets reader execution
@@ -154,6 +157,23 @@ function createSyncHandler(options = {}) {
         knownSnapshotHash: body.knownSnapshotHash
       });
 
+      let finalWorkbook = result.workbook;
+      if (finalWorkbook && authUser?.role !== 'admin' && finalWorkbook.Members?.records) {
+        finalWorkbook = {
+          ...finalWorkbook,
+          Members: {
+            ...finalWorkbook.Members,
+            records: finalWorkbook.Members.records.map(rec => ({
+              ...rec,
+              fields: {
+                ...rec.fields,
+                Birthday: rec.fields?.Birthday ? 'Redacted' : ''
+              }
+            }))
+          }
+        };
+      }
+
       res.statusCode = 200;
       res.end(
         JSON.stringify({
@@ -163,7 +183,7 @@ function createSyncHandler(options = {}) {
           snapshotHash: result.snapshotHash,
           snapshotDate: result.snapshotDate,
           modified: result.modified !== false,
-          ...(result.modified !== false ? { workbook: result.workbook } : {})
+          ...(result.modified !== false ? { workbook: finalWorkbook } : {})
         })
       );
     } catch (readErr) {

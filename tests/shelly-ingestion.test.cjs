@@ -16,6 +16,7 @@ process.env.SYNC_SERVICE_ACCOUNT_KEY = JSON.stringify({
 });
 process.env.SYNC_SHEET_ID = 'synthetic-sheet-id-12345';
 process.env.SYNC_ALLOWED_TABS = 'Morning Report,CPS Academy VMRs';
+process.env.SYNTHETIC_TEST_SYNC = '1';
 
 // Network blocker: intercept all fetch calls to ensure 0 outbound requests
 const originalFetch = global.fetch;

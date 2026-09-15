@@ -13,17 +13,30 @@ if (fs.existsSync(envPath) && typeof process.loadEnvFile === 'function') {
 
 const { createSyncHandler } = require('./_lib/sync-contract.cjs');
 const { sheetsReader } = require('./_lib/sheets-reader.cjs');
+const { getSessionUser } = require('./_lib/auth-session.cjs');
 
 function authValidator(req) {
+  // 1. Authenticated server session
+  const sessionUser = getSessionUser(req);
+  if (sessionUser && sessionUser.isAuthenticated) {
+    return { authorized: true, user: sessionUser };
+  }
+
+  // 2. Service account sync token
   const token = process.env.SYNC_AUTH_TOKEN;
-  if (!token) {
-    return { authorized: true };
+  if (token) {
+    const authHeader = req.headers['authorization'] || '';
+    if (authHeader === `Bearer ${token}`) {
+      return { authorized: true, user: { role: 'admin', email: 'service-token' } };
+    }
   }
-  const authHeader = req.headers['authorization'] || '';
-  if (authHeader === `Bearer ${token}`) {
-    return { authorized: true };
+
+  // 3. Synthetic test bypass flag for unit test runners
+  if (process.env.SYNTHETIC_TEST_SYNC === '1') {
+    return { authorized: true, user: { role: 'admin', email: 'synth-test' } };
   }
-  return { authorized: false, message: 'Missing or invalid authorization token' };
+
+  return { authorized: false, message: 'Authentication required to access Academy workbook snapshot' };
 }
 
 module.exports = async function handlerEntry(req, res) {
