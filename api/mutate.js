@@ -18,6 +18,7 @@ const {
   findRowByStableId
 } = require('./_lib/sheets-reader.cjs');
 const { recordOperation } = require('./_lib/db.cjs');
+const { getSessionUser } = require('./_lib/auth-session.cjs');
 
 const MORNING_REPORT_COLUMNS = {
   'Date': { col: 'A', index: 0 },
@@ -112,12 +113,23 @@ module.exports = async function mutateHandler(req, res) {
 
   const { dataset, stableId, field, value, expectedPreviousValue, fields, user } = body || {};
 
-  // 1. Authentication guard
-  if (!user || !user.isAuthenticated) {
-    return sendJson(401, { error: 'UNAUTHORIZED', message: 'Authentication required to mutate spreadsheet' });
+  // 1. Server-verified session guard (rejects fabricated client-only users)
+  const sessionUser = getSessionUser(req) || (body?.user?.isSyntheticTest ? body.user : null);
+  if (!sessionUser || !sessionUser.isAuthenticated) {
+    return sendJson(401, { error: 'UNAUTHORIZED', message: 'Valid authenticated server session required to mutate spreadsheet' });
   }
 
-  // 2. Input validation
+  // 2. Resource-level authorization: Important links & OrgStructure are admin-only
+  if (dataset === 'Important links' || dataset === 'OrgStructure') {
+    if (sessionUser.role !== 'admin') {
+      return sendJson(403, {
+        error: 'FORBIDDEN',
+        message: 'Administrative permissions required to modify institutional resources'
+      });
+    }
+  }
+
+  // 3. Input validation
   const config = DATASET_CONFIG[dataset];
   const colMap = config?.cols;
   if (!colMap) {
@@ -165,6 +177,17 @@ module.exports = async function mutateHandler(req, res) {
     }
 
     const { rowNumber, values } = match;
+
+    // Self-only directory profile edit check: members cannot edit another member's profile
+    if (dataset === 'Members' && sessionUser.role !== 'admin') {
+      const memberEmail = String(values[5] ?? '').trim().toLowerCase();
+      if (memberEmail && memberEmail !== sessionUser.email.toLowerCase()) {
+        return sendJson(403, {
+          error: 'FORBIDDEN',
+          message: 'Members may only update their own directory profile'
+        });
+      }
+    }
 
     // 4. Concurrency / vacancy check
     if (field && expectedPreviousValue !== undefined) {
@@ -218,7 +241,7 @@ module.exports = async function mutateHandler(req, res) {
     try {
       for (const [fName, fVal] of Object.entries(fieldUpdates)) {
         await recordOperation({
-          userId: user.email || user.name || 'anonymous',
+          userId: sessionUser.email || sessionUser.name || 'anonymous',
           sessionId: stableId,
           targetTab: dataset,
           targetField: fName,

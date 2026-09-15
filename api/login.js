@@ -12,9 +12,10 @@ if (fs.existsSync(envPath) && typeof process.loadEnvFile === 'function') {
 }
 
 const { sheetsReader } = require('./_lib/sheets-reader.cjs');
+const { createSessionToken } = require('./_lib/auth-session.cjs');
 
 const UNIVERSAL_PASSWORD = process.env.UNIVERSAL_PASSWORD || 'cpsvmr143';
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'zak,admin,saketh').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+const ADMIN_EMAILS = new Set((process.env.ADMIN_EMAILS || 'zak@cpsolvers.com,saketh@cpsolvers.com,admin@cpsolvers.com,zak@example.com,admin@example.com').toLowerCase().split(',').map(s => s.trim()).filter(Boolean));
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -86,17 +87,23 @@ module.exports = async function loginHandler(req, res) {
     console.warn('Login sheet lookup warning:', err.message);
   }
 
-  const isAdmin = ADMIN_EMAILS.some(adm => cleanEmail.includes(adm));
+  const isAdmin = ADMIN_EMAILS.has(cleanEmail);
   const role = isAdmin ? 'admin' : isAcademyMember ? 'member' : 'viewer';
+
+  const user = {
+    email: cleanEmail,
+    name: memberName,
+    role,
+    id: memberId,
+    isAuthenticated: true
+  };
+
+  const token = createSessionToken(user);
+  res.setHeader('Set-Cookie', `cps_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
 
   return sendJson(200, {
     success: true,
-    user: {
-      email: cleanEmail,
-      name: memberName,
-      role,
-      id: memberId,
-      isAuthenticated: true
-    }
+    token,
+    user
   });
 };

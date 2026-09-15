@@ -101,13 +101,19 @@ test.after(() => {
 });
 
 const mutateHandler = require('../api/mutate.js');
+const { createSessionToken } = require('../api/_lib/auth-session.cjs');
 
 function mockReqRes(options = {}) {
   const { method = 'POST', body = null, headers = {} } = options;
 
+  const reqHeaders = { 'content-type': 'application/json', ...headers };
+  if (body && body.user && !reqHeaders.authorization) {
+    reqHeaders.authorization = `Bearer ${createSessionToken(body.user)}`;
+  }
+
   const req = {
     method,
-    headers: { 'content-type': 'application/json', ...headers },
+    headers: reqHeaders,
     body
   };
 
