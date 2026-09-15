@@ -46,9 +46,34 @@ const CPS_ACADEMY_VMRS_COLUMNS = {
   'Bonus learning': { col: 'H', index: 7 }
 };
 
-const DATASET_COLUMNS = {
-  'Morning Report': MORNING_REPORT_COLUMNS,
-  'CPS Academy VMRs': CPS_ACADEMY_VMRS_COLUMNS
+const ORG_STRUCTURE_COLUMNS = {
+  'Team / responsibility': { col: 'A', index: 0 },
+  'Members': { col: 'B', index: 1 },
+  'Role': { col: 'C', index: 2 }
+};
+
+const MEMBERS_COLUMNS = {
+  'Name': { col: 'A', index: 0 },
+  'Sponsor': { col: 'B', index: 1 },
+  'Social handles': { col: 'C', index: 2 },
+  'Country': { col: 'D', index: 3 },
+  'Birthday': { col: 'E', index: 4 },
+  'Email': { col: 'F', index: 5 },
+  'Location': { col: 'G', index: 6 },
+  'Subspecialty': { col: 'H', index: 7 }
+};
+
+const IMPORTANT_LINKS_COLUMNS = {
+  'Resource': { col: 'A', index: 0 },
+  'Link': { col: 'B', index: 1 }
+};
+
+const DATASET_CONFIG = {
+  'Morning Report': { sheetTab: 'Morning Report', cols: MORNING_REPORT_COLUMNS },
+  'CPS Academy VMRs': { sheetTab: 'CPS Academy VMRs', cols: CPS_ACADEMY_VMRS_COLUMNS },
+  'OrgStructure': { sheetTab: 'OrgStructure', cols: ORG_STRUCTURE_COLUMNS },
+  'Members': { sheetTab: 'OrgStructure', cols: MEMBERS_COLUMNS },
+  'Important links': { sheetTab: 'Important links', cols: IMPORTANT_LINKS_COLUMNS }
 };
 
 function parseBody(req) {
@@ -93,11 +118,12 @@ module.exports = async function mutateHandler(req, res) {
   }
 
   // 2. Input validation
-  const colMap = DATASET_COLUMNS[dataset];
+  const config = DATASET_CONFIG[dataset];
+  const colMap = config?.cols;
   if (!colMap) {
     return sendJson(400, {
       error: 'INVALID_DATASET',
-      message: `Dataset "${dataset}" is not mutable. Allowed: ${Object.keys(DATASET_COLUMNS).join(', ')}`
+      message: `Dataset "${dataset}" is not mutable. Allowed: ${Object.keys(DATASET_CONFIG).join(', ')}`
     });
   }
 
@@ -161,7 +187,7 @@ module.exports = async function mutateHandler(req, res) {
     const updateData = Object.entries(fieldUpdates).map(([fName, fVal]) => {
       const colDef = colMap[fName];
       return {
-        range: `'${dataset}'!${colDef.col}${rowNumber}`,
+        range: `'${config.sheetTab}'!${colDef.col}${rowNumber}`,
         majorDimension: 'ROWS',
         values: [[String(fVal ?? '').trim()]]
       };
@@ -215,7 +241,7 @@ module.exports = async function mutateHandler(req, res) {
         rowNumber,
         field,
         value: String(value ?? '').trim(),
-        updatedRange: `'${dataset}'!${colDef.col}${rowNumber}`
+        updatedRange: `'${config.sheetTab}'!${colDef.col}${rowNumber}`
       });
     }
 

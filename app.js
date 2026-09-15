@@ -2030,19 +2030,100 @@ function listing(){
     )
   ) : '<section class="empty-state panel"><h2>No matching records</h2><p>Clear the filters or try a broader search.</p><button class="button secondary" data-clear-filters>Clear filters</button></section>';
 
-  $('#page').innerHTML = header(sectionLabel(tab), descriptions[tab]||'Programme records, assignments and source details.') +
-    banner() +
-    sopBanner(tab) +
-    areaPicker() +
-    `<div class="toolbar area-tabs">${groups[Object.keys(groups).find(g=>groups[g].includes(tab))].map(t=>`<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>` +
-    renderFilters(rr, tab, filters, field, options, viewSwitcher) +
-    (tab==='Morning Report'?renderWeekNavigator(rr):'') +
-    `<p class="muted results-count" id="results-count-announcer" aria-live="polite">${formatResultsCount(rr,tab,records())}${yearFilter!=='all'?(yearFilter==='unresolved'?' · Unresolved / undated records':' · Year '+yearFilter):''}${sort==='date'?' · Unresolved dates follow recognised dates':''}${dateFrom||dateTo?' · Records with unresolved dates are excluded from this range':''}</p>` +
-    resultsHeading +
-    paginationTop +
-    recordsContent +
-    paginationBottom +
-    (tab==='CRC'&&db['CRC - retired']?crcDrawer():'');
+  if(tab==='Morning Report'){
+    const currentWeekStart = mrScheduleWeekStart || getDefaultScheduleWeekStart();
+    const bounds = typeof SessionCore !== 'undefined' && SessionCore.getWeekBounds ? SessionCore.getWeekBounds(currentWeekStart) : { start: currentWeekStart, end: currentWeekStart };
+    const wLbl = weekLabel(bounds.start, bounds.end);
+    const prevWeekStart = typeof SessionCore !== 'undefined' && SessionCore.addWeeks ? SessionCore.addWeeks(bounds.start, -1) : bounds.start;
+    const nextWeekStart = typeof SessionCore !== 'undefined' && SessionCore.addWeeks ? SessionCore.addWeeks(bounds.start, 1) : bounds.start;
+    const next7 = getNextSevenVMRs();
+    const stats = mrFilledStats(next7);
+
+    const mrTopBar = `
+      <div class="mr-top-bar">
+        <div class="mr-top-breadcrumb">
+          <span class="mr-crumb-root">Academic Portal</span>
+          <span class="mr-crumb-sep">/</span>
+          <span class="mr-crumb-current">Morning Report</span>
+          <span class="mr-live-badge">Live Operational Feed</span>
+        </div>
+        <div class="mr-top-tools">
+          <div class="mr-top-search-box">
+            <span class="mr-search-icon">🔍</span>
+            <input type="text" class="mr-top-search-input" id="mr-quick-search" placeholder="Search presenter, topic, case..." value="${esc(search||'')}">
+          </div>
+          <div class="mr-quick-week-selector">
+            <button type="button" class="mr-week-btn" data-week-jump="${esc(prevWeekStart)}" title="Previous week">‹</button>
+            <span class="mr-week-label">${esc(wLbl)}</span>
+            <button type="button" class="mr-week-btn" data-week-jump="${esc(nextWeekStart)}" title="Next week">›</button>
+          </div>
+        </div>
+      </div>`;
+
+    const mrSubHeader = `
+      <section class="mr-subheader">
+        <div class="mr-subheader-left">
+          <div class="mr-title-row">
+            <h1 class="mr-page-title">Virtual Morning Report (VMR)</h1>
+            <span class="mr-term-badge">Term 2026.Q3</span>
+          </div>
+          <p class="mr-page-desc">Real-time daily case distribution, clinical reasoning facilitators, and trainee assignments for the current academic rotation.</p>
+        </div>
+        <div class="mr-subheader-right">
+          <div class="mr-filled-pill">
+            <span class="mr-filled-dot"></span>
+            <span class="mr-filled-label">Filled Slots:</span>
+            <strong class="mr-filled-val">${stats.filled}/${stats.total} (${stats.pct}%)</strong>
+          </div>
+          <button type="button" class="button secondary small" id="mr-filter-toggle-btn">
+            <span>⚙ Filters</span>
+          </button>
+        </div>
+      </section>`;
+
+    const mrFiltersDrawer = `
+      <div class="mr-filters-collapsible" id="mr-filters-panel" style="${scheduleFiltersOpen?'':'display:none;'}">
+        <div class="toolbar area-tabs" style="margin-bottom:8px;">
+          ${groups[Object.keys(groups).find(g=>groups[g].includes(tab))].map(t=>`<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}
+        </div>
+        ${renderFilters(rr, tab, filters, field, options, viewSwitcher)}
+        ${renderWeekNavigator(rr)}
+      </div>`;
+
+    $('#page').innerHTML = `<div class="mr-portal-container">${mrTopBar}${mrSubHeader}${mrFiltersDrawer}${recordsContent}</div>`;
+    
+    const qs = document.getElementById('mr-quick-search');
+    if(qs){
+      qs.oninput = (e) => {
+        search = e.target.value;
+        page = 0;
+        render();
+        const nqs = document.getElementById('mr-quick-search');
+        if(nqs){ nqs.focus(); nqs.setSelectionRange(nqs.value.length, nqs.value.length); }
+      };
+    }
+    const ftBtn = document.getElementById('mr-filter-toggle-btn');
+    if(ftBtn){
+      ftBtn.onclick = () => {
+        scheduleFiltersOpen = !scheduleFiltersOpen;
+        const panel = document.getElementById('mr-filters-panel');
+        if(panel) panel.style.display = scheduleFiltersOpen ? 'block' : 'none';
+      };
+    }
+  } else {
+    $('#page').innerHTML = header(sectionLabel(tab), descriptions[tab]||'Programme records, assignments and source details.') +
+      banner() +
+      sopBanner(tab) +
+      areaPicker() +
+      `<div class="toolbar area-tabs">${groups[Object.keys(groups).find(g=>groups[g].includes(tab))].map(t=>`<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}</div>` +
+      renderFilters(rr, tab, filters, field, options, viewSwitcher) +
+      `<p class="muted results-count" id="results-count-announcer" aria-live="polite">${formatResultsCount(rr,tab,records())}${yearFilter!=='all'?(yearFilter==='unresolved'?' · Unresolved / undated records':' · Year '+yearFilter):''}${sort==='date'?' · Unresolved dates follow recognised dates':''}${dateFrom||dateTo?' · Records with unresolved dates are excluded from this range':''}</p>` +
+      resultsHeading +
+      paginationTop +
+      recordsContent +
+      paginationBottom +
+      (tab==='CRC'&&db['CRC - retired']?crcDrawer():'');
+  }
 
   bindExtraFilters();
   if(tab==='Morning Report')bindWeekNavigatorEvents();
@@ -5676,7 +5757,7 @@ function editDialog(isNew,targetRole){
 
  $('#dialog-content').innerHTML=`
   <div class="edit-workflow-note-bar">
-   <p class="form-note">${user && user.isAuthenticated && ['Morning Report', 'CPS Academy VMRs'].includes(editingTab) ? 'Changes save directly to the Academy schedule.' : 'Saved on this device.'}</p>
+    <p class="form-note">${user && user.isAuthenticated && ['Morning Report', 'CPS Academy VMRs', 'OrgStructure', 'Members', 'Important links'].includes(editingTab) ? 'Changes save directly to the Academy schedule.' : 'Saved on this device.'}</p>
   </div>
   ${r.flags.length?`<details class="review-details"><summary>${r.flags.length} source details to verify</summary>${r.flags.map(f=>`<p>${esc(f)}</p>`).join('')}</details>`:''}
   ${sessionNotice(r)}
@@ -5809,7 +5890,7 @@ $('#dialog-primary').onclick=e=>{
   $('#detail-dialog').close();
   render();
   const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
-  const isOnlineEligible = user && user.isAuthenticated && !user.isMock && !isNew && ['Morning Report', 'CPS Academy VMRs'].includes(editingTab);
+  const isOnlineEligible = user && user.isAuthenticated && !user.isMock && !isNew && ['Morning Report', 'CPS Academy VMRs', 'OrgStructure', 'Members', 'Important links'].includes(editingTab);
   if (isOnlineEligible && Object.keys(updatedChanges).length > 0 && typeof fetch === 'function') {
     toast('Saved changes');
     const targetStableId = r.stableId || r.parentId || r.id;
@@ -6734,40 +6815,56 @@ function editorialCard(r){
    mon=dObj.toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'}).toUpperCase();
   }
  }
+ const fac=(r.fields.Facilitator||'').trim();
+ const isCanceled=/canceled|cancelled/i.test(fac);
  const railClass=editorialCardRail(r);
  const gaps=mrGaps(r);
  const sessionType=r.fields.Type||'Morning Report';
  const statusHtml=editorialCardStatus(r);
  const titleText=r.fields['Topic / Case']||title(r,'Morning Report')||sessionType;
+ const subtitleText=r.fields.Notes||r.fields['Theme / Series']||r.fields.Description||'';
+
  const staffingCells=['Facilitator','Presenter','Scribe','Teaching Points'].map(role=>{
   const isVacant=gaps.includes(role);
-  return `<div class="mr-role-cell"><span class="mr-role-label${isVacant?' role-vacant':''}">${role==='Teaching Points'?'TEACHING PTS':role.toUpperCase()}</span><div class="mr-role-value">${staffingSlot(r,role)}</div></div>`;
+  const roleLabel=role==='Teaching Points'?'TEACHING POINTS':role.toUpperCase();
+  return `<div class="mr-role-cell">
+   <span class="mr-role-label${isVacant?' role-vacant':''}">${roleLabel}</span>
+   <div class="mr-role-value">${staffingSlot(r,role)}</div>
+  </div>`;
  }).join('');
+
+ const staffingZone = (isCanceled && gaps.length === 4) ? `
+  <div class="mr-card-bypassed">
+   <span>📅</span>
+   <span>Session staffing bypassed for Grand Rounds / Recess</span>
+  </div>` : `
+  <div class="mr-card-staffing">
+   ${staffingCells}
+  </div>`;
+
  return `<article class="mr-card" data-record-id="${esc(r.id)}">
   <div class="mr-card-rail ${railClass}"></div>
-  <div class="mr-card-tier1">
-   <div class="mr-card-date">
-    <div class="mr-card-day-num${gaps.length?' day-warning':''}">${dayNum}</div>
-    <div class="mr-card-day-meta">
+  <div class="mr-card-date">
+   <div class="mr-card-day-num${gaps.length?' day-warning':''}">${dayNum}</div>
+   <div class="mr-card-day-meta">
+    <div class="mr-card-day-row">
      <span class="mr-card-weekday">${esc(wday)}</span>
      <span class="mr-card-month">${esc(mon)}</span>
-     <div class="mr-card-time">${esc(timeStr)}</div>
     </div>
+    <div class="mr-card-time">${isCanceled?'<span class="mr-time-canceled">⊘ No Session</span>':`<span>🕒</span> <span>${esc(timeStr)}</span>`}</div>
    </div>
-   <span class="mr-card-type-tag">${esc(sessionType)}</span>
-   ${statusHtml}
-   <h3 class="mr-card-title">${esc(titleText)}</h3>
-   <div class="mr-card-tags"></div>
   </div>
   <div class="mr-card-content">
-   <div class="mr-card-tags"><span class="mr-card-type-tag">${esc(sessionType)}</span>${statusHtml}</div>
+   <div class="mr-card-tags">
+    <span class="mr-card-type-tag">${esc(sessionType)}</span>
+    ${statusHtml}
+   </div>
    <h3 class="mr-card-title">${esc(titleText)}</h3>
+   ${subtitleText?`<p class="mr-card-subtitle">${esc(subtitleText)}</p>`:''}
   </div>
-  <div class="mr-card-staffing">${staffingCells}</div>
+  ${staffingZone}
   <div class="mr-card-actions">
-   ${sessionNotice(r)}
    <button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details">Details</button>
-   <button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button>
   </div>
  </article>`;
 }
@@ -6775,26 +6872,25 @@ function agendaView(rr){
  const {weeks,unresolved}=scheduleGroups(rr);
  if(mrScheduleRangeMode==='unresolved'){
    const unres = rr.filter(r=>!recordDate(r));
-   return `<section class="agenda-view">${scheduleSummary(rr)}<section class="panel unresolved-panel"><h2>Unresolved source dates (${unres.length})</h2><p class="muted">These records have spreadsheet errors, TBD values, or unrecognised date strings in the source workbook. They are excluded from calendar weeks until reviewed.</p><div class="agenda-session-list">${unres.map(r=>agendaCard(r,true)).join('')}</div></section></section>`;
+   return `<section class="agenda-view"><section class="panel unresolved-panel"><h2>Unresolved source dates (${unres.length})</h2><p class="muted">These records have spreadsheet errors, TBD values, or unrecognised date strings in the source workbook. They are excluded from calendar weeks until reviewed.</p><div class="agenda-session-list">${unres.map(r=>agendaCard(r,true)).join('')}</div></section></section>`;
  }
  if(!weeks.length&&!unresolved.length&&mrScheduleRangeMode==='all'){
-   return `<section class="agenda-view">${scheduleSummary(rr)}<section class="panel empty-state"><h3>No sessions found</h3><p class="muted">No Morning Report sessions match your active filters.</p></section></section>`;
+   return `<section class="agenda-view"><section class="panel empty-state"><h3>No sessions found</h3><p class="muted">No Morning Report sessions match your active filters.</p></section></section>`;
  }
 
  // Next 7 VMRs stream (crosses week boundaries, always chronologically next 7)
  const next7=getNextSevenVMRs();
- const stats=mrFilledStats(next7);
  const next7Html=next7.length?`
-  <section class="mr-meta-strip">
-   <h1>Virtual Morning Report (VMR)</h1>
-   <div class="mr-filled-badge"><span class="mr-filled-dot"></span><span>Filled: <strong>${stats.filled}/${stats.total}</strong> (${stats.pct}%)</span></div>
-  </section>
   <section style="display:flex;flex-direction:column;gap:10px;">
    <div class="mr-section-head">
-    <h2>Next 7 VMR Sessions</h2>
+    <div class="mr-section-title-wrap">
+      <h2>Next 7 VMR Sessions</h2>
+      <span class="mr-section-sub">· Consecutive Day-by-Day Operations</span>
+    </div>
     <div class="mr-legend">
      <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--brand)"></span> Confirmed</span>
      <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--warning-fg)"></span> Open Slot</span>
+     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--urgent-fg)"></span> Canceled/Blackout</span>
     </div>
    </div>
    <div class="mr-stream">${next7.map(r=>editorialCard(r)).join('')}</div>
@@ -6805,11 +6901,14 @@ function agendaView(rr){
  const isSingleWeek = mrScheduleRangeMode !== 'all';
  const weekRows = weeks.length ? weeks.flatMap(w => w.records.map((r, i) => renderMatrixItem({type:'record', record:r}, i))).join('') : '<tr><td colspan="7" style="text-align:center;padding:16px;">No dated sessions scheduled for this week.</td></tr>';
  const lowerStaffingTable = (!isMobile && isSingleWeek) ? `
-   <section class="agenda-staffing-section panel">
-     <div class="agenda-staffing-header">
+   <section class="agenda-staffing-section" style="margin-top:16px;">
+     <div class="agenda-staffing-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
        <div>
-         <h3 class="agenda-staffing-title">Weekly Staffing Detail</h3>
-         <p class="muted" style="margin:2px 0 0 0;font-size:12px;">Operational role assignments and vacancy management for this week.</p>
+         <h3 class="agenda-staffing-title" style="margin:0;font-size:16px;font-weight:600;">Weekly Staffing Master Roster</h3>
+         <p class="muted" style="margin:2px 0 0 0;font-size:12px;">Consolidated institutional staffing audit matrix with role verification markers.</p>
+       </div>
+       <div style="font-size:12px;color:var(--text-muted);">
+         Showing ${weeks.flatMap(w=>w.records).length} of ${weeks.flatMap(w=>w.records).length} Sessions
        </div>
      </div>
      <div class="matrix-card">

@@ -365,7 +365,8 @@ async function findRowByStableId(sheetId, tabName, targetStableId) {
   let range = '';
   if (tabName === 'Morning Report') range = "'Morning Report'!A1:S2500";
   else if (tabName === 'CPS Academy VMRs') range = "'CPS Academy VMRs'!A1:I400";
-  else if (tabName === 'OrgStructure') range = "'OrgStructure'!A1:I300";
+  else if (tabName === 'OrgStructure' || tabName === 'Members') range = "'OrgStructure'!A1:I300";
+  else if (tabName === 'Important links') range = "'Important links'!A1:C50";
   else range = `'${tabName}'!A1:Z500`;
 
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueRenderOption=FORMATTED_VALUE`;
@@ -376,7 +377,7 @@ async function findRowByStableId(sheetId, tabName, targetStableId) {
   const rows = data.values || [];
 
   const seen = new Set();
-  const startIndex = tabName === 'Morning Report' ? 6 : tabName === 'CPS Academy VMRs' ? 3 : 2;
+  const startIndex = tabName === 'Morning Report' ? 6 : tabName === 'CPS Academy VMRs' ? 3 : tabName === 'Members' ? 56 : (tabName === 'Important links' ? 1 : 2);
 
   for (let i = startIndex; i < rows.length; i++) {
     const rowNum = i + 1;
@@ -401,6 +402,30 @@ async function findRowByStableId(sheetId, tabName, targetStableId) {
         'Session title': String(r[1] ?? '').trim()
       };
       rowStableId = generateDeterministicId('CPS Academy VMRs', fields, seen);
+    } else if (tabName === 'Members') {
+      if (rowNum >= 57) {
+        const fields = {
+          _cps_id: String(r[8] ?? '').trim(),
+          Email: String(r[5] ?? '').trim(),
+          Name: String(r[0] ?? '').trim()
+        };
+        rowStableId = generateDeterministicId('Members', fields, seen);
+      }
+    } else if (tabName === 'OrgStructure') {
+      if (rowNum <= 55) {
+        const fields = {
+          _cps_id: String(r[3] ?? '').trim(),
+          'Team / responsibility': String(r[0] ?? '').trim(),
+          Role: String(r[2] ?? '').trim()
+        };
+        rowStableId = generateDeterministicId('OrgStructure', fields, seen);
+      }
+    } else if (tabName === 'Important links') {
+      const fields = {
+        _cps_id: String(r[2] ?? '').trim(),
+        Resource: String(r[0] ?? '').trim()
+      };
+      rowStableId = generateDeterministicId('Important links', fields, seen);
     }
 
     if (rowStableId === targetStableId || `${tabName}:${rowNum}` === targetStableId) {
