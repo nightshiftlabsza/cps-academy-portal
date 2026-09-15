@@ -6373,7 +6373,29 @@ window.addEventListener('hashchange',()=>{
   if(t!==tab&&(db[t]||['Home','Workspace'].includes(t)))navigate(t);
   else if(t==='Morning Report'&&mrParsed)render();
 });
-const loadWb = (typeof OfflineManager !== 'undefined' && OfflineManager.loadWorkbook) ? OfflineManager.loadWorkbook : () => fetch('workbook.json').then(r => { if (!r.ok) throw Error(); return r.json(); });
+const loadWb = async () => {
+  if (typeof OfflineManager !== 'undefined' && OfflineManager.loadWorkbook) {
+    try {
+      const cached = await OfflineManager.loadWorkbook();
+      if (cached && Object.keys(cached).length > 0) return cached;
+    } catch {}
+  }
+  if (typeof fetch === 'function') {
+    try {
+      const syncRes = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schemaVersion: 1, operation: 'readSnapshot', requestId: `init-${Date.now()}` })
+      });
+      if (syncRes.ok) {
+        const syncData = await syncRes.json();
+        if (syncData && syncData.workbook) return syncData.workbook;
+      }
+    } catch {}
+    return fetch('workbook.json').then(r => { if (!r.ok) throw Error(); return r.json(); });
+  }
+  throw new Error('No loader available');
+};
 loadWb().then(data=>{db=data;for(const[t,grp]of Object.entries(db))for(const r of grp.records)r._search=buildSearchIndex(r,t);let hash=decodeURIComponent(location.hash.slice(1));if(hash.startsWith('/'))hash=hash.slice(1);if(hash==='admin/issues'){if(isAdmin())tab='admin/issues';else tab='Home';}else if(hash==='profile/logbook'){tab='profile/logbook';}else if(hash==='Sessions'||hash==='sessions'){tab='Morning Report';}else if(hash==='People'){tab='OrgStructure';}else if(db[hash]||['Home','Workspace'].includes(hash))tab=hash;
 restoreSectionState(tab);
 const mrParsed=parseScheduleHash(hash);
