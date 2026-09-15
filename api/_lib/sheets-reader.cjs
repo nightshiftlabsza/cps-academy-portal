@@ -403,7 +403,7 @@ async function findRowByStableId(sheetId, tabName, targetStableId) {
       rowStableId = generateDeterministicId('CPS Academy VMRs', fields, seen);
     }
 
-    if (rowStableId === targetStableId || `Morning Report:${rowNum}` === targetStableId) {
+    if (rowStableId === targetStableId || `${tabName}:${rowNum}` === targetStableId) {
       return {
         rowNumber: rowNum,
         stableId: rowStableId,

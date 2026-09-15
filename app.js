@@ -5082,7 +5082,7 @@ function claimRole(sessionId, role) {
     };
     render();
     if (user && user.isAuthenticated && !user.isMock) {
-      toast(`Assigned ${user.name} as ${role}. Syncing to Google Sheets...`, { undo: true });
+      toast(`Signed up as ${role}`, { undo: true });
       if (typeof fetch === 'function') {
         const targetStableId = r.stableId || r.parentId || r.id;
         fetch('/api/mutate', {
@@ -5105,21 +5105,19 @@ function claimRole(sessionId, role) {
           if (!res.ok) {
             const errData = await res.json().catch(() => ({}));
             if (res.status === 409) {
-              toast(`Could not claim: ${errData.message || 'Slot already taken in Google Sheets'}`);
+              toast('This slot was just claimed by someone else.');
               undoClaim();
             } else {
-              toast(`Saved locally. Note: Google Sheets sync: ${errData.message || res.statusText}`);
+              toast('Saved on this device.');
             }
-          } else {
-            toast(`Synced to Google Sheets: ${user.name} claimed ${role}`);
           }
         })
         .catch(err => {
-          console.warn('Google Sheets mutation failed:', err);
+          console.warn('Mutation failed:', err);
         });
       }
     } else {
-      toast(`Assigned ${user.name} as ${role} (Local test profile). Saved on this device.`, { undo: true });
+      toast(`Signed up as ${role}`, { undo: true });
     }
     return { success: true, sessionId: r.id, role, field: changedField, value: newValue };
   }
@@ -5179,13 +5177,10 @@ function undoClaim() {
         }
       })
     })
-    .then(async res => {
-      if (res.ok) toast(`Cleared ${role} from Google Sheets.`);
-    })
-    .catch(err => console.warn('Undo sync error:', err));
+    .catch(err => console.warn('Undo error:', err));
   }
 
-  toast(`Undid ${role} claim.`);
+  toast(`Removed ${role} assignment.`);
   return true;
 }
 
@@ -5655,6 +5650,7 @@ function editDialog(isNew,targetRole){
  detailMode='edit';
  reviewedSessionFields=new Set();
  const r=selected;
+ const user=typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
 
  const eyebrowEl=$('#dialog-eyebrow');
  const titleEl=$('#dialog-title');
@@ -5680,7 +5676,7 @@ function editDialog(isNew,targetRole){
 
  $('#dialog-content').innerHTML=`
   <div class="edit-workflow-note-bar">
-   <p class="form-note">Saved on this device; no changes sent to the workbook.</p>
+   <p class="form-note">${user && user.isAuthenticated && ['Morning Report', 'CPS Academy VMRs'].includes(editingTab) ? 'Changes save directly to the Academy schedule.' : 'Saved on this device.'}</p>
   </div>
   ${r.flags.length?`<details class="review-details"><summary>${r.flags.length} source details to verify</summary>${r.flags.map(f=>`<p>${esc(f)}</p>`).join('')}</details>`:''}
   ${sessionNotice(r)}
@@ -5802,16 +5798,38 @@ $('#dialog-primary').onclick=e=>{
  $('#dialog-content').querySelectorAll('[data-field]').forEach(el=>fields[el.dataset.field]=el.value.trim());
  if(!fields[titles[editingTab]]){toast('Please enter the required title or name.');return}
  const isNew=e.currentTarget.dataset.isNew==='true',r={...selected,fields};
+ const updatedChanges=changedFields(fields,initialFormValues,reviewedSessionFields);
  if(mutate(w=>{
   if(isNew)w.added.push(r);
-  else w.edits[r.id]={...(w.edits[r.id]||{}),...changedFields(fields,initialFormValues,reviewedSessionFields)};
+  else w.edits[r.id]={...(w.edits[r.id]||{}),...updatedChanges};
   log(w,isNew?'Created':'Updated',r,editingTab);
  }, r.id)){
   initialFormValues=getFormValues();
   reviewedSessionFields.clear();
   $('#detail-dialog').close();
   render();
-  toast('Saved on this device');
+  const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+  const isOnlineEligible = user && user.isAuthenticated && !user.isMock && !isNew && ['Morning Report', 'CPS Academy VMRs'].includes(editingTab);
+  if (isOnlineEligible && Object.keys(updatedChanges).length > 0 && typeof fetch === 'function') {
+    toast('Saved changes');
+    const targetStableId = r.stableId || r.parentId || r.id;
+    fetch('/api/mutate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dataset: editingTab,
+        stableId: targetStableId,
+        fields: updatedChanges,
+        user: {
+          name: user.name,
+          email: user.email,
+          isAuthenticated: true
+        }
+      })
+    }).catch(err => console.warn('Sync update warning:', err));
+  } else {
+    toast(isNew ? 'Record created' : 'Saved on this device');
+  }
  }
 };
 
@@ -6101,7 +6119,16 @@ document.addEventListener('keydown',e=>{
     }
   }
 });
-$('.sync-card').onclick=()=>navigate('Workspace');$('.sync-card strong').textContent='Workbook snapshot';$('.sync-card small').textContent='Local changes · no live sync';$('.notification-button')?.remove();
+if ($('.sync-card')) {
+  $('.sync-card').onclick = () => navigate('Workspace');
+}
+if ($('#nav-workspace-btn')) {
+  $('#nav-workspace-btn').onclick = () => {
+    $('#admin-prefs-dialog')?.close();
+    navigate('Workspace');
+  };
+}
+$('.notification-button')?.remove();
 if($('#feedback-trigger-btn'))$('#feedback-trigger-btn').onclick=openIssueModal;
 if($('#issue-report-form'))$('#issue-report-form').onsubmit=submitIssueReport;
 if($('#profile-options-btn'))$('#profile-options-btn').onclick=()=>{
@@ -6257,6 +6284,45 @@ if ($('#auth-logout-btn')) {
 }
 
 enforceAuthGate();
+
+let lastKnownHash = null;
+async function silentBackgroundReconcile() {
+  if (typeof window === 'undefined' || typeof fetch !== 'function') return;
+  const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+  if (!user || !user.isAuthenticated) return;
+
+  try {
+    const res = await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: `poll-${Date.now()}`,
+        knownSnapshotHash: lastKnownHash || undefined
+      })
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.snapshotHash) {
+      if (lastKnownHash && data.snapshotHash !== lastKnownHash && data.workbook) {
+        for (const [t, grp] of Object.entries(data.workbook)) {
+          if (db[t]) {
+            db[t] = grp;
+            for (const rec of grp.records) rec._search = buildSearchIndex(rec, t);
+          }
+        }
+        render();
+      }
+      lastKnownHash = data.snapshotHash;
+    }
+  } catch {}
+}
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('focus', () => { silentBackgroundReconcile(); });
+}
+if (typeof setInterval === 'function') {
+  setInterval(() => { silentBackgroundReconcile(); }, 120000);
+}
 
 bindSwapEvents();
 if(typeof Identity!=='undefined'){
@@ -6474,6 +6540,21 @@ function updateRoleAssignment(sessionId, role, updateFn){
  },sessionId);
  if(success){
   render();
+  const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+  if (user && user.isAuthenticated && !user.isMock && typeof fetch === 'function') {
+    const targetStableId = r.stableId || r.parentId || r.id;
+    fetch('/api/mutate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dataset: 'Morning Report',
+        stableId: targetStableId,
+        field: changedField,
+        value: newValue,
+        user: { name: user.name, email: user.email, isAuthenticated: true }
+      })
+    }).catch(err => console.warn('Staff token mutation error:', err));
+  }
   return {success:true,newTokens:nextTokens,value:newValue};
  }
  return {success:false};

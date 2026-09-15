@@ -142,3 +142,89 @@ test('mutate: live round-trip claiming empty Presenter slot and reverting', asyn
   assert.equal(revertResult.body.value, '');
 });
 
+test('mutate: rejects invalid field for CPS Academy VMRs with 400', async () => {
+  const { req, res, getResult } = mockReqRes({
+    body: {
+      user: { isAuthenticated: true, name: 'Zak' },
+      dataset: 'CPS Academy VMRs',
+      stableId: 'CPS Academy VMRs:4',
+      field: 'InvalidColumn',
+      value: 'Test'
+    }
+  });
+  await mutateHandler(req, res);
+  const result = getResult();
+  assert.equal(result.status, 400);
+  assert.equal(result.body.error, 'INVALID_FIELD');
+});
+
+test('mutate: supports batchUpdate for multiple fields', async () => {
+  const { req, res, getResult } = mockReqRes({
+    body: {
+      user: { isAuthenticated: true, name: 'Zak' },
+      dataset: 'Morning Report',
+      stableId: 'mr-2026-12-31-spontaneous-6-00-am',
+      fields: {
+        'Notes': 'Automated batch test note',
+        'Chat support': 'Test bot'
+      }
+    }
+  });
+  await mutateHandler(req, res);
+  const result = getResult();
+  assert.equal(result.status, 200);
+  assert.equal(result.body.success, true);
+  assert.equal(result.body.operation, 'batchUpdate');
+  assert.deepEqual(result.body.updatedFields, ['Notes', 'Chat support']);
+
+  // Clean up reverting notes and chat support
+  const { req: revReq, res: revRes, getResult: getRevResult } = mockReqRes({
+    body: {
+      user: { isAuthenticated: true, name: 'Zak' },
+      dataset: 'Morning Report',
+      stableId: 'mr-2026-12-31-spontaneous-6-00-am',
+      fields: {
+        'Notes': '',
+        'Chat support': ''
+      }
+    }
+  });
+  await mutateHandler(revReq, revRes);
+  const revResult = getRevResult();
+  assert.equal(revResult.status, 200);
+  assert.equal(revResult.body.success, true);
+});
+
+test('mutate: live round-trip for CPS Academy VMRs', async () => {
+  const { req, res, getResult } = mockReqRes({
+    body: {
+      user: { isAuthenticated: true, name: 'Zak' },
+      dataset: 'CPS Academy VMRs',
+      stableId: 'CPS Academy VMRs:4',
+      fields: {
+        'Bonus learning': 'https://example.com/test-learning'
+      }
+    }
+  });
+  await mutateHandler(req, res);
+  const result = getResult();
+  assert.equal(result.status, 200);
+  assert.equal(result.body.success, true);
+  assert.equal(result.body.operation, 'batchUpdate');
+
+  // Revert back
+  const { req: revReq, res: revRes, getResult: getRevResult } = mockReqRes({
+    body: {
+      user: { isAuthenticated: true, name: 'Zak' },
+      dataset: 'CPS Academy VMRs',
+      stableId: 'CPS Academy VMRs:4',
+      fields: {
+        'Bonus learning': ''
+      }
+    }
+  });
+  await mutateHandler(revReq, revRes);
+  assert.equal(getRevResult().status, 200);
+});
+
+

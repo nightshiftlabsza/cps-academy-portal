@@ -19,6 +19,10 @@ const {
 } = require('./_lib/sheets-reader.cjs');
 
 const MORNING_REPORT_COLUMNS = {
+  'Date': { col: 'A', index: 0 },
+  'Pacific time (source)': { col: 'B', index: 1 },
+  'Eastern time (source)': { col: 'C', index: 2 },
+  'Type': { col: 'D', index: 3 },
   'Facilitator': { col: 'F', index: 5 },
   'Presenter': { col: 'G', index: 6 },
   'Active participant 1': { col: 'H', index: 7 },
@@ -28,6 +32,22 @@ const MORNING_REPORT_COLUMNS = {
   'Chat support': { col: 'L', index: 11 },
   'Notes': { col: 'M', index: 12 },
   'Scribe / teaching points sign-ups': { col: 'N', index: 13 }
+};
+
+const CPS_ACADEMY_VMRS_COLUMNS = {
+  'Facilitator': { col: 'A', index: 0 },
+  'Session title': { col: 'B', index: 1 },
+  'Topic': { col: 'C', index: 2 },
+  'Date / time (source)': { col: 'D', index: 3 },
+  'Meeting info': { col: 'E', index: 4 },
+  'Recording': { col: 'F', index: 5 },
+  'Public flag (source)': { col: 'G', index: 6 },
+  'Bonus learning': { col: 'H', index: 7 }
+};
+
+const DATASET_COLUMNS = {
+  'Morning Report': MORNING_REPORT_COLUMNS,
+  'CPS Academy VMRs': CPS_ACADEMY_VMRS_COLUMNS
 };
 
 function parseBody(req) {
@@ -64,7 +84,7 @@ module.exports = async function mutateHandler(req, res) {
     return sendJson(400, { error: 'INVALID_JSON', message: 'Malformed JSON payload' });
   }
 
-  const { dataset, stableId, field, value, expectedPreviousValue, user } = body || {};
+  const { dataset, stableId, field, value, expectedPreviousValue, fields, user } = body || {};
 
   // 1. Authentication guard
   if (!user || !user.isAuthenticated) {
@@ -72,20 +92,37 @@ module.exports = async function mutateHandler(req, res) {
   }
 
   // 2. Input validation
-  if (!dataset || dataset !== 'Morning Report') {
-    return sendJson(400, { error: 'INVALID_DATASET', message: 'Currently only Morning Report mutations are supported' });
+  const colMap = DATASET_COLUMNS[dataset];
+  if (!colMap) {
+    return sendJson(400, {
+      error: 'INVALID_DATASET',
+      message: `Dataset "${dataset}" is not mutable. Allowed: ${Object.keys(DATASET_COLUMNS).join(', ')}`
+    });
   }
 
   if (!stableId || typeof stableId !== 'string') {
     return sendJson(400, { error: 'MISSING_STABLE_ID', message: 'A valid record stableId is required' });
   }
 
-  const colDef = MORNING_REPORT_COLUMNS[field];
-  if (!colDef) {
-    return sendJson(400, {
-      error: 'INVALID_FIELD',
-      message: `Field "${field}" is not mutable. Allowed: ${Object.keys(MORNING_REPORT_COLUMNS).join(', ')}`
-    });
+  const fieldUpdates = {};
+  if (fields && typeof fields === 'object') {
+    for (const [k, v] of Object.entries(fields)) {
+      if (colMap[k]) {
+        fieldUpdates[k] = v;
+      }
+    }
+  } else if (field && typeof field === 'string') {
+    if (!colMap[field]) {
+      return sendJson(400, {
+        error: 'INVALID_FIELD',
+        message: `Field "${field}" is not mutable. Allowed: ${Object.keys(colMap).join(', ')}`
+      });
+    }
+    fieldUpdates[field] = value;
+  }
+
+  if (Object.keys(fieldUpdates).length === 0) {
+    return sendJson(400, { error: 'NO_VALID_FIELDS', message: 'No mutable fields were provided' });
   }
 
   const sheetId = process.env.SYNC_SHEET_ID;
@@ -101,10 +138,11 @@ module.exports = async function mutateHandler(req, res) {
     }
 
     const { rowNumber, values } = match;
-    const currentValue = String(values[colDef.index] ?? '').trim();
 
     // 4. Concurrency / vacancy check
-    if (expectedPreviousValue !== undefined) {
+    if (field && expectedPreviousValue !== undefined) {
+      const colDef = colMap[field];
+      const currentValue = String(values[colDef.index] ?? '').trim();
       const expectedClean = String(expectedPreviousValue).trim();
       if (currentValue !== expectedClean) {
         return sendJson(409, {
@@ -115,23 +153,29 @@ module.exports = async function mutateHandler(req, res) {
       }
     }
 
-    // 5. Execute cell update in Google Sheets
+    // 5. Execute cell updates in Google Sheets
     const creds = getCredentials();
     const token = await getAccessToken(creds);
 
-    const cellRange = `'${dataset}'!${colDef.col}${rowNumber}`;
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(cellRange)}?valueInputOption=USER_ENTERED`;
+    const updateData = Object.entries(fieldUpdates).map(([fName, fVal]) => {
+      const colDef = colMap[fName];
+      return {
+        range: `'${dataset}'!${colDef.col}${rowNumber}`,
+        majorDimension: 'ROWS',
+        values: [[String(fVal ?? '').trim()]]
+      };
+    });
 
-    const updateRes = await fetch(url, {
-      method: 'PUT',
+    const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`;
+    const updateRes = await fetch(batchUrl, {
+      method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        range: cellRange,
-        majorDimension: 'ROWS',
-        values: [[String(value ?? '').trim()]]
+        valueInputOption: 'USER_ENTERED',
+        data: updateData
       })
     });
 
@@ -143,15 +187,27 @@ module.exports = async function mutateHandler(req, res) {
     // 6. Invalidate read cache so next snapshot fetch gets fresh data
     clearCache();
 
+    if (field && !fields) {
+      const colDef = colMap[field];
+      return sendJson(200, {
+        success: true,
+        operation: 'updateCell',
+        dataset,
+        stableId,
+        rowNumber,
+        field,
+        value: String(value ?? '').trim(),
+        updatedRange: `'${dataset}'!${colDef.col}${rowNumber}`
+      });
+    }
+
     return sendJson(200, {
       success: true,
-      operation: 'updateCell',
+      operation: 'batchUpdate',
       dataset,
       stableId,
       rowNumber,
-      field,
-      value: String(value ?? '').trim(),
-      updatedRange: cellRange
+      updatedFields: Object.keys(fieldUpdates)
     });
   } catch (err) {
     return sendJson(500, { error: 'MUTATION_ERROR', message: err.message });
