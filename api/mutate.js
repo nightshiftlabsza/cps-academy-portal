@@ -17,6 +17,7 @@ const {
   clearCache,
   findRowByStableId
 } = require('./_lib/sheets-reader.cjs');
+const { recordOperation } = require('./_lib/db.cjs');
 
 const MORNING_REPORT_COLUMNS = {
   'Date': { col: 'A', index: 0 },
@@ -186,6 +187,23 @@ module.exports = async function mutateHandler(req, res) {
 
     // 6. Invalidate read cache so next snapshot fetch gets fresh data
     clearCache();
+
+    // 7. Record to durable operation journal
+    try {
+      for (const [fName, fVal] of Object.entries(fieldUpdates)) {
+        await recordOperation({
+          userId: user.email || user.name || 'anonymous',
+          sessionId: stableId,
+          targetTab: dataset,
+          targetField: fName,
+          previousValue: (field === fName && expectedPreviousValue !== undefined) ? expectedPreviousValue : (values ? String(values[colMap[fName]?.index] ?? '') : null),
+          newValue: fVal,
+          status: 'committed'
+        });
+      }
+    } catch (journalErr) {
+      console.warn('Journal log notice:', journalErr.message);
+    }
 
     if (field && !fields) {
       const colDef = colMap[field];

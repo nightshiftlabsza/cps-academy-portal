@@ -36,3 +36,4 @@ __pycache__/
 .DS_Store
 Thumbs.db
 # workbook.json is intentional private application data, not a public sample.
+data/
