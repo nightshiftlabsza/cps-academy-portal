@@ -287,7 +287,7 @@ test('mutate: synthetic round-trip for CPS Academy VMRs', async () => {
     body: {
       user: { isAuthenticated: true, name: 'Zak' },
       dataset: 'CPS Academy VMRs',
-      stableId: 'CPS Academy VMRs:4',
+      stableId: 'vmr-2026-09-01-session-1',
       fields: {
         'Bonus learning': 'https://example.com/test-learning'
       }

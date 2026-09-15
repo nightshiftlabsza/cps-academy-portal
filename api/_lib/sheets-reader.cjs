@@ -428,7 +428,7 @@ async function findRowByStableId(sheetId, tabName, targetStableId) {
       rowStableId = generateDeterministicId('Important links', fields, seen);
     }
 
-    if (rowStableId === targetStableId || `${tabName}:${rowNum}` === targetStableId) {
+    if (rowStableId === targetStableId) {
       return {
         rowNumber: rowNum,
         stableId: rowStableId,
