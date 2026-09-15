@@ -2,6 +2,104 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { generateKeyPairSync } = require('node:crypto');
+
+// Generate synthetic RSA key for offline signature verification (ZERO real credentials)
+const { privateKey } = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+});
+
+process.env.SYNC_SERVICE_ACCOUNT_KEY = JSON.stringify({
+  client_email: 'synthetic@test.iam.gserviceaccount.com',
+  private_key: privateKey
+});
+process.env.SYNC_SHEET_ID = 'synthetic-sheet-id-12345';
+
+// Synthetic in-memory sheet state
+const syntheticSheet = {
+  'Morning Report': [
+    [], [], [], [], [], [],
+    // Row 7 (index 6):
+    ['12/31/2026', '6:00 AM', '9:00 AM', 'Spontaneous', '', 'Rabih & TBD', '', '', '', '', '', '', '', '', '', '', '', '', '']
+  ],
+  'CPS Academy VMRs': [
+    [], [], [],
+    // Row 4 (index 3):
+    ['Facilitator Name', 'Session 1', 'Cardiology', '2026-09-01', 'Zoom Link', '', '', '', '']
+  ]
+};
+
+// Network blocker: intercept all fetch calls to ensure 0 outbound requests
+const originalFetch = global.fetch;
+global.fetch = async (url, options = {}) => {
+  const urlStr = String(url);
+
+  // 1. Google OAuth2 token exchange
+  if (urlStr.includes('oauth2.googleapis.com/token')) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ access_token: 'synthetic-jwt-token', expires_in: 3600 })
+    };
+  }
+
+  // 2. Google Sheets GET values (row scanning)
+  if (urlStr.includes('/values/') && (!options.method || options.method === 'GET')) {
+    if (urlStr.includes('Morning%20Report')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ values: syntheticSheet['Morning Report'] })
+      };
+    }
+    if (urlStr.includes('CPS%20Academy%20VMRs')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ values: syntheticSheet['CPS Academy VMRs'] })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ values: [] })
+    };
+  }
+
+  // 3. Google Sheets POST batchUpdate (mutations)
+  if (urlStr.includes('values:batchUpdate') && options.method === 'POST') {
+    if (options.body) {
+      try {
+        const bodyObj = JSON.parse(options.body);
+        for (const item of (bodyObj.data || [])) {
+          const m = item.range.match(/'([^']+)'!([A-Z]+)(\d+)/);
+          if (m) {
+            const tab = m[1];
+            const colLetter = m[2];
+            const rowNum = parseInt(m[3], 10);
+            const colIdx = colLetter.charCodeAt(0) - 65;
+            if (syntheticSheet[tab] && syntheticSheet[tab][rowNum - 1]) {
+              syntheticSheet[tab][rowNum - 1][colIdx] = item.values[0][0];
+            }
+          }
+        }
+      } catch {}
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ totalUpdatedCells: 1, responses: [] })
+    };
+  }
+
+  throw new Error(`Outbound network call BLOCKED in synthetic unit test: ${urlStr}`);
+};
+
+test.after(() => {
+  global.fetch = originalFetch;
+});
+
 const mutateHandler = require('../api/mutate.js');
 
 function mockReqRes(options = {}) {
@@ -103,8 +201,8 @@ test('mutate: detects concurrency conflict (409) when slot is already occupied',
   assert.match(result.body.currentValue, /Rabih/);
 });
 
-test('mutate: live round-trip claiming empty Presenter slot and reverting', async () => {
-  const testVal = 'Zak Test Presenter';
+test('mutate: synthetic round-trip claiming empty Presenter slot and reverting', async () => {
+  const testVal = 'Synthetic Presenter';
 
   // 1. Claim vacant Presenter slot
   const { req: writeReq, res: writeRes, getResult: getWriteResult } = mockReqRes({
@@ -165,7 +263,7 @@ test('mutate: supports batchUpdate for multiple fields', async () => {
       dataset: 'Morning Report',
       stableId: 'mr-2026-12-31-spontaneous-6-00-am',
       fields: {
-        'Notes': 'Automated batch test note',
+        'Notes': 'Synthetic batch test note',
         'Chat support': 'Test bot'
       }
     }
@@ -176,26 +274,9 @@ test('mutate: supports batchUpdate for multiple fields', async () => {
   assert.equal(result.body.success, true);
   assert.equal(result.body.operation, 'batchUpdate');
   assert.deepEqual(result.body.updatedFields, ['Notes', 'Chat support']);
-
-  // Clean up reverting notes and chat support
-  const { req: revReq, res: revRes, getResult: getRevResult } = mockReqRes({
-    body: {
-      user: { isAuthenticated: true, name: 'Zak' },
-      dataset: 'Morning Report',
-      stableId: 'mr-2026-12-31-spontaneous-6-00-am',
-      fields: {
-        'Notes': '',
-        'Chat support': ''
-      }
-    }
-  });
-  await mutateHandler(revReq, revRes);
-  const revResult = getRevResult();
-  assert.equal(revResult.status, 200);
-  assert.equal(revResult.body.success, true);
 });
 
-test('mutate: live round-trip for CPS Academy VMRs', async () => {
+test('mutate: synthetic round-trip for CPS Academy VMRs', async () => {
   const { req, res, getResult } = mockReqRes({
     body: {
       user: { isAuthenticated: true, name: 'Zak' },
@@ -211,20 +292,4 @@ test('mutate: live round-trip for CPS Academy VMRs', async () => {
   assert.equal(result.status, 200);
   assert.equal(result.body.success, true);
   assert.equal(result.body.operation, 'batchUpdate');
-
-  // Revert back
-  const { req: revReq, res: revRes, getResult: getRevResult } = mockReqRes({
-    body: {
-      user: { isAuthenticated: true, name: 'Zak' },
-      dataset: 'CPS Academy VMRs',
-      stableId: 'CPS Academy VMRs:4',
-      fields: {
-        'Bonus learning': ''
-      }
-    }
-  });
-  await mutateHandler(revReq, revRes);
-  assert.equal(getRevResult().status, 200);
 });
-
-

@@ -2,6 +2,75 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { generateKeyPairSync } = require('node:crypto');
+
+// Generate synthetic RSA key for offline signature verification (ZERO real credentials)
+const { privateKey } = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+});
+
+process.env.SYNC_SERVICE_ACCOUNT_KEY = JSON.stringify({
+  client_email: 'synthetic@test.iam.gserviceaccount.com',
+  private_key: privateKey
+});
+process.env.SYNC_SHEET_ID = 'synthetic-sheet-id-12345';
+process.env.SYNC_ALLOWED_TABS = 'Morning Report,CPS Academy VMRs';
+
+// Network blocker: intercept all fetch calls to ensure 0 outbound requests
+const originalFetch = global.fetch;
+global.fetch = async (url, options = {}) => {
+  const urlStr = String(url);
+
+  if (urlStr.includes('oauth2.googleapis.com/token')) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ access_token: 'synthetic-jwt-token', expires_in: 3600 })
+    };
+  }
+
+  if (urlStr.includes('values:batchGet')) {
+    const mrRows = [
+      ['Date', 'Pacific', 'Eastern', 'Type', 'Case', 'Facilitator'],
+      [], [], [], [], [],
+      ['12/31/2026', '6:00 AM', '9:00 AM', 'Spontaneous', '', 'Rabih']
+    ];
+    const vmrRows = [
+      ['Facilitator', 'Session title', 'Topic', 'Date / time (source)', 'Meeting info', 'Recording', 'Public flag', 'Bonus learning'],
+      [], [],
+      ['Facilitator Name', 'Session 1', 'Cardiology', '2026-09-01', 'Zoom Link', '', '', '']
+    ];
+    const orgRows = [
+      ['Team / responsibility', 'Members', 'Role'],
+      [],
+      ['Core Team', 'Member 1', 'Lead']
+    ];
+    const linkRows = [
+      ['Resource', 'Link'],
+      ['Guidelines', 'https://example.com/guidelines']
+    ];
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        valueRanges: [
+          { values: mrRows },
+          { values: vmrRows },
+          { values: orgRows },
+          { values: linkRows }
+        ]
+      })
+    };
+  }
+
+  throw new Error(`Outbound network call BLOCKED in synthetic unit test: ${urlStr}`);
+};
+
+test.after(() => {
+  global.fetch = originalFetch;
+});
+
 const syncHandlerEntry = require('../api/sync.js');
 const { generateDeterministicId, slugify } = require('../api/_lib/sheets-reader.cjs');
 
@@ -36,7 +105,6 @@ test('shelly ingestion: sync endpoint enforces contract schemaVersion and operat
   const { req, res, getResult } = mockReqRes({
     body: {
       requestId: 'test-invalid-schema'
-      // missing schemaVersion: 1 and operation: 'readSnapshot'
     }
   });
   await syncHandlerEntry(req, res);
@@ -110,20 +178,18 @@ test('shelly ingestion: 60 bulk row additions produce 0 ID collisions and surviv
     generatedIds.push(stableId);
   }
 
-  assert.equal(generatedIds.length, 60);
-  assert.equal(new Set(generatedIds).size, 60, 'All 60 bulk sessions must have unique stable IDs');
+  // 1. Zero collisions among 60 bulk rows
+  const uniqueIds = new Set(generatedIds);
+  assert.equal(uniqueIds.size, 60, 'All 60 bulk additions must have unique deterministic IDs');
 
-  // Verify row shifting: existing record ID is unaffected when 30 rows are inserted before it
-  const shiftedRecordFields = {
-    Date: '2026-12-15',
+  // 2. Shifting row index in physical sheet does NOT change stableId
+  const shiftedFields = {
+    Date: '2026-11-05',
     'Pacific time (source)': '6:00 AM',
-    Type: 'Scheduled',
-    Facilitator: 'Reza'
+    Type: 'Spontaneous',
+    Facilitator: 'Shelly'
   };
-  const seenBefore = new Set();
-  const idAtRow50 = generateDeterministicId('Morning Report', shiftedRecordFields, seenBefore);
-
-  const seenAfterShift = new Set();
-  const idAtRow80 = generateDeterministicId('Morning Report', shiftedRecordFields, seenAfterShift);
-  assert.equal(idAtRow50, idAtRow80, 'Physical row shift from row 50 to row 80 must not alter stable ID');
+  const idAtRow100 = generateDeterministicId('Morning Report', shiftedFields, new Set());
+  const idAtRow250 = generateDeterministicId('Morning Report', shiftedFields, new Set());
+  assert.equal(idAtRow100, idAtRow250, 'Deterministic ID must be invariant to physical row number shifting');
 });
