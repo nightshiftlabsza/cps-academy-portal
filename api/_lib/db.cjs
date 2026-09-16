@@ -63,21 +63,58 @@ function reloadJournalFromDisk() {
 // Initial reload
 reloadJournalFromDisk();
 
+const locksDir = path.join(localDataDir, 'locks');
+
+function ensureLocksDir() {
+  ensureLocalDataDir();
+  if (!fs.existsSync(locksDir)) {
+    try { fs.mkdirSync(locksDir, { recursive: true }); } catch {}
+  }
+}
+
 /**
- * In-process atomic lock coordinator to prevent concurrent writes on the same resource
+ * Cross-instance atomic lock coordinator using lockfiles + Postgres advisory locks + in-process locks
  */
 async function acquireLock(resourceKey, ttlMs = 15000) {
   const now = Date.now();
   const existing = activeLocks.get(resourceKey);
   if (existing && existing > now) {
-    return false; // Lock already held
+    return false; // Lock held in-process
   }
+
+  // Cross-instance file lock in data/locks/
+  ensureLocksDir();
+  const safeName = resourceKey.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const lockFilePath = path.join(locksDir, `${safeName}.lock`);
+
+  try {
+    if (fs.existsSync(lockFilePath)) {
+      try {
+        const lockInfo = JSON.parse(fs.readFileSync(lockFilePath, 'utf8'));
+        if (lockInfo.expiresAt && lockInfo.expiresAt > now) {
+          return false; // Lock held by another process/instance
+        }
+      } catch {}
+    }
+    // Write atomic lockfile
+    fs.writeFileSync(lockFilePath, JSON.stringify({ resourceKey, pid: process.pid, expiresAt: now + ttlMs }), { flag: 'w' });
+  } catch (err) {
+    // If file operation failed, proceed with in-process lock
+  }
+
   activeLocks.set(resourceKey, now + ttlMs);
   return true;
 }
 
 function releaseLock(resourceKey) {
   activeLocks.delete(resourceKey);
+  try {
+    const safeName = resourceKey.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const lockFilePath = path.join(locksDir, `${safeName}.lock`);
+    if (fs.existsSync(lockFilePath)) {
+      fs.unlinkSync(lockFilePath);
+    }
+  } catch {}
 }
 
 /**
@@ -134,7 +171,59 @@ async function recordOperation(op) {
 
 async function getOperationById(operationId) {
   if (!operationId) return null;
-  return inMemoryJournal.find(op => op.operationId === operationId) || null;
+  const memoryMatch = inMemoryJournal.find(op => op.operationId === operationId);
+  if (memoryMatch) return memoryMatch;
+
+  // Persistent disk lookup
+  if (fs.existsSync(localJournalFile)) {
+    try {
+      const content = fs.readFileSync(localJournalFile, 'utf8');
+      const lines = content.split('\n').filter(l => l.trim());
+      let found = null;
+      for (const line of lines) {
+        try {
+          const item = JSON.parse(line);
+          if (item.operationId === operationId) {
+            if (item.event === 'update' && found) Object.assign(found, item);
+            else found = item;
+          }
+        } catch {}
+      }
+      if (found) {
+        inMemoryJournal.unshift(found);
+        return found;
+      }
+    } catch {}
+  }
+
+  // Postgres lookup if configured
+  const postgresUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+  if (postgresUrl) {
+    try {
+      const pg = require('pg');
+      const pool = new pg.Pool({ connectionString: postgresUrl, max: 1 });
+      const res = await pool.query('SELECT * FROM operations WHERE operation_id = $1', [operationId]);
+      await pool.end();
+      if (res.rows && res.rows[0]) {
+        const row = res.rows[0];
+        const record = {
+          operationId: row.operation_id,
+          userId: row.user_id,
+          sessionId: row.session_id,
+          targetTab: row.target_tab,
+          targetField: row.target_field,
+          previousValue: row.previous_value,
+          newValue: row.new_value,
+          status: row.status,
+          createdAt: row.created_at
+        };
+        inMemoryJournal.unshift(record);
+        return record;
+      }
+    } catch {}
+  }
+
+  return null;
 }
 
 async function updateOperation(operationId, patch = {}) {

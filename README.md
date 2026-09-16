@@ -46,11 +46,20 @@ The mobile suite covers all 18 sections at 320, 360, 390, 430, 820 and 1440 pixe
 - `AGENTS.md` / `CLAUDE.md`: shared instructions for coding agents.
 
 ## What works and what remains
-Dashboard, pins, search with match snippets, cards/tables, date and skill filters, staffing helper, archive links, local drafts/edits/restore, backup import/export, versioned offline loading via service worker (`sw.js`), cache recovery, and activity history work. Edits are device-local; there is no shared database, member authorization or live Sheets connection. Source dates remain intact; ambiguous dates are not guessed.
+Dashboard, pins, search with match snippets, cards/tables, date and skill filters, staffing helper, archive links, local drafts/edits/restore, backup import/export, versioned offline loading via service worker (`sw.js`), cache recovery, and activity history work.
 
-Moving source code does NOT transfer browser-local edits from the hosted URL to localhost. On the hosted portal, use Workspace → Download backup, then import it at the local URL. Keep backups private. The original uploaded workbook is not part of this code archive; retain it separately if needed for later import work.
+### Live Synchronization & Shared Architecture
+- **Authentication & Access Model:** Shared organization password with verified directory email identification for the small, high-trust team. Sessions are signed with HMAC-SHA256 cookies. Directory profile updates strictly enforce email-matching session ownership.
+- **Confirmed Save & Rollback:** UI save paths (quick role claim, staff token updates, session notes, and the general detail dialog) await server HTTP response. Saves show confirmed success feedback only on HTTP 200; on HTTP 409 conflict or network failure, optimistic local edits are automatically rolled back without losing earlier valid state.
+- **Concurrency & Write Serialization:** Writes coordinate atomic locks before reading current sheet values, serializing concurrent single-field and batch updates across instances and rejecting conflicts.
+- **Split Session Lineage:** Morning Report split sessions (sub-sessions within compound rows) validate positive child indexes and isolate writes to the targeted child segment without clobbering sibling sessions.
+- **Operations Journal & Interrupted Recovery:** Operations are logged durably (`data/operations.jsonl` or PostgreSQL) with persistent lookup. Interrupted writes reconcile by verifying whether target sheet cells already reflect the intended value before retrying.
+- **Deterministic Reconciliation:** `scripts/reconcile-workbooks.cjs` validates independent remote snapshots against local snapshots across all 15 datasets, reporting field discrepancies, missing rows, and rejecting duplicate stable IDs.
 
-Priorities: shared saving and permissions, concurrent edit protection, stable IDs, then approved read-only Sheets integration. The importer repair script expects the original workbook in ignored upload/; it is not needed to run this app.
+### Remaining Limitations (Do Not Deploy Yet)
+- Live synchronization requires configuring server environment variables (`SYNC_SHEET_ID`, `GOOGLE_APPLICATION_CREDENTIALS`).
+- Stronger multi-factor or per-user account authentication remains a planned future improvement beyond the current shared-credential model.
+- Deployment cutover is intentionally held until final end-to-end rehearsal and administrative review are completed.
 
 ## Make this the canonical project
 Open this extracted folder as your ChatGPT Work Local project, in VS Code, Claude Code or Antigravity. Keep one main GitHub repository. Use separate branches/worktrees for simultaneous agents, and merge reviewed changes. Do not run multiple agents against the same working files at once.

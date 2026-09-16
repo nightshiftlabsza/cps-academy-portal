@@ -1012,6 +1012,7 @@ function updateProfileDisplay(){
 function setAdminMode(active){mutate(w=>{w.isAdmin=Boolean(active);w.role=active?'Super admin':'VMR Leadership'});updateProfileDisplay();if(!isAdmin()&&(tab==='admin/issues'||tab==='Admin Issues'))navigate('Home');else render();toast(isAdmin()?'Super admin mode enabled':'Switched to standard member profile')}
 async function dispatchIssueReport(issueData){const WEBHOOK_URL='';if(WEBHOOK_URL){try{await fetch(WEBHOOK_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(issueData)})}catch(e){console.warn('Webhook dispatch error:',e)}}}
 function navigate(t){
+  const toastEl=$('#toast');if(toastEl){toastEl.classList.remove('show');clearTimeout(toast?.timer);}
   if(t!==tab)scheduleFiltersOpen=false;
   const dialog=$('#detail-dialog');
   if(dialog?.open){
@@ -1041,13 +1042,23 @@ function navigate(t){
 function nav(){
   const entries=['Home',...Object.keys(groups),'Workspace',...(isAdmin()?['Issue Reports']:[])];
   const current=tab==='admin/issues'?'Issue Reports':tab==='profile/logbook'?'':(Object.keys(groups).find(g=>groups[g].includes(tab))||tab);
-  $('#desktop-nav').innerHTML=entries.map(g=>`<button class="nav-button ${current===g?'active':''}" ${current===g?'aria-current="page"':''} data-nav="${g}">${g}${g==='Issue Reports'&&workspace.issues.filter(i=>i.status==='Open').length?` <span class="nav-badge">${workspace.issues.filter(i=>i.status==='Open').length}</span>`:''}</button>`).join('');
+  $('#desktop-nav').innerHTML=entries.map(g=>`<button class="nav-button ${current===g?'active':''}" ${current===g?'aria-current="page"':''} data-nav="${g}">${g}${g==='Issue Reports'&&workspace.issues.filter(i=>i.status==='Open').length?` <span class="nav-badge">${workspace.issues.filter(i=>i.status==='Open').length}</span>`:''}</button>`).join('') +
+    `<div class="sidebar-divider"></div><button type="button" class="nav-button sidebar-utility-btn" id="sidebar-report-issue-btn"><span aria-hidden="true" style="margin-right:6px;">💬</span>Report an issue</button>`;
   const primary=['Home','Morning Report','People','Links'];
   $('#mobile-nav').innerHTML=primary.map(g=>`<button class="nav-button ${current===g?'active':''}" ${current===g?'aria-current="page"':''} data-nav="${g}">${g}</button>`).join('')+`<button class="nav-button ${!primary.includes(current)?'active':''}" id="more-navigation" aria-haspopup="dialog">More</button>`;
   $('#all-sections').innerHTML=entries.map(g=>`<button type="button" class="button ${current===g?'primary':'secondary'}" data-nav="${g}" ${current===g?'aria-current="page"':''}>${g}</button>`).join('')+`<button type="button" class="button secondary" data-nav="profile/logbook">My logbook</button>`;
   $('#more-navigation').onclick=()=>$('#navigation-dialog').showModal();
   document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{$('#navigation-dialog')?.close();if(b.dataset.nav==='Issue Reports')navigate('admin/issues');else navigate(groups[b.dataset.nav]?.[0]||b.dataset.nav)});
-  $('#new-item-button').textContent=tab==='Home'||tab==='Workspace'||tab==='admin/issues'||tab==='profile/logbook'?'+ New session':'+ Add record';
+  if($('#sidebar-report-issue-btn'))$('#sidebar-report-issue-btn').onclick=openIssueModal;
+  const newItemBtn = $('#new-item-button');
+  if(newItemBtn){
+    if(tab==='Morning Report'){
+      newItemBtn.style.display='none';
+    } else {
+      newItemBtn.style.display='';
+      newItemBtn.textContent=tab==='Home'||tab==='Workspace'||tab==='admin/issues'||tab==='profile/logbook'?'+ New session':'+ Add record';
+    }
+  }
 }
 function header(t,sub){return `<div class="page-heading"><div><p class="eyebrow">CPS Academy · private workspace</p><h1>${esc(t)}</h1><p>${esc(sub)}</p></div></div>`}
 function banner(){return `<div class="mobile-snapshot">Workbook snapshot · saved on this device <button class="text-button" data-go="Workspace">Backups &amp; status</button></div>`+`<div class="snapshot-note"><span class="snapshot-dot"></span><span>Workbook snapshot (2026-09-06) · local changes saved on this device · no live Sheets connection · <button class="text-button" data-go="Workspace">Backups & activity</button></span></div>`}
@@ -2047,10 +2058,6 @@ function listing(){
           <span class="mr-crumb-current">Morning Report</span>
         </div>
         <div class="mr-top-tools">
-          <div class="mr-top-search-box">
-            <span class="mr-search-icon">🔍</span>
-            <input type="text" class="mr-top-search-input" id="mr-quick-search" placeholder="Search presenter, topic, case, note..." value="${esc(query||'')}">
-          </div>
           <div class="mr-quick-week-selector">
             <button type="button" class="mr-week-btn" data-week-jump="${esc(prevWeekStart)}" title="Previous week">‹</button>
             <span class="mr-week-label">${esc(wLbl)}</span>
@@ -2064,9 +2071,7 @@ function listing(){
         <div class="mr-subheader-left">
           <div class="mr-title-row">
             <h1 class="mr-page-title">Virtual Morning Report (VMR)</h1>
-            <span class="mr-term-badge">Term 2026.Q3</span>
           </div>
-          <p class="mr-page-desc">Real-time daily case distribution, clinical reasoning facilitators, and trainee assignments for the current academic rotation.</p>
         </div>
         <div class="mr-subheader-right">
           <button type="button" class="button secondary small" id="mr-filter-toggle-btn">
@@ -2086,16 +2091,6 @@ function listing(){
 
     $('#page').innerHTML = `<div class="mr-portal-container">${mrTopBar}${mrSubHeader}${mrFiltersDrawer}${recordsContent}</div>`;
     
-    const qs = document.getElementById('mr-quick-search');
-    if(qs){
-      qs.oninput = (e) => {
-        query = e.target.value;
-        page = 0;
-        render();
-        const nqs = document.getElementById('mr-quick-search');
-        if(nqs){ nqs.focus(); nqs.setSelectionRange(nqs.value.length, nqs.value.length); }
-      };
-    }
     const ftBtn = document.getElementById('mr-filter-toggle-btn');
     if(ftBtn){
       ftBtn.onclick = () => {
@@ -5157,42 +5152,46 @@ function claimRole(sessionId, role) {
     };
     render();
     if (user && user.isAuthenticated && !user.isMock) {
-      toast(`Signed up as ${role}`, { undo: true });
       if (typeof fetch === 'function') {
         const targetStableId = r.stableId || r.parentId || r.id;
+        const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
         fetch('/api/mutate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             dataset: 'Morning Report',
             stableId: targetStableId,
+            childSessionIndex: r.session?.index || null,
             field: changedField,
             value: newValue,
             expectedPreviousValue: prevValue,
-            user: {
-              name: user.name,
-              email: user.email,
-              isAuthenticated: true
-            }
+            operationId: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
           })
         })
         .then(async res => {
           if (!res.ok) {
             const errData = await res.json().catch(() => ({}));
+            // Rollback optimistic claim on conflict or failure
+            undoClaim();
             if (res.status === 409) {
-              toast('This slot was just claimed by someone else.');
-              undoClaim();
+              toast(`Conflict: Slot is already claimed by ${errData.currentValue || 'another member'}.`);
             } else {
-              toast('Saved on this device.');
+              toast(`Failed to sync to Google Sheets: ${errData.message || 'Server error'}`);
             }
+          } else {
+            toast(`✓ Saved: Signed up as ${role}`);
           }
         })
         .catch(err => {
           console.warn('Mutation failed:', err);
+          toast('Network error: Change kept locally on this device.');
         });
       }
     } else {
-      toast(`Signed up as ${role}`, { undo: true });
+      toast(`Signed up as ${role} (saved on this device)`, { undo: true });
     }
     return { success: true, sessionId: r.id, role, field: changedField, value: newValue };
   }
@@ -5886,22 +5885,49 @@ $('#dialog-primary').onclick=e=>{
   const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
   const isOnlineEligible = user && user.isAuthenticated && !user.isMock && !isNew && ['Morning Report', 'CPS Academy VMRs', 'OrgStructure', 'Members', 'Important links'].includes(editingTab);
   if (isOnlineEligible && Object.keys(updatedChanges).length > 0 && typeof fetch === 'function') {
-    toast('Saved changes');
     const targetStableId = r.stableId || r.parentId || r.id;
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     fetch('/api/mutate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         dataset: editingTab,
         stableId: targetStableId,
+        childSessionIndex: r.session?.index || null,
         fields: updatedChanges,
-        user: {
-          name: user.name,
-          email: user.email,
-          isAuthenticated: true
-        }
+        operationId: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
       })
-    }).catch(err => console.warn('Sync update warning:', err));
+    })
+    .then(async res => {
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        // Roll back optimistic edit for all changed fields on server error / conflict
+        mutate(w => {
+          if (w.edits && w.edits[r.id]) {
+            for (const f of Object.keys(updatedChanges)) {
+              delete w.edits[r.id][f];
+            }
+            if (Object.keys(w.edits[r.id]).length === 0) delete w.edits[r.id];
+          }
+        }, r.id);
+        render();
+
+        if (res.status === 409) {
+          toast(`Conflict: Slot or record was already modified by another member.`);
+        } else {
+          toast(`Failed to sync to Google Sheets: ${errData.message || 'Server error'}`);
+        }
+      } else {
+        toast('✓ Saved changes to spreadsheet.');
+      }
+    })
+    .catch(err => {
+      console.warn('Sync update warning:', err);
+      toast('Network error: Changes kept locally on this device.');
+    });
   } else {
     toast(isNew ? 'Record created' : 'Saved on this device');
   }
@@ -6741,6 +6767,7 @@ function updateSessionNote(sessionId, newNote) {
   const r = records('Morning Report').find(x => x.id === sessionId);
   if (!r) return { success: false, reason: 'not-found' };
   const val = String(newNote ?? '').trim();
+  const prevNote = (r.fields && r.fields.Notes) || '';
   const success = mutate(w => {
     w.edits[sessionId] = { ...(w.edits[sessionId] || {}), Notes: val };
     log(w, 'Updated Session Note', r, 'Morning Report');
@@ -6750,17 +6777,48 @@ function updateSessionNote(sessionId, newNote) {
     const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
     if (user && user.isAuthenticated && !user.isMock && typeof fetch === 'function') {
       const targetStableId = r.stableId || r.parentId || r.id;
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       fetch('/api/mutate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           dataset: 'Morning Report',
           stableId: targetStableId,
+          childSessionIndex: r.session?.index || null,
           field: 'Notes',
           value: val,
-          user: { name: user.name, email: user.email, isAuthenticated: true }
+          expectedPreviousValue: prevNote,
+          operationId: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
         })
-      }).catch(err => console.warn('Note mutation error:', err));
+      })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          // Roll back optimistic edit on error
+          mutate(w => {
+            if (w.edits && w.edits[sessionId]) {
+              delete w.edits[sessionId].Notes;
+              if (Object.keys(w.edits[sessionId]).length === 0) delete w.edits[sessionId];
+            }
+          }, sessionId);
+          render();
+
+          if (res.status === 409) {
+            toast(`Conflict: Note was modified by another member.`);
+          } else {
+            toast(`Failed to sync note: ${errData.message || 'Server error'}`);
+          }
+        } else {
+          toast('✓ Saved session note.');
+        }
+      })
+      .catch(err => {
+        console.warn('Note mutation error:', err);
+        toast('Network error: Note kept locally on this device.');
+      });
     }
     return { success: true, value: val };
   }
@@ -6789,7 +6847,7 @@ function staffingSlot(r,role){
  const isUncertain=(r.flags&&r.flags.some(f=>/moved|rescheduled|tentative|uncertain|verify|tbd/i.test(f)))||(r.session?.unresolved&&r.session.unresolved.length>0)||/moved|tentative|\?|tbd/i.test(r.fields.Date||'')||timing.status!=='resolved';
  const baseTier=getStaffingUrgency(SessionCore.parseDate(dateValue(r)));
  const tier=isUncertain?'open':baseTier;
- const label=isUncertain?`+ Open ${isTP ? 'TP Lead' : role} (Verify Date)`:(tier==='urgent'?`● Urgent: ${isTP ? 'TP Lead' : role}`:tier==='upcoming'?`◷ ${isTP ? 'TP Lead' : role}`:`+ Open ${isTP ? 'TP Lead' : role}`);
+ const label=tier==='urgent'?`● Urgent: ${role}`:tier==='upcoming'?`◷ ${role}`:`+ Open ${role}`;
  return `<button type="button" class="status-chip matrix-slot-btn matrix-slot-gap gap-action-btn slot-${tier}${isTP ? ' slot-tp' : ''}" data-status="${tier}" data-open="${esc(r.id)}" data-role="${esc(role)}" aria-label="${esc(label)}" title="${esc(label)}">${esc(label)}</button>`;
 }
 function staffingGrid(r){return `<div class="staffing-grid">${['Facilitator','Presenter','Scribe','Teaching Points'].map(role=>`<div class="staffing-role"><small>${role}</small>${staffingSlot(r,role)}</div>`).join('')}</div>`;}
@@ -7055,6 +7113,9 @@ function editorialCard(r){
     noteHtml = `<div class="mr-note-hover-wrap"><button type="button" class="mr-note-edit-trigger" data-edit-note="${esc(r.id)}" title="Add session note">+ Note</button></div>`;
   }
 
+  const titleMeta = typeof SessionCore !== 'undefined' && SessionCore.getSessionDisplayTitle ? SessionCore.getSessionDisplayTitle(r) : { mainTitle: titleText, sessionTypeTag: sessionType, hasDistinctTag: false };
+  const typeTagHtml = titleMeta.hasDistinctTag && titleMeta.sessionTypeTag ? `<span class="mr-card-type-tag">${esc(titleMeta.sessionTypeTag)}</span>` : '';
+
  return `<article class="mr-card" data-record-id="${esc(r.id)}">
   <div class="mr-card-rail ${railClass}"></div>
   <div class="mr-card-date">
@@ -7068,11 +7129,8 @@ function editorialCard(r){
    </div>
   </div>
   <div class="mr-card-content">
-   <div class="mr-card-tags">
-    <span class="mr-card-type-tag">${esc(sessionType)}</span>
-    ${statusHtml}
-   </div>
-   <h3 class="mr-card-title">${esc(titleText)}</h3>
+   ${(typeTagHtml || statusHtml) ? `<div class="mr-card-tags">${typeTagHtml}${statusHtml}</div>` : ''}
+   <h3 class="mr-card-title">${esc(titleMeta.mainTitle)}</h3>
    ${noteHtml}
   </div>
   ${staffingZone}
@@ -7109,18 +7167,18 @@ function agendaView(rr){
  const isMobile = typeof window !== 'undefined' && (window.innerWidth || 0) <= 760;
  const isSingleWeek = mrScheduleRangeMode !== 'all';
  const weekRows = weeks.length ? weeks.flatMap(w => w.records.map((r, i) => renderMatrixItem({type:'record', record:r}, i))).join('') : '<tr><td colspan="7" style="text-align:center;padding:16px;">No dated sessions scheduled for this week.</td></tr>';
- const lowerStaffingTable = (!isMobile && isSingleWeek) ? `
-   <section class="agenda-staffing-section" style="margin-top:16px;">
-     <div class="agenda-staffing-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-       <div>
-         <h3 class="agenda-staffing-title" style="margin:0;font-size:16px;font-weight:600;">Weekly Staffing Master Roster</h3>
-         <p class="muted" style="margin:2px 0 0 0;font-size:12px;">Consolidated institutional staffing audit matrix with role verification markers.</p>
-       </div>
-       <div style="font-size:12px;color:var(--text-muted);">
-         Showing ${weeks.flatMap(w=>w.records).length} of ${weeks.flatMap(w=>w.records).length} Sessions
-       </div>
-     </div>
-     <div class="matrix-card">
+  const weekSessionsCount = weeks.flatMap(w=>w.records).length;
+  const isFiltered = (filter && !['All', 'Upcoming', 'This Week'].includes(filter)) || gapsOnly || mySessionsOnly || Boolean(query && query.trim()) || Boolean(sectionQuery && sectionQuery.trim()) || Boolean(facet) || Boolean(secondaryScope && secondaryScope !== 'All');
+  const countDisplayHtml = isFiltered ? `<div style="font-size:12px;color:var(--text-muted);">Showing ${weekSessionsCount} Session${weekSessionsCount===1?'':'s'}</div>` : '';
+  const lowerStaffingTable = (!isMobile && isSingleWeek) ? `
+    <section class="agenda-staffing-section" style="margin-top:16px;">
+      <div class="agenda-staffing-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div>
+          <h3 class="agenda-staffing-title" style="margin:0;font-size:16px;font-weight:600;">Weekly Staffing Master Roster</h3>
+          <p class="muted" style="margin:2px 0 0 0;font-size:12px;">Consolidated institutional staffing audit matrix with role verification markers.</p>
+        </div>
+        ${countDisplayHtml}
+      </div><div class="matrix-card">
        <div class="matrix-container">
          <table class="matrix-table">
            <thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead>

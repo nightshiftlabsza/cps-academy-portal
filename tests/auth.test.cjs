@@ -2,11 +2,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
-const loginHandler = require('../api/login.js');
-const Identity = require('../identity.js');
 const sheetsReaderModule = require('../api/_lib/sheets-reader.cjs');
 
-// Offline fixture: intercept sheetsReader to prevent outbound network calls
+// Offline fixture: intercept sheetsReader BEFORE requiring login handler to guarantee 0 network calls
 sheetsReaderModule.sheetsReader = async () => ({
   workbook: {
     Members: {
@@ -23,6 +21,19 @@ sheetsReaderModule.sheetsReader = async () => ({
     }
   }
 });
+
+// Guard: block any unexpected external network requests throughout test execution
+const originalFetch = global.fetch;
+global.fetch = async (url, options = {}) => {
+  const urlStr = String(url);
+  if (urlStr.startsWith('http://127.0.0.1') || urlStr.startsWith('http://localhost') || urlStr.startsWith('/')) {
+    if (typeof originalFetch === 'function') return originalFetch(url, options);
+  }
+  throw new Error(`Unexpected external network request blocked in test: ${urlStr}`);
+};
+
+const loginHandler = require('../api/login.js');
+const Identity = require('../identity.js');
 
 function mockRequest(body, method = 'POST') {
   const b = JSON.stringify(body);

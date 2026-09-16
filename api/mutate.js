@@ -185,12 +185,36 @@ async function mutateHandler(req, res) {
     return sendJson(400, { error: 'NO_VALID_FIELDS', message: 'No mutable fields were provided' });
   }
 
-  const sheetId = process.env.SYNC_SHEET_ID;
-  if (!sheetId) {
-    return sendJson(503, { error: 'SHEET_NOT_CONFIGURED', message: 'SYNC_SHEET_ID is not configured' });
+  // 3. Resolve target fields for lock coordination
+  const targetFields = Object.keys(fieldUpdates).sort();
+  // Coordinate locks across single-field and batch updates by acquiring a lock for each individual field
+  const acquiredFieldLocks = [];
+  let allLocksAcquired = true;
+  for (const f of targetFields) {
+    const lockKey = `cell_${dataset}_${stableId}_${f}`;
+    const ok = await acquireLock(lockKey, 12000);
+    if (!ok) {
+      allLocksAcquired = false;
+      break;
+    }
+    acquiredFieldLocks.push(lockKey);
   }
 
-  // 3. Resolve actual row number using deterministic stable ID
+  if (!allLocksAcquired) {
+    for (const lk of acquiredFieldLocks) releaseLock(lk);
+    return sendJson(409, {
+      error: 'CONCURRENT_MUTATION',
+      message: 'Another user or operation is currently writing to this record. Please retry in a moment.'
+    });
+  }
+
+  try {
+    const sheetId = process.env.SYNC_SHEET_ID;
+    if (!sheetId) {
+      return sendJson(503, { error: 'SHEET_NOT_CONFIGURED', message: 'SYNC_SHEET_ID is not configured' });
+    }
+
+    // 4. Resolve actual row number using deterministic stable ID (inside acquired lock)
     const match = await findRowByStableId(sheetId, dataset, stableId);
     if (!match) {
       return sendJson(404, { error: 'RECORD_NOT_FOUND', message: `Could not locate record "${stableId}" in spreadsheet` });
@@ -210,49 +234,87 @@ async function mutateHandler(req, res) {
       }
     }
 
-    // 4. Atomic cell-level coordination to serialize concurrent writes
-    const cellResourceKey = `cell_${dataset}_${stableId}_${field || Object.keys(fieldUpdates).sort().join('_')}`;
-    const cellLockAcquired = await acquireLock(cellResourceKey, 8000);
-    if (!cellLockAcquired) {
-      return sendJson(409, {
-        error: 'CONCURRENT_MUTATION',
-        message: 'Another user or operation is currently writing to this slot. Please retry in a moment.'
-      });
+    // 5. Interrupted write reconciliation & child index validation
+    const childIndex = body?.childSessionIndex; // 1-indexed (e.g. 1 or 2)
+    if (childIndex !== undefined && childIndex !== null) {
+      if (!Number.isInteger(childIndex) || childIndex < 1) {
+        return sendJson(400, {
+          error: 'INVALID_CHILD_INDEX',
+          message: `childSessionIndex must be a positive integer, got ${childIndex}`
+        });
+      }
     }
 
-    try {
-      // 4b. Concurrency / vacancy check
-      if (field && expectedPreviousValue !== undefined) {
-        const colDef = colMap[field];
-        const currentValue = String(values[colDef.index] ?? '').trim();
-        const expectedClean = String(expectedPreviousValue).trim();
-        if (currentValue !== expectedClean) {
-          return sendJson(409, {
-            error: 'SLOT_OCCUPIED',
-            message: `Slot is already occupied by: "${currentValue || 'another user'}"`,
-            currentValue
+    // 5b. Concurrency / vacancy check (isolated to child if specified)
+    if (field && expectedPreviousValue !== undefined) {
+      const colDef = colMap[field];
+      const rawCurrentCell = String(values[colDef.index] ?? '');
+      let currentValToCompare = rawCurrentCell.trim();
+
+      if (childIndex && childIndex > 0) {
+        const parts = rawCurrentCell.replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/);
+        if (childIndex > parts.length) {
+          return sendJson(400, {
+            error: 'INVALID_CHILD_INDEX',
+            message: `childSessionIndex ${childIndex} exceeds sub-session count (${parts.length})`
           });
         }
+        currentValToCompare = (parts[childIndex - 1] || '').trim();
       }
 
-      // 5. Pre-log operation as pending before network write
-      try {
+      const expectedClean = String(expectedPreviousValue).trim();
+
+      // Interrupted write reconciliation: if the sheet cell already contains our intended newValue,
+      // the operation actually succeeded prior to interruption/timeout.
+      const intendedValClean = String(value ?? '').trim();
+      if (currentValToCompare === intendedValClean && currentValToCompare !== expectedClean) {
         await recordOperation({
           operationId,
           userId: sessionUser.email || sessionUser.name || 'anonymous',
           sessionId: stableId,
           targetTab: dataset,
-          targetField: field || Object.keys(fieldUpdates).join(','),
-          previousValue: (field && expectedPreviousValue !== undefined) ? expectedPreviousValue : (values ? String(values[colMap[field]?.index] ?? '') : null),
-          newValue: field ? value : JSON.stringify(fieldUpdates),
-          status: 'pending'
+          targetField: field,
+          previousValue: expectedPreviousValue,
+          newValue: value,
+          status: 'committed'
         });
-      } catch {}
+        return sendJson(200, {
+          success: true,
+          reconciled: true,
+          operationId,
+          dataset,
+          stableId,
+          field,
+          value: intendedValClean
+        });
+      }
+
+      if (currentValToCompare !== expectedClean) {
+        return sendJson(409, {
+          error: 'SLOT_OCCUPIED',
+          message: `Slot is already occupied by: "${currentValToCompare || 'another user'}"`,
+          currentValue: currentValToCompare
+        });
+      }
+    }
+
+    // 5c. Pre-log operation as pending before network write
+    try {
+      await recordOperation({
+        operationId,
+        userId: sessionUser.email || sessionUser.name || 'anonymous',
+        sessionId: stableId,
+        targetTab: dataset,
+        targetField: field || targetFields.join(','),
+        previousValue: (field && expectedPreviousValue !== undefined) ? expectedPreviousValue : (values ? String(values[colMap[field]?.index] ?? '') : null),
+        newValue: field ? value : JSON.stringify(fieldUpdates),
+        status: 'pending'
+      });
+    } catch {}
 
     // 6. Execute cell updates in Google Sheets (with child sub-session splicing support)
     const creds = getCredentials();
     const token = await getAccessToken(creds);
-    const childIndex = body?.childSessionIndex; // 1-indexed (e.g. 1 or 2)
 
     const updateData = Object.entries(fieldUpdates).map(([fName, fVal]) => {
       const colDef = colMap[fName];
@@ -332,7 +394,9 @@ async function mutateHandler(req, res) {
       updatedFields: Object.keys(fieldUpdates)
     });
     } finally {
-      releaseLock(cellResourceKey);
+      for (const lk of acquiredFieldLocks) {
+        releaseLock(lk);
+      }
     }
   } catch (err) {
     if (operationId) {

@@ -11,6 +11,16 @@ const path = require('node:path');
 const { generateDeterministicId } = require('../api/_lib/sheets-reader.cjs');
 
 function reconcileWorkbooks(localWorkbook, remoteWorkbook) {
+  if (!localWorkbook || typeof localWorkbook !== 'object') {
+    throw new Error('Valid localWorkbook object is required for reconciliation');
+  }
+  if (!remoteWorkbook || typeof remoteWorkbook !== 'object') {
+    throw new Error('Explicit remoteWorkbook object is required for reconciliation');
+  }
+  if (localWorkbook === remoteWorkbook) {
+    throw new Error('Independent remote snapshot is required; cannot self-reconcile identical object reference');
+  }
+
   const report = {
     timestamp: new Date().toISOString(),
     datasets: {},
@@ -19,11 +29,23 @@ function reconcileWorkbooks(localWorkbook, remoteWorkbook) {
       totalRemote: 0,
       totalDiscrepancies: 0,
       totalMissingInRemote: 0,
-      totalNewInRemote: 0
+      totalNewInRemote: 0,
+      totalDuplicateStableIds: 0
     }
   };
 
+  const EXPECTED_DATASETS = [
+    'Morning Report',
+    'CPS Academy VMRs',
+    'OrgStructure',
+    'Members',
+    'Important links',
+    'Conferences',
+    'Residency Programs'
+  ];
+
   const allTabs = new Set([
+    ...EXPECTED_DATASETS,
     ...Object.keys(localWorkbook || {}),
     ...Object.keys(remoteWorkbook || {})
   ]);
@@ -34,17 +56,24 @@ function reconcileWorkbooks(localWorkbook, remoteWorkbook) {
 
     const localByStableId = new Map();
     const remoteByStableId = new Map();
+    const duplicateStableIds = [];
 
     const seenLocal = new Set();
     const seenRemote = new Set();
 
     localRecords.forEach((r, idx) => {
       const stableId = r.stableId || generateDeterministicId(tab, r.fields, seenLocal);
+      if (localByStableId.has(stableId)) {
+        duplicateStableIds.push({ dataset: tab, source: 'local', stableId, id: r.id });
+      }
       localByStableId.set(stableId, { record: r, index: idx });
     });
 
     remoteRecords.forEach((r, idx) => {
       const stableId = r.stableId || generateDeterministicId(tab, r.fields, seenRemote);
+      if (remoteByStableId.has(stableId)) {
+        duplicateStableIds.push({ dataset: tab, source: 'remote', stableId, id: r.id });
+      }
       remoteByStableId.set(stableId, { record: r, index: idx });
     });
 
@@ -104,6 +133,8 @@ function reconcileWorkbooks(localWorkbook, remoteWorkbook) {
       missingInRemoteCount: missingInRemote.length,
       newInRemoteCount: newInRemote.length,
       discrepanciesCount: fieldDiscrepancies.length,
+      duplicateStableIdsCount: duplicateStableIds.length,
+      duplicateStableIds,
       discrepancies: fieldDiscrepancies,
       missingInRemote,
       newInRemote
@@ -114,6 +145,7 @@ function reconcileWorkbooks(localWorkbook, remoteWorkbook) {
     report.summary.totalDiscrepancies += fieldDiscrepancies.length;
     report.summary.totalMissingInRemote += missingInRemote.length;
     report.summary.totalNewInRemote += newInRemote.length;
+    report.summary.totalDuplicateStableIds += duplicateStableIds.length;
   }
 
   return report;
@@ -122,8 +154,18 @@ function reconcileWorkbooks(localWorkbook, remoteWorkbook) {
 // CLI execution
 if (require.main === module) {
   const args = process.argv.slice(2);
-  const localPath = args[0] || path.resolve(__dirname, '../workbook.json');
-  const remotePath = args[1] || localPath;
+  const localPath = args[0];
+  const remotePath = args[1];
+
+  if (!localPath || !remotePath) {
+    console.error('Usage: node scripts/reconcile-workbooks.cjs <local-snapshot.json> <remote-snapshot.json>');
+    process.exit(1);
+  }
+
+  if (path.resolve(localPath) === path.resolve(remotePath)) {
+    console.error('Error: Independent remote snapshot is required. Cannot reconcile identical file path.');
+    process.exit(1);
+  }
 
   if (!fs.existsSync(localPath)) {
     console.error(`Local file not found: ${localPath}`);

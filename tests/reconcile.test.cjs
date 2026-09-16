@@ -69,3 +69,31 @@ test('reconcileWorkbooks: detects missing and new records', () => {
   assert.equal(result.datasets['Morning Report'].missingInRemote[0].stableId, 'mr-1');
   assert.equal(result.datasets['Morning Report'].newInRemote[0].stableId, 'mr-2');
 });
+
+test('reconcileWorkbooks: strictly rejects identical self-reconciliation object references', () => {
+  const local = { 'Morning Report': { records: [] } };
+  assert.throws(() => reconcileWorkbooks(local, local), /cannot self-reconcile identical object reference/);
+});
+
+test('reconcileWorkbooks: detects and reports duplicate stable IDs within a dataset', () => {
+  const local = {
+    'Morning Report': {
+      records: [
+        { id: 'mr:1', stableId: 'dup-id', fields: { Date: '2026-10-01' } },
+        { id: 'mr:2', stableId: 'dup-id', fields: { Date: '2026-10-01' } }
+      ]
+    }
+  };
+  const remote = {
+    'Morning Report': {
+      records: [
+        { id: 'mr:1', stableId: 'dup-id', fields: { Date: '2026-10-01' } }
+      ]
+    }
+  };
+
+  const result = reconcileWorkbooks(local, remote);
+  assert.equal(result.summary.totalDuplicateStableIds, 1);
+  assert.equal(result.datasets['Morning Report'].duplicateStableIdsCount, 1);
+  assert.equal(result.datasets['Morning Report'].duplicateStableIds[0].stableId, 'dup-id');
+});
