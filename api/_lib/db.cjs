@@ -62,6 +62,24 @@ async function recordOperation(op) {
   return record;
 }
 
+async function getOperationById(operationId) {
+  if (!operationId) return null;
+  return inMemoryJournal.find(op => op.operationId === operationId) || null;
+}
+
+async function updateOperation(operationId, patch = {}) {
+  const op = inMemoryJournal.find(o => o.operationId === operationId);
+  if (op) {
+    Object.assign(op, patch, { updatedAt: new Date().toISOString() });
+    try {
+      ensureLocalDataDir();
+      fs.appendFileSync(localJournalFile, JSON.stringify({ event: 'update', operationId, ...patch }) + '\n', 'utf8');
+    } catch {}
+    return op;
+  }
+  return null;
+}
+
 /**
  * Retrieve recent operations from the journal
  */
@@ -99,6 +117,8 @@ function resetMemoryState() {
 
 module.exports = {
   recordOperation,
+  getOperationById,
+  updateOperation,
   getRecentOperations,
   getSyncState,
   setSyncState,

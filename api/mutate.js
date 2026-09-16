@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 // Auto-load .env.local if present in local dev
 const envPath = path.resolve(__dirname, '../.env.local');
@@ -17,7 +18,7 @@ const {
   clearCache,
   findRowByStableId
 } = require('./_lib/sheets-reader.cjs');
-const { recordOperation } = require('./_lib/db.cjs');
+const { recordOperation, getOperationById, updateOperation } = require('./_lib/db.cjs');
 const { getSessionUser } = require('./_lib/auth-session.cjs');
 
 const MORNING_REPORT_COLUMNS = {
@@ -90,7 +91,7 @@ function parseBody(req) {
   });
 }
 
-module.exports = async function mutateHandler(req, res) {
+async function mutateHandler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
@@ -111,7 +112,20 @@ module.exports = async function mutateHandler(req, res) {
     return sendJson(400, { error: 'INVALID_JSON', message: 'Malformed JSON payload' });
   }
 
-  const { dataset, stableId, field, value, expectedPreviousValue, fields, user } = body || {};
+  const { dataset, stableId, field, value, expectedPreviousValue, fields, user, operationId: clientOpId } = body || {};
+  const operationId = clientOpId || `op_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+
+  // Idempotency: return cached response if operation has already been committed
+  const existingOp = await getOperationById(operationId);
+  if (existingOp && existingOp.status === 'committed') {
+    return sendJson(200, {
+      success: true,
+      replayed: true,
+      operationId,
+      dataset: existingOp.targetTab,
+      stableId: existingOp.sessionId
+    });
+  }
 
   // 1. Server-verified session guard (rejects fabricated client-only users)
   const sessionUser = getSessionUser(req) || (body?.user?.isSyntheticTest ? body.user : null);
@@ -203,7 +217,21 @@ module.exports = async function mutateHandler(req, res) {
       }
     }
 
-    // 5. Execute cell updates in Google Sheets
+    // 5. Pre-log operation as pending before network write
+    try {
+      await recordOperation({
+        operationId,
+        userId: sessionUser.email || sessionUser.name || 'anonymous',
+        sessionId: stableId,
+        targetTab: dataset,
+        targetField: field || Object.keys(fieldUpdates).join(','),
+        previousValue: (field && expectedPreviousValue !== undefined) ? expectedPreviousValue : (values ? String(values[colMap[field]?.index] ?? '') : null),
+        newValue: field ? value : JSON.stringify(fieldUpdates),
+        status: 'pending'
+      });
+    } catch {}
+
+    // 6. Execute cell updates in Google Sheets
     const creds = getCredentials();
     const token = await getAccessToken(creds);
 
@@ -231,25 +259,16 @@ module.exports = async function mutateHandler(req, res) {
 
     if (!updateRes.ok) {
       const errText = await updateRes.text();
+      try { await updateOperation(operationId, { status: 'failed', error: errText }); } catch {}
       return sendJson(500, { error: 'SHEETS_API_ERROR', message: `Failed to update sheet: ${errText}` });
     }
 
-    // 6. Invalidate read cache so next snapshot fetch gets fresh data
+    // 7. Invalidate read cache so next snapshot fetch gets fresh data
     clearCache();
 
-    // 7. Record to durable operation journal
+    // 8. Mark operation committed in durable journal
     try {
-      for (const [fName, fVal] of Object.entries(fieldUpdates)) {
-        await recordOperation({
-          userId: sessionUser.email || sessionUser.name || 'anonymous',
-          sessionId: stableId,
-          targetTab: dataset,
-          targetField: fName,
-          previousValue: (field === fName && expectedPreviousValue !== undefined) ? expectedPreviousValue : (values ? String(values[colMap[fName]?.index] ?? '') : null),
-          newValue: fVal,
-          status: 'committed'
-        });
-      }
+      await updateOperation(operationId, { status: 'committed' });
     } catch (journalErr) {
       console.warn('Journal log notice:', journalErr.message);
     }
@@ -259,6 +278,7 @@ module.exports = async function mutateHandler(req, res) {
       return sendJson(200, {
         success: true,
         operation: 'updateCell',
+        operationId,
         dataset,
         stableId,
         rowNumber,
@@ -271,12 +291,16 @@ module.exports = async function mutateHandler(req, res) {
     return sendJson(200, {
       success: true,
       operation: 'batchUpdate',
+      operationId,
       dataset,
       stableId,
       rowNumber,
       updatedFields: Object.keys(fieldUpdates)
     });
   } catch (err) {
+    if (operationId) {
+      try { await updateOperation(operationId, { status: 'failed', error: err.message }); } catch {}
+    }
     return sendJson(500, { error: 'MUTATION_ERROR', message: err.message });
   }
 };
