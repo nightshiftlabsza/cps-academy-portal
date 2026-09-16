@@ -132,6 +132,7 @@
         localStorage.setItem('userName', data.user.name);
         localStorage.setItem('userRole', data.user.role);
         localStorage.setItem('userId', data.user.id);
+        if (data.token) localStorage.setItem('cps_token', data.token);
       }
       const user = getCurrentUser();
       notify(user);
@@ -147,7 +148,17 @@
       localStorage.removeItem('userName');
       localStorage.removeItem('userRole');
       localStorage.removeItem('userId');
+      localStorage.removeItem('cps_token');
     }
+    // Call server to expire HttpOnly cookie
+    try {
+      fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'logout' })
+      }).catch(() => {});
+    } catch {}
+
     clearMockUser();
     notify(null);
   }

@@ -18,7 +18,7 @@ const {
   clearCache,
   findRowByStableId
 } = require('./_lib/sheets-reader.cjs');
-const { recordOperation, getOperationById, updateOperation } = require('./_lib/db.cjs');
+const { recordOperation, getOperationById, updateOperation, acquireLock, releaseLock } = require('./_lib/db.cjs');
 const { getSessionUser } = require('./_lib/auth-session.cjs');
 
 const MORNING_REPORT_COLUMNS = {
@@ -115,23 +115,30 @@ async function mutateHandler(req, res) {
   const { dataset, stableId, field, value, expectedPreviousValue, fields, user, operationId: clientOpId } = body || {};
   const operationId = clientOpId || `op_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-  // Idempotency: return cached response if operation has already been committed
-  const existingOp = await getOperationById(operationId);
-  if (existingOp && existingOp.status === 'committed') {
-    return sendJson(200, {
-      success: true,
-      replayed: true,
-      operationId,
-      dataset: existingOp.targetTab,
-      stableId: existingOp.sessionId
-    });
+  // Atomic operation-level lock to prevent concurrent requests with the same operationId
+  const opLockAcquired = await acquireLock(`op_${operationId}`, 10000);
+  if (!opLockAcquired) {
+    return sendJson(409, { error: 'OPERATION_IN_FLIGHT', message: 'An operation with this ID is currently executing' });
   }
 
-  // 1. Server-verified session guard (rejects fabricated client-only users)
-  const sessionUser = getSessionUser(req) || (body?.user?.isSyntheticTest ? body.user : null);
-  if (!sessionUser || !sessionUser.isAuthenticated) {
-    return sendJson(401, { error: 'UNAUTHORIZED', message: 'Valid authenticated server session required to mutate spreadsheet' });
-  }
+  try {
+    // Idempotency: return cached response if operation has already been committed
+    const existingOp = await getOperationById(operationId);
+    if (existingOp && existingOp.status === 'committed') {
+      return sendJson(200, {
+        success: true,
+        replayed: true,
+        operationId,
+        dataset: existingOp.targetTab,
+        stableId: existingOp.sessionId
+      });
+    }
+
+    // 1. Server-verified session guard (strictly requires verified server session)
+    const sessionUser = getSessionUser(req);
+    if (!sessionUser || !sessionUser.isAuthenticated) {
+      return sendJson(401, { error: 'UNAUTHORIZED', message: 'Valid authenticated server session required to mutate spreadsheet' });
+    }
 
   // 2. Resource-level authorization: Important links & OrgStructure are admin-only
   if (dataset === 'Important links' || dataset === 'OrgStructure') {
@@ -183,8 +190,7 @@ async function mutateHandler(req, res) {
     return sendJson(503, { error: 'SHEET_NOT_CONFIGURED', message: 'SYNC_SHEET_ID is not configured' });
   }
 
-  try {
-    // 3. Resolve actual row number using deterministic stable ID
+  // 3. Resolve actual row number using deterministic stable ID
     const match = await findRowByStableId(sheetId, dataset, stableId);
     if (!match) {
       return sendJson(404, { error: 'RECORD_NOT_FOUND', message: `Could not locate record "${stableId}" in spreadsheet` });
@@ -193,54 +199,82 @@ async function mutateHandler(req, res) {
     const { rowNumber, values } = match;
 
     // Self-only directory profile edit check: members cannot edit another member's profile
+    // Must strictly match verified email on record; unverified or missing emails are rejected
     if (dataset === 'Members' && sessionUser.role !== 'admin') {
       const memberEmail = String(values[5] ?? '').trim().toLowerCase();
-      if (memberEmail && memberEmail !== sessionUser.email.toLowerCase()) {
+      if (!memberEmail || memberEmail !== sessionUser.email.toLowerCase()) {
         return sendJson(403, {
           error: 'FORBIDDEN',
-          message: 'Members may only update their own directory profile'
+          message: 'Members may only update their own directory profile with a verified matching email'
         });
       }
     }
 
-    // 4. Concurrency / vacancy check
-    if (field && expectedPreviousValue !== undefined) {
-      const colDef = colMap[field];
-      const currentValue = String(values[colDef.index] ?? '').trim();
-      const expectedClean = String(expectedPreviousValue).trim();
-      if (currentValue !== expectedClean) {
-        return sendJson(409, {
-          error: 'SLOT_OCCUPIED',
-          message: `Slot is already occupied by: "${currentValue || 'another user'}"`,
-          currentValue
-        });
-      }
-    }
-
-    // 5. Pre-log operation as pending before network write
-    try {
-      await recordOperation({
-        operationId,
-        userId: sessionUser.email || sessionUser.name || 'anonymous',
-        sessionId: stableId,
-        targetTab: dataset,
-        targetField: field || Object.keys(fieldUpdates).join(','),
-        previousValue: (field && expectedPreviousValue !== undefined) ? expectedPreviousValue : (values ? String(values[colMap[field]?.index] ?? '') : null),
-        newValue: field ? value : JSON.stringify(fieldUpdates),
-        status: 'pending'
+    // 4. Atomic cell-level coordination to serialize concurrent writes
+    const cellResourceKey = `cell_${dataset}_${stableId}_${field || Object.keys(fieldUpdates).sort().join('_')}`;
+    const cellLockAcquired = await acquireLock(cellResourceKey, 8000);
+    if (!cellLockAcquired) {
+      return sendJson(409, {
+        error: 'CONCURRENT_MUTATION',
+        message: 'Another user or operation is currently writing to this slot. Please retry in a moment.'
       });
-    } catch {}
+    }
 
-    // 6. Execute cell updates in Google Sheets
+    try {
+      // 4b. Concurrency / vacancy check
+      if (field && expectedPreviousValue !== undefined) {
+        const colDef = colMap[field];
+        const currentValue = String(values[colDef.index] ?? '').trim();
+        const expectedClean = String(expectedPreviousValue).trim();
+        if (currentValue !== expectedClean) {
+          return sendJson(409, {
+            error: 'SLOT_OCCUPIED',
+            message: `Slot is already occupied by: "${currentValue || 'another user'}"`,
+            currentValue
+          });
+        }
+      }
+
+      // 5. Pre-log operation as pending before network write
+      try {
+        await recordOperation({
+          operationId,
+          userId: sessionUser.email || sessionUser.name || 'anonymous',
+          sessionId: stableId,
+          targetTab: dataset,
+          targetField: field || Object.keys(fieldUpdates).join(','),
+          previousValue: (field && expectedPreviousValue !== undefined) ? expectedPreviousValue : (values ? String(values[colMap[field]?.index] ?? '') : null),
+          newValue: field ? value : JSON.stringify(fieldUpdates),
+          status: 'pending'
+        });
+      } catch {}
+
+    // 6. Execute cell updates in Google Sheets (with child sub-session splicing support)
     const creds = getCredentials();
     const token = await getAccessToken(creds);
+    const childIndex = body?.childSessionIndex; // 1-indexed (e.g. 1 or 2)
 
     const updateData = Object.entries(fieldUpdates).map(([fName, fVal]) => {
       const colDef = colMap[fName];
+      let finalCellValue = String(fVal ?? '').trim();
+
+      // If updating a child of a split cell (e.g. AM/PM or Case 1/Case 2)
+      if (childIndex && childIndex > 0) {
+        const rawExisting = String(values[colDef.index] ?? '');
+        const dividerMatch = rawExisting.match(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/);
+        const divider = dividerMatch ? dividerMatch[0] : '\n---\n';
+        const parts = rawExisting.replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/);
+
+        if (parts.length >= childIndex) {
+          parts[childIndex - 1] = finalCellValue;
+          finalCellValue = parts.join(divider);
+        }
+      }
+
       return {
         range: `'${config.sheetTab}'!${colDef.col}${rowNumber}`,
         majorDimension: 'ROWS',
-        values: [[String(fVal ?? '').trim()]]
+        values: [[finalCellValue]]
       };
     });
 
@@ -297,10 +331,20 @@ async function mutateHandler(req, res) {
       rowNumber,
       updatedFields: Object.keys(fieldUpdates)
     });
+    } finally {
+      releaseLock(cellResourceKey);
+    }
   } catch (err) {
     if (operationId) {
       try { await updateOperation(operationId, { status: 'failed', error: err.message }); } catch {}
     }
     return sendJson(500, { error: 'MUTATION_ERROR', message: err.message });
+  } finally {
+    releaseLock(`op_${operationId}`);
   }
-};
+}
+
+mutateHandler.DATASET_CONFIG = DATASET_CONFIG;
+mutateHandler.MORNING_REPORT_COLUMNS = MORNING_REPORT_COLUMNS;
+module.exports = mutateHandler;
+

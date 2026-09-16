@@ -4,6 +4,25 @@ const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
 const loginHandler = require('../api/login.js');
 const Identity = require('../identity.js');
+const sheetsReaderModule = require('../api/_lib/sheets-reader.cjs');
+
+// Offline fixture: intercept sheetsReader to prevent outbound network calls
+sheetsReaderModule.sheetsReader = async () => ({
+  workbook: {
+    Members: {
+      records: [
+        {
+          id: 'mem-1',
+          stableId: 'mem-krishi-korrapati',
+          fields: {
+            Name: 'Krishi Korrapati',
+            Email: 'krishi.korrapati@my.rfums.org'
+          }
+        }
+      ]
+    }
+  }
+});
 
 function mockRequest(body, method = 'POST') {
   const b = JSON.stringify(body);

@@ -51,6 +51,12 @@ module.exports = async function loginHandler(req, res) {
     return sendJson(400, { error: 'INVALID_JSON', message: 'Malformed JSON payload' });
   }
 
+  // Handle explicit logout request to expire session cookie
+  if (body?.action === 'logout') {
+    res.setHeader('Set-Cookie', 'cps_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+    return sendJson(200, { success: true, message: 'Logged out successfully' });
+  }
+
   const { email, password } = body || {};
   if (!email || !String(email).trim()) {
     return sendJson(400, { error: 'MISSING_EMAIL', message: 'Email address is required' });

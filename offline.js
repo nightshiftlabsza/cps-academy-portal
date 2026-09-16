@@ -60,9 +60,13 @@
 
       // 1. Attempt live Google Sheets sync first
       try {
+        const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
         const syncRes = await fetch('/api/sync', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             schemaVersion: 1,
             operation: 'readSnapshot',

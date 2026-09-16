@@ -2,7 +2,10 @@
 
 const crypto = require('node:crypto');
 
-const SESSION_SECRET = process.env.SESSION_SECRET || 'cps-academy-secure-session-key-at-least-32-chars';
+if (!process.env.SESSION_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('FATAL: SESSION_SECRET environment variable must be set in production');
+}
+const SESSION_SECRET = process.env.SESSION_SECRET || 'cps-academy-dev-ephemeral-key-do-not-use-in-prod';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 function base64UrlEncode(str) {

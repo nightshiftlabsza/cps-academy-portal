@@ -2045,12 +2045,11 @@ function listing(){
           <span class="mr-crumb-root">Academic Portal</span>
           <span class="mr-crumb-sep">/</span>
           <span class="mr-crumb-current">Morning Report</span>
-          <span class="mr-live-badge">Live Operational Feed</span>
         </div>
         <div class="mr-top-tools">
           <div class="mr-top-search-box">
             <span class="mr-search-icon">🔍</span>
-            <input type="text" class="mr-top-search-input" id="mr-quick-search" placeholder="Search presenter, topic, case..." value="${esc(search||'')}">
+            <input type="text" class="mr-top-search-input" id="mr-quick-search" placeholder="Search presenter, topic, case, note..." value="${esc(query||'')}">
           </div>
           <div class="mr-quick-week-selector">
             <button type="button" class="mr-week-btn" data-week-jump="${esc(prevWeekStart)}" title="Previous week">‹</button>
@@ -2070,11 +2069,6 @@ function listing(){
           <p class="mr-page-desc">Real-time daily case distribution, clinical reasoning facilitators, and trainee assignments for the current academic rotation.</p>
         </div>
         <div class="mr-subheader-right">
-          <div class="mr-filled-pill">
-            <span class="mr-filled-dot"></span>
-            <span class="mr-filled-label">Filled Slots:</span>
-            <strong class="mr-filled-val">${stats.filled}/${stats.total} (${stats.pct}%)</strong>
-          </div>
           <button type="button" class="button secondary small" id="mr-filter-toggle-btn">
             <span>⚙ Filters</span>
           </button>
@@ -2095,7 +2089,7 @@ function listing(){
     const qs = document.getElementById('mr-quick-search');
     if(qs){
       qs.oninput = (e) => {
-        search = e.target.value;
+        query = e.target.value;
         page = 0;
         render();
         const nqs = document.getElementById('mr-quick-search');
@@ -6373,9 +6367,13 @@ async function silentBackgroundReconcile() {
   if (!user || !user.isAuthenticated) return;
 
   try {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     const res = await fetch('/api/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         schemaVersion: 1,
         operation: 'readSnapshot',
@@ -6576,20 +6574,45 @@ function tokenizeStaff(raw){
  return parts;
 }
 
+let _cachedMilestoneIndex = null;
+let _cachedMilestoneRecordCount = 0;
+function getRoleMilestoneIndex() {
+  const allMr = records('Morning Report');
+  if (!_cachedMilestoneIndex || _cachedMilestoneRecordCount !== allMr.length) {
+    if (typeof SessionCore !== 'undefined' && typeof SessionCore.buildRoleMilestoneIndex === 'function') {
+      _cachedMilestoneIndex = SessionCore.buildRoleMilestoneIndex(allMr);
+      _cachedMilestoneRecordCount = allMr.length;
+    }
+  }
+  return _cachedMilestoneIndex;
+}
+
 function renderStaffTokens(namesArray, role, sessionId){
  const tokens=Array.isArray(namesArray)?namesArray:tokenizeStaff(namesArray);
  if(!tokens.length)return '';
  const userIsAdmin = typeof isAdmin === 'function' ? isAdmin() : true;
  const isTP = role === 'Teaching Points';
- const prefix = isTP ? '<span class="tp-icon" aria-hidden="true">📝 </span>' : '';
+ const prefix = '';
+ const mIndex = getRoleMilestoneIndex();
  const tokensHtml=tokens.map(name=>{
   const noteMatch=name.match(/^([^(]+)(\([^)]+\))$/);
   const main=noteMatch?noteMatch[1].trim():name;
   const note=noteMatch?` <span class="staff-token-note">${esc(noteMatch[2])}</span>`:'';
-  if (!userIsAdmin) {
-    return `<span class="staff-token${isTP ? ' tp-token' : ''} is-readonly-token" data-token-name="${esc(name)}" data-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="${esc(main)}">${prefix}<span class="staff-token-name">${esc(main)}</span>${note}</span>`;
+  
+  let milestoneBadgeHtml = '';
+  if (mIndex && sessionId) {
+    const info = mIndex.getMilestone(sessionId, role, main);
+    if (info && info.ordinal) {
+      const cls = info.ordinal === '1st time' ? 'milestone-1st' : (info.ordinal === '2nd time' ? 'milestone-2nd' : 'milestone-3rd');
+      milestoneBadgeHtml = `<span class="milestone-badge ${cls}">${esc(info.ordinal)}</span>`;
+    }
   }
-  return `<button type="button" class="staff-token${isTP ? ' tp-token' : ''}" data-token-name="${esc(name)}" data-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="Click to swap or remove ${esc(main)}">${prefix}<span class="staff-token-name">${esc(main)}</span>${note}</button>`;
+
+  const tokenBtn = (!userIsAdmin) ?
+    `<span class="staff-token${isTP ? ' tp-token' : ''} is-readonly-token" data-token-name="${esc(name)}" data-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="${esc(main)}">${prefix}<span class="staff-token-name">${esc(main)}</span>${note}</span>` :
+    `<button type="button" class="staff-token${isTP ? ' tp-token' : ''}" data-token-name="${esc(name)}" data-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="Click to swap or remove ${esc(main)}">${prefix}<span class="staff-token-name">${esc(main)}</span>${note}</button>`;
+
+  return `<div class="staff-token-wrapper">${tokenBtn}${milestoneBadgeHtml}</div>`;
  }).join('');
  const addBtn = userIsAdmin ? `<button type="button" class="staff-add-btn" data-add-role="${esc(role)}" data-session-id="${esc(sessionId)}" title="Add another ${esc(role)}">＋ Add</button>` : '';
  return `<div class="staff-tokens-container" data-session-id="${esc(sessionId)}" data-role="${esc(role)}">${tokensHtml}${addBtn}</div>`;
@@ -6648,17 +6671,49 @@ function updateRoleAssignment(sessionId, role, updateFn){
   const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
   if (user && user.isAuthenticated && !user.isMock && typeof fetch === 'function') {
     const targetStableId = r.stableId || r.parentId || r.id;
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const previousSnapshotVal = (r.fields && r.fields[changedField]) || '';
+    const childIndex = r.session?.index || null;
+
     fetch('/api/mutate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         dataset: 'Morning Report',
         stableId: targetStableId,
+        childSessionIndex: childIndex,
         field: changedField,
         value: newValue,
-        user: { name: user.name, email: user.email, isAuthenticated: true }
+        expectedPreviousValue: previousSnapshotVal,
+        operationId: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
       })
-    }).catch(err => console.warn('Staff token mutation error:', err));
+    }).then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        // Roll back local optimistic edit on server failure / conflict
+        mutate(w => {
+          if (w.edits && w.edits[sessionId]) {
+            delete w.edits[sessionId][changedField];
+            if (Object.keys(w.edits[sessionId]).length === 0) delete w.edits[sessionId];
+          }
+        }, sessionId);
+        render();
+
+        if (res.status === 409) {
+          toast(`Conflict: Slot is already claimed by ${err.currentValue || 'another member'}.`);
+        } else {
+          toast(`Failed to sync to Google Sheets: ${err.message || 'Server error'}`);
+        }
+      } else {
+        toast(`✓ Saved: ${role} updated.`);
+      }
+    }).catch(err => {
+      console.warn('Staff token mutation network error:', err);
+      toast('Network error: Change kept locally on this device.');
+    });
   }
   return {success:true,newTokens:nextTokens,value:newValue};
  }
@@ -6679,6 +6734,37 @@ function removeStaffToken(sessionId, role, nameToRemove){
  return updateRoleAssignment(sessionId,role,tokens=>{
   return tokens.filter(t=>t.toLowerCase()!==nameToRemove.trim().toLowerCase());
  });
+}
+
+function updateSessionNote(sessionId, newNote) {
+  try { const latest = JSON.parse(localStorage.getItem(KEY) || 'null'); if (latest && latest.edits) workspace = latest; } catch {}
+  const r = records('Morning Report').find(x => x.id === sessionId);
+  if (!r) return { success: false, reason: 'not-found' };
+  const val = String(newNote ?? '').trim();
+  const success = mutate(w => {
+    w.edits[sessionId] = { ...(w.edits[sessionId] || {}), Notes: val };
+    log(w, 'Updated Session Note', r, 'Morning Report');
+  }, sessionId);
+  if (success) {
+    render();
+    const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+    if (user && user.isAuthenticated && !user.isMock && typeof fetch === 'function') {
+      const targetStableId = r.stableId || r.parentId || r.id;
+      fetch('/api/mutate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dataset: 'Morning Report',
+          stableId: targetStableId,
+          field: 'Notes',
+          value: val,
+          user: { name: user.name, email: user.email, isAuthenticated: true }
+        })
+      }).catch(err => console.warn('Note mutation error:', err));
+    }
+    return { success: true, value: val };
+  }
+  return { success: false };
 }
 
 function addStaffToken(sessionId, role, newName){
@@ -6788,7 +6874,7 @@ function mrFilledStats(sessionList){
 function editorialCardRail(r){
  const gaps=mrGaps(r);
  const fac=(r.fields.Facilitator||'').trim();
- if(/canceled|cancelled/i.test(fac))return 'rail-canceled';
+ if(/canceled|cancelled/i.test(fac)||/canceled|cancelled/i.test(r.fields.Type||'')||/canceled|cancelled/i.test(r.fields.Notes||''))return 'rail-canceled';
  const d=SessionCore.parseDate(dateValue(r));
  const urgency=getStaffingUrgency(d);
  if(urgency==='urgent')return 'rail-urgent';
@@ -6797,16 +6883,93 @@ function editorialCardRail(r){
 }
 function editorialCardStatus(r){
  const gaps=mrGaps(r);
- if(gaps.length===0)return `<span class="mr-card-status-tag status-ready"><span class="mr-card-status-dot" style="background:var(--brand)"></span> Ready</span>`;
+ if(gaps.length===0)return '';
  const d=SessionCore.parseDate(dateValue(r));
  const urgency=getStaffingUrgency(d);
  const dotBg=urgency==='urgent'?'var(--urgent-fg)':'var(--warning-fg)';
  const label=gaps.length===1?'1 Slot Open':`${gaps.length} Slots Open`;
  return `<span class="mr-card-status-tag status-open"><span class="mr-card-status-dot" style="background:${dotBg}"></span> ${label}</span>`;
 }
+function formatSessionTimeBreakdown(record, userZone) {
+  const parsed = typeof SessionCore !== 'undefined' && SessionCore.parseSessionTime ? SessionCore.parseSessionTime(record) : { status: 'unresolved' };
+  if (parsed.status !== 'resolved' || !parsed.startUtc) {
+    return {
+      status: 'unresolved',
+      startUtc: null,
+      primaryText: 'Time TBD',
+      sourceLabel: parsed.sourceLabel || 'Time TBD',
+      reason: parsed.reason || 'Time unconfirmed in source',
+      hasDisclosure: false,
+      isLocal: false,
+      fallbackMode: null,
+      local: null,
+      eastern: null,
+      pacific: null
+    };
+  }
+  const d = new Date(parsed.startUtc);
+
+  function formatZone(targetZone) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: targetZone,
+      timeZoneName: 'short'
+    });
+    const parts = formatter.formatToParts(d);
+    const time = parts.filter(p => p.type !== 'timeZoneName').map(p => p.value).join('').trim();
+    const zoneLabel = parts.find(p => p.type === 'timeZoneName')?.value || targetZone;
+    return { time, zoneLabel, zoneId: targetZone, text: `${time} ${zoneLabel}` };
+  }
+
+  const eastern = formatZone('America/New_York');
+  const pacific = formatZone('America/Los_Angeles');
+
+  let local = null;
+  let isLocal = false;
+  if (userZone && typeof userZone === 'string') {
+    try {
+      local = formatZone(userZone.trim());
+      isLocal = true;
+    } catch {}
+  }
+
+  if (isLocal && local) {
+    return {
+      status: 'resolved',
+      startUtc: parsed.startUtc,
+      primaryText: local.text,
+      isLocal: true,
+      fallbackMode: null,
+      userZoneName: userZone,
+      hasDisclosure: true,
+      local,
+      eastern,
+      pacific,
+      sourceLabel: parsed.sourceLabel
+    };
+  }
+
+  return {
+    status: 'resolved',
+    startUtc: parsed.startUtc,
+    primaryText: eastern.text,
+    isLocal: false,
+    fallbackMode: 'institutional-eastern',
+    userZoneName: null,
+    hasDisclosure: true,
+    local: null,
+    eastern,
+    pacific,
+    sourceLabel: parsed.sourceLabel
+  };
+}
+if (typeof globalThis !== 'undefined') globalThis.formatSessionTimeBreakdown = formatSessionTimeBreakdown;
+if (typeof module !== 'undefined' && module.exports) module.exports.formatSessionTimeBreakdown = formatSessionTimeBreakdown;
+
 function editorialCard(r){
  const dStr=recordDate(r);
- let dayNum='?',wday='TBD',mon='',timeStr=SessionCore.formatSessionTime(r);
+ let dayNum='?',wday='TBD',mon='';
  if(dStr){
   const dObj=new Date(dStr+'T12:00:00Z');
   if(!Number.isNaN(dObj.getTime())){
@@ -6815,14 +6978,35 @@ function editorialCard(r){
    mon=dObj.toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'}).toUpperCase();
   }
  }
+ const userZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : null;
+ const tzBreakdown = SessionCore.formatSessionTimeBreakdown(r, userZone);
  const fac=(r.fields.Facilitator||'').trim();
- const isCanceled=/canceled|cancelled/i.test(fac);
+ const isCanceled=/canceled|cancelled/i.test(fac)||/canceled|cancelled/i.test(r.fields.Type||'')||/canceled|cancelled/i.test(r.fields.Notes||'');
  const railClass=editorialCardRail(r);
  const gaps=mrGaps(r);
  const sessionType=r.fields.Type||'Morning Report';
  const statusHtml=editorialCardStatus(r);
- const titleText=r.fields['Topic / Case']||title(r,'Morning Report')||sessionType;
- const subtitleText=r.fields.Notes||r.fields['Theme / Series']||r.fields.Description||'';
+
+ const rawTopic = (r.fields['Topic / Case'] || '').trim();
+ const rawDetails = (r.fields['Details'] || '').trim();
+ const rawType = (r.fields['Type'] || '').trim();
+ const rawNotes = (r.fields['Notes'] || '').trim();
+
+ let titleText = '';
+ if (rawTopic && !/^(tbd|none|-|—|\?)$/i.test(rawTopic)) {
+  titleText = rawTopic;
+ } else if (rawDetails && !/^(tbd|none|-|—|\?)$/i.test(rawDetails)) {
+  titleText = rawDetails;
+ } else if (rawType && !/^(tbd|none|-|—|\?)$/i.test(rawType)) {
+  titleText = rawType;
+ } else {
+  titleText = 'Morning Report Session';
+ }
+
+ let subtitleText = '';
+ if (rawNotes && rawNotes !== titleText && !/^(tbd|none|-|—|\?)$/i.test(rawNotes)) {
+  subtitleText = rawNotes;
+ }
 
  const staffingCells=['Facilitator','Presenter','Scribe','Teaching Points'].map(role=>{
   const isVacant=gaps.includes(role);
@@ -6833,14 +7017,43 @@ function editorialCard(r){
   </div>`;
  }).join('');
 
- const staffingZone = (isCanceled && gaps.length === 4) ? `
+ const bypassMessage = /grand rounds/i.test(fac+rawNotes+sessionType) ? 'Session staffing bypassed for Grand Rounds' :
+   (/recess/i.test(fac+rawNotes+sessionType) ? 'Session staffing bypassed for Recess' : 'Session cancelled — staffing not required');
+
+ const staffingZone = (isCanceled || (gaps.length === 4 && /none|recess/i.test(fac))) ? `
   <div class="mr-card-bypassed">
-   <span>📅</span>
-   <span>Session staffing bypassed for Grand Rounds / Recess</span>
+   <span>${esc(bypassMessage)}</span>
   </div>` : `
   <div class="mr-card-staffing">
    ${staffingCells}
   </div>`;
+
+ let timeHtml = '';
+ if (isCanceled) {
+  timeHtml = '<span class="mr-time-canceled">⊘ No Session</span>';
+ } else if (tzBreakdown.hasDisclosure) {
+  const disclosureDetails = `
+   <span class="mr-tz-details">
+    <span class="mr-tz-line"><strong>Your time:</strong> ${esc(tzBreakdown.local ? tzBreakdown.local.text : tzBreakdown.eastern.text + ' (ET default)')}</span>
+    <span class="mr-tz-line"><strong>Eastern:</strong> ${esc(tzBreakdown.eastern.text)}</span>
+    <span class="mr-tz-line"><strong>Pacific:</strong> ${esc(tzBreakdown.pacific.text)}</span>
+   </span>`;
+  timeHtml = `
+   <div class="mr-tz-popover-anchor" tabindex="0" role="button" aria-haspopup="true" title="Click to view timezone breakdown (Local / ET / PT)">
+    <span class="mr-clock-icon" aria-hidden="true">🕒</span>
+    <span class="mr-time-primary">${esc(tzBreakdown.primaryText)}</span>
+    ${disclosureDetails}
+   </div>`;
+ } else {
+  timeHtml = `<span>🕒</span> <span>${esc(tzBreakdown.primaryText)}</span>`;
+ }
+
+  let noteHtml = '';
+  if (rawNotes && !/^(tbd|none|-|—|\?)$/i.test(rawNotes)) {
+    noteHtml = `<div class="mr-session-note"><em>${esc(rawNotes)}</em><button type="button" class="mr-note-edit-trigger" data-edit-note="${esc(r.id)}" title="Edit session note">✎</button></div>`;
+  } else {
+    noteHtml = `<div class="mr-note-hover-wrap"><button type="button" class="mr-note-edit-trigger" data-edit-note="${esc(r.id)}" title="Add session note">+ Note</button></div>`;
+  }
 
  return `<article class="mr-card" data-record-id="${esc(r.id)}">
   <div class="mr-card-rail ${railClass}"></div>
@@ -6851,7 +7064,7 @@ function editorialCard(r){
      <span class="mr-card-weekday">${esc(wday)}</span>
      <span class="mr-card-month">${esc(mon)}</span>
     </div>
-    <div class="mr-card-time">${isCanceled?'<span class="mr-time-canceled">⊘ No Session</span>':`<span>🕒</span> <span>${esc(timeStr)}</span>`}</div>
+    <div class="mr-card-time">${timeHtml}</div>
    </div>
   </div>
   <div class="mr-card-content">
@@ -6860,12 +7073,9 @@ function editorialCard(r){
     ${statusHtml}
    </div>
    <h3 class="mr-card-title">${esc(titleText)}</h3>
-   ${subtitleText?`<p class="mr-card-subtitle">${esc(subtitleText)}</p>`:''}
+   ${noteHtml}
   </div>
   ${staffingZone}
-  <div class="mr-card-actions">
-   <button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details">Details</button>
-  </div>
  </article>`;
 }
 function agendaView(rr){
@@ -6888,7 +7098,6 @@ function agendaView(rr){
       <span class="mr-section-sub">· Consecutive Day-by-Day Operations</span>
     </div>
     <div class="mr-legend">
-     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--brand)"></span> Confirmed</span>
      <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--warning-fg)"></span> Open Slot</span>
      <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--urgent-fg)"></span> Canceled/Blackout</span>
     </div>
@@ -6937,7 +7146,7 @@ function agendaView(rr){
    return `<section class="agenda-week panel"><div class="agenda-week-head"><h3>${esc(weekLabel(w.start,w.end))}</h3><span>${w.records.length} sessions</span></div>${dayGroupsHtml}</section>`;
  }).join('') : '';
 
- return `<section class="agenda-view">${scheduleSummary(rr)}${next7Html}${lowerStaffingTable}${weekContent}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
+ return `<section class="agenda-view">${next7Html}${lowerStaffingTable}${weekContent}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
 }
 function agendaCard(r,isUnresolved=false){
  return `<article class="agenda-card"><div class="agenda-card-date"><strong>${esc(recordDate(r)||dateValue(r)||'Date TBD')}</strong></div><div class="agenda-card-body"><div class="agenda-card-top"><span class="tag">${esc(r.fields.Type||'Morning Report')}</span><span class="muted agenda-times">${esc(SessionCore.formatSessionTime(r))}</span></div>${staffingGrid(r)}</div><div class="agenda-card-actions">${sessionNotice(r)}<button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details">Details</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></article>`;
@@ -7146,6 +7355,22 @@ function arrangeScheduleFilters(){
 
 if(typeof window!=='undefined'&&window.matchMedia){window.matchMedia('(max-width:760px)').addEventListener('change',()=>{if(!document.querySelector('dialog[open]'))render()});}
 if(typeof window!=='undefined'){window.addEventListener('resize',()=>{const d=document.querySelector('.schedule-secondary-filters[open]');if(d&&window.positionFiltersPanel)window.positionFiltersPanel();});}
+if(typeof document!=='undefined'){
+  document.addEventListener('click', e => {
+    const editBtn = e.target.closest('[data-edit-note]');
+    if (!editBtn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const sessionId = editBtn.dataset.editNote;
+    const r = records('Morning Report').find(x => x.id === sessionId);
+    if (!r) return;
+    const existing = (r.fields && r.fields.Notes) || '';
+    const newNote = window.prompt('Session Note:\n(Optional context about this VMR. Keep role fields limited to names.)', existing);
+    if (newNote !== null) {
+      updateSessionNote(sessionId, newNote);
+    }
+  });
+}
 if(typeof globalThis!=='undefined'){
   globalThis.RECORD_CATEGORY=RECORD_CATEGORY;
   globalThis.CRC_RETIRED_ROUNDS=CRC_RETIRED_ROUNDS;
