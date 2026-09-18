@@ -41,7 +41,7 @@ global.fetch = async (url, options = {}) => {
     const mrRows = [
       ['Date', 'Pacific', 'Eastern', 'Type', 'Case', 'Facilitator', 'Presenter'],
       [], [], [], [], [],
-      ['2026-10-01', '6:00 AM', '9:00 AM', 'Morning Report', '', 'Rabih', 'Dr. Alice']
+      ['2026-10-05', '6:00 AM', '9:00 AM', 'Morning Report', '', 'Rabih', 'Dr. Alice']
     ];
     return {
       ok: true,
@@ -108,7 +108,7 @@ test('Milestone 5: Durable operations, concurrency serialization, and idempotenc
   resetMemoryState();
   sheetsBatchCalls = 0;
 
-  const stableId = 'mr-2026-10-01-morning-report-6-00-am';
+  const stableId = 'mr-2026-10-05-morning-report-6-00-am';
 
   await t.test('rejects conflicting write when expectedPreviousValue does not match current occupant', async () => {
     // Current presenter in row 7 is 'Dr. Alice'
@@ -127,10 +127,11 @@ test('Milestone 5: Durable operations, concurrency serialization, and idempotenc
     assert.equal(result.body.currentValue, 'Dr. Alice');
   });
 
+  const testOpId = `op-test-m5-${Date.now()}`;
+
   await t.test('executes write and logs committed operation in journal when expectedPreviousValue matches', async () => {
-    const opId = 'op-test-unique-123';
     const { req, res, getResult } = mockReqRes({
-      operationId: opId,
+      operationId: testOpId,
       dataset: 'Morning Report',
       stableId,
       field: 'Presenter',
@@ -142,9 +143,9 @@ test('Milestone 5: Durable operations, concurrency serialization, and idempotenc
     const result = getResult();
     assert.equal(result.status, 200);
     assert.equal(result.body.success, true);
-    assert.equal(result.body.operationId, opId);
+    assert.equal(result.body.operationId, testOpId);
 
-    const logged = await getOperationById(opId);
+    const logged = await getOperationById(testOpId);
     assert.ok(logged, 'Operation must be logged in durable journal');
     assert.equal(logged.status, 'committed');
     assert.equal(logged.sessionId, stableId);
@@ -152,10 +153,9 @@ test('Milestone 5: Durable operations, concurrency serialization, and idempotenc
 
   await t.test('replays committed operation idempotently without re-executing batchUpdate to Google Sheets', async () => {
     const initialCalls = sheetsBatchCalls;
-    const opId = 'op-test-unique-123'; // Same operationId as previous test
 
     const { req, res, getResult } = mockReqRes({
-      operationId: opId,
+      operationId: testOpId,
       dataset: 'Morning Report',
       stableId,
       field: 'Presenter',

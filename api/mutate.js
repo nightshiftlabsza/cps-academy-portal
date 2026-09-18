@@ -12,12 +12,12 @@ if (fs.existsSync(envPath) && typeof process.loadEnvFile === 'function') {
   } catch {}
 }
 
+const sheetsReaderModule = require('./_lib/sheets-reader.cjs');
 const {
   getCredentials,
   getAccessToken,
-  clearCache,
-  findRowByStableId
-} = require('./_lib/sheets-reader.cjs');
+  clearCache
+} = sheetsReaderModule;
 const { recordOperation, getOperationById, updateOperation, acquireLock, releaseLock } = require('./_lib/db.cjs');
 const { getSessionUser } = require('./_lib/auth-session.cjs');
 
@@ -62,7 +62,15 @@ const MEMBERS_COLUMNS = {
   'Birthday': { col: 'E', index: 4 },
   'Email': { col: 'F', index: 5 },
   'Location': { col: 'G', index: 6 },
-  'Subspecialty': { col: 'H', index: 7 }
+  'Subspecialty': { col: 'H', index: 7 },
+  '_cps_id': { col: 'I', index: 8 },
+  'First Name': { col: 'J', index: 9 },
+  'Surname': { col: 'K', index: 10 },
+  'AKA / Nicknames': { col: 'L', index: 11 },
+  'Onboarded': { col: 'M', index: 12 },
+  'Onboarded At': { col: 'N', index: 13 },
+  'Category': { col: 'O', index: 14 },
+  'Active Status': { col: 'P', index: 15 }
 };
 
 const IMPORTANT_LINKS_COLUMNS = {
@@ -112,7 +120,7 @@ async function mutateHandler(req, res) {
     return sendJson(400, { error: 'INVALID_JSON', message: 'Malformed JSON payload' });
   }
 
-  const { dataset, stableId, field, value, expectedPreviousValue, fields, user, operationId: clientOpId } = body || {};
+  const { dataset, stableId, field, value, expectedPreviousValue, fields, expectedPreviousValues, user, operationId: clientOpId } = body || {};
   const operationId = clientOpId || `op_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
   // Atomic operation-level lock to prevent concurrent requests with the same operationId
@@ -215,7 +223,7 @@ async function mutateHandler(req, res) {
     }
 
     // 4. Resolve actual row number using deterministic stable ID (inside acquired lock)
-    const match = await findRowByStableId(sheetId, dataset, stableId);
+    const match = await sheetsReaderModule.findRowByStableId(sheetId, dataset, stableId);
     if (!match) {
       return sendJson(404, { error: 'RECORD_NOT_FOUND', message: `Could not locate record "${stableId}" in spreadsheet` });
     }
@@ -223,18 +231,40 @@ async function mutateHandler(req, res) {
     const { rowNumber, values } = match;
 
     // Self-only directory profile edit check: members cannot edit another member's profile
-    // Must strictly match verified email on record; unverified or missing emails are rejected
+    // Must strictly match session user's email or stableId on record
     if (dataset === 'Members' && sessionUser.role !== 'admin') {
       const memberEmail = String(values[5] ?? '').trim().toLowerCase();
       if (!memberEmail || memberEmail !== sessionUser.email.toLowerCase()) {
         return sendJson(403, {
           error: 'FORBIDDEN',
-          message: 'Members may only update their own directory profile with a verified matching email'
+          message: 'Members may only update their own directory profile with a matching email'
         });
+      }
+
+      // Disallow non-admins from mutating administrative fields or login-email directly
+      const DISALLOWED_SELF_SERVICE = new Set(['Sponsor', 'Email', '_cps_id', 'Subspecialty']);
+      for (const f of targetFields) {
+        if (DISALLOWED_SELF_SERVICE.has(f)) {
+          return sendJson(403, {
+            error: 'PROTECTED_FIELD',
+            message: `Field "${f}" cannot be modified through self-service profile edits`
+          });
+        }
       }
     }
 
     // 5. Interrupted write reconciliation & child index validation
+    let totalSubSessions = 1;
+    if (dataset === 'Morning Report') {
+      const checkFields = ['Type', 'Facilitator', 'Pacific time (source)', 'Eastern time (source)', 'Scribe / teaching points sign-ups'];
+      for (const f of checkFields) {
+        const idx = MORNING_REPORT_COLUMNS[f]?.index;
+        if (idx !== undefined && values[idx]) {
+          const parts = String(values[idx]).replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/);
+          if (parts.length > totalSubSessions) totalSubSessions = parts.length;
+        }
+      }
+    }
     const childIndex = body?.childSessionIndex; // 1-indexed (e.g. 1 or 2)
     if (childIndex !== undefined && childIndex !== null) {
       if (!Number.isInteger(childIndex) || childIndex < 1) {
@@ -252,13 +282,13 @@ async function mutateHandler(req, res) {
       let currentValToCompare = rawCurrentCell.trim();
 
       if (childIndex && childIndex > 0) {
-        const parts = rawCurrentCell.replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/);
-        if (childIndex > parts.length) {
+        if (childIndex > totalSubSessions) {
           return sendJson(400, {
             error: 'INVALID_CHILD_INDEX',
-            message: `childSessionIndex ${childIndex} exceeds sub-session count (${parts.length})`
+            message: `childSessionIndex ${childIndex} exceeds sub-session count (${totalSubSessions})`
           });
         }
+        const parts = rawCurrentCell ? rawCurrentCell.replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/) : [];
         currentValToCompare = (parts[childIndex - 1] || '').trim();
       }
 
@@ -298,6 +328,30 @@ async function mutateHandler(req, res) {
       }
     }
 
+    if (expectedPreviousValues && typeof expectedPreviousValues === 'object') {
+      for (const [fName, expVal] of Object.entries(expectedPreviousValues)) {
+        const colDef = colMap[fName];
+        if (!colDef) continue;
+        const currentCell = String(values[colDef.index] ?? '').trim();
+        const expectedClean = String(expVal ?? '').trim();
+        const intendedValClean = String(fieldUpdates[fName] ?? '').trim();
+
+        // If cell already matches intended value, it succeeded previously
+        if (currentCell === intendedValClean && currentCell !== expectedClean) {
+          continue;
+        }
+
+        if (currentCell !== expectedClean) {
+          return sendJson(409, {
+            error: 'CONFLICT',
+            field: fName,
+            message: `Field "${fName}" was modified in spreadsheet (current: "${currentCell}", expected: "${expectedClean}"). Please reload and review.`,
+            currentValue: currentCell
+          });
+        }
+      }
+    }
+
     // 5c. Pre-log operation as pending before network write
     try {
       await recordOperation({
@@ -323,14 +377,15 @@ async function mutateHandler(req, res) {
       // If updating a child of a split cell (e.g. AM/PM or Case 1/Case 2)
       if (childIndex && childIndex > 0) {
         const rawExisting = String(values[colDef.index] ?? '');
-        const dividerMatch = rawExisting.match(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/);
-        const divider = dividerMatch ? dividerMatch[0] : '\n---\n';
-        const parts = rawExisting.replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/);
-
-        if (parts.length >= childIndex) {
-          parts[childIndex - 1] = finalCellValue;
-          finalCellValue = parts.join(divider);
+        let divider = '\n\n&\n\n';
+        for (const idx of [3, 5, 1, 2, 13]) {
+          const m = String(values[idx] ?? '').match(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/);
+          if (m) { divider = m[0]; break; }
         }
+        const parts = rawExisting ? rawExisting.replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/) : [];
+        while (parts.length < totalSubSessions) parts.push('');
+        parts[childIndex - 1] = finalCellValue;
+        finalCellValue = parts.join(divider);
       }
 
       return {

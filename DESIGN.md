@@ -90,6 +90,16 @@ Urgent Background:
 Urgent Foreground:
 #8B281E
 
+### Vacancy Tokens (Light)
+Vacancy Background:
+#FFFCF5
+
+Vacancy Foreground:
+#704400
+
+Vacancy Border:
+#F0E6D2
+
 ---
 
 ## Shared Dark Mode Surface Tokens
@@ -138,6 +148,37 @@ Urgent Background:
 
 Urgent Foreground:
 #FFC8B9
+
+### Vacancy Tokens (Dark)
+Vacancy Background:
+#30281B
+
+Vacancy Foreground:
+#FFD88A
+
+Vacancy Border:
+#4A3C23
+
+---
+
+## Desktop Morning Report Reference System (Stitch Final Alignment)
+
+### Typography
+- **UI Body & Controls**: Inter, with `system-ui, -apple-system, sans-serif` fallback.
+- **Editorial Headings & Dates**: Newsreader, with `Georgia, "Times New Roman", serif` fallback.
+- **Font Loading**: Preconnected via Google Fonts in `index.html` with explicit weights.
+
+### Proportions & Grid
+- **Date Column**: ~176px (flexible, `flex-shrink: 0`) containing day number, uppercase weekday/month, and interactive timezone trigger.
+- **Editorial Content Zone**: Flexible main column (`flex: 1`) displaying session taxonomy badges, session title, and discreet inline note trigger.
+- **Horizontal Staffing Pane**: ~480px–500px 4-column modular grid (`grid-template-columns: repeat(4, 1fr)`) containing Facilitator, Presenter, Scribe, and Teaching Points.
+- **Actions Column**: Compact Details button and calendar/export triggers.
+- **Desktop Responsiveness**: Fully visible across 1280px, 1440px, and 1600px without horizontal page scrolling or cramped overflowing roles.
+
+### Vacancy & Action Presentation
+- **Calm Amber Vacancy**: Vacancy alone triggers soft amber styling (`#FFFCF5` light / `#30281B` dark).
+- **Consistent Action**: Displays "Open" alongside an accessible `"Volunteer"` text action button preserving single-click claim workflows.
+- **Strict Urgency Rails**: Semantic red indicator rail requires both an actual unfilled role (`gaps.length > 0`) AND urgent proximity (`<= 1 day`). Fully staffed sessions never receive a staffing-urgency rail.
 
 ---
 

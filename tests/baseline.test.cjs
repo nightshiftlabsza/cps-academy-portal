@@ -785,21 +785,34 @@ test('backupAgeText returns "Never requested" when lastBackup is absent or inval
   assert.equal(sandbox.backupAgeText(), '2d ago');
 });
 
-test('Home backup card displays accurate local change counts and avoids "pending backup"', () => {
+test('Workspace backup panel displays accurate local change counts and avoids "pending backup"', () => {
   const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
-  const createCardHarness = (edits = {}, added = [], lastBackup = null) => {
+  const createWorkspaceHarness = (edits = {}, added = [], lastBackup = null) => {
     const ctx = {
       workspace: { edits, added, favorites: [], history: [], lastBackup },
       Date,
       Math,
-      esc: s => String(s ?? '')
+      esc: s => String(s ?? ''),
+      sessionStorage: { getItem: () => null },
+      OfflineManager: { getOfflineStatus: () => null },
+      header: () => '',
+      banner: () => '',
+      workbookDiffHtml: () => '',
+      isAdmin: () => false,
+      exportBackup: () => {},
+      importBackup: () => {},
+      exportPatchJson: () => {},
+      rollbackImport: () => {},
+      $: () => ({})
     };
     const helper = `
       ${appCode.slice(appCode.indexOf('function backupAgeText'), appCode.indexOf('function sessionZoomUrl'))}
+      let html = '';
+      const $ = () => ({ set innerHTML(val) { html = val; } });
+      ${appCode.slice(appCode.indexOf('function workspaceView(){'), appCode.indexOf('let currentLogbookSlice=null;'))}
       function renderCard() {
-        const editCount = Object.keys(workspace.edits).length + workspace.added.length;
-        ${appCode.slice(appCode.indexOf('const backupCard=`<article class="panel op-card">'), appCode.indexOf('const linksCard=`'))}
-        return backupCard;
+        workspaceView();
+        return html;
       }
     `;
     vm.runInNewContext(helper, ctx);
@@ -807,20 +820,20 @@ test('Home backup card displays accurate local change counts and avoids "pending
   };
 
   // Clean state
-  const clean = createCardHarness();
-  assert(clean.includes('0 local changes retained on this device'));
+  const clean = createWorkspaceHarness();
+  assert(clean.includes('0 edited records · 0 new drafts'));
   assert(clean.includes('Last backup export requested: Never requested'));
   assert(!clean.includes('pending backup'));
 
   // Edits retained before export
-  const withEdits = createCardHarness({ 'MR:1': { Facilitator: 'Test' } }, [{ id: 'local:draft1' }]);
-  assert(withEdits.includes('2 local changes retained on this device'));
+  const withEdits = createWorkspaceHarness({ 'MR:1': { Facilitator: 'Test' } }, [{ id: 'local:draft1' }]);
+  assert(withEdits.includes('1 edited record · 1 new draft'));
   assert(withEdits.includes('Last backup export requested: Never requested'));
   assert(!withEdits.includes('pending backup'));
 
   // Edits retained after export requested
-  const afterExport = createCardHarness({ 'MR:1': { Facilitator: 'Test' } }, [{ id: 'local:draft1' }], new Date().toISOString());
-  assert(afterExport.includes('2 local changes retained on this device'), 'Edits remain retained after export');
+  const afterExport = createWorkspaceHarness({ 'MR:1': { Facilitator: 'Test' } }, [{ id: 'local:draft1' }], new Date().toISOString());
+  assert(afterExport.includes('1 edited record · 1 new draft'), 'Edits remain retained after export');
   assert(afterExport.includes('Last backup export requested: < 1h ago'));
   assert(!afterExport.includes('pending backup'), 'Must never claim pending backup');
   assert(!afterExport.includes('All changes backed up'), 'Must not make unverified claims about filesystem storage');

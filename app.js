@@ -211,7 +211,21 @@ function classifyRecord(record, t = (record?.tab || (typeof tab !== 'undefined' 
       return { category: RECORD_CATEGORY.SOURCE_HEADING, cohort: meta.cohort, role: meta.role, label: meta.label, isStructural: true, isSubstantive: false, hasLocalEdits, wasHeading: false, reviewNotice: null };
     }
     const name = (fields.Name || '').trim();
-    const cohort = (record.id?.startsWith('local:') || record.row == null) ? 'Local / unassigned' : getMemberCohortByRow(record.row);
+    let cohort = 'Local / unassigned';
+    const explicitCat = (fields['Category'] || '').trim();
+    const explicitActive = (fields['Active Status'] || '').trim();
+
+    if (explicitActive.toLowerCase() === 'inactive') {
+      cohort = 'Marked inactive in source';
+    } else if (explicitCat) {
+      if (explicitCat.toLowerCase() === 'participant') cohort = 'Participants';
+      else if (explicitCat.toLowerCase() === 'core team') cohort = 'Core team';
+      else if (explicitCat.toLowerCase() === 'leader') cohort = 'Leaders';
+      else cohort = explicitCat;
+    } else {
+      cohort = (record.id?.startsWith('local:') || record.row == null) ? 'Local / unassigned' : getMemberCohortByRow(record.row);
+    }
+
     if (!name && !fields.Email && !fields.Country && !fields.Sponsor) {
       return { category: RECORD_CATEGORY.PLACEHOLDER, cohort, role: 'empty_row', label: 'Empty member row', isStructural: true, isSubstantive: false, hasLocalEdits, wasPlaceholder: false, reviewNotice: 'All member fields are empty' };
     }
@@ -402,6 +416,23 @@ function searchMatches(r,t,terms){const txt=recordSearchText(r,t);return terms.e
 let skill='',dateFrom='',dateTo='',owner='',sessionType='',sessionFacilitator='',gapsOnly=false,sectionQuery='',mySessionsOnly=false,secondaryScope='';
 let yearFilter='all';
 let mrScheduleWeekStart='',mrScheduleRangeMode='week';
+let mrScheduleMonth='';
+function getDefaultScheduleMonth(){
+  const t=typeof today==='function'?today():'2026-09-08';
+  return t.slice(0, 7);
+}
+function mrShiftMonth(monthStr, delta){
+  const cur = monthStr || getDefaultScheduleMonth();
+  const [y, m] = cur.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return d.toISOString().slice(0, 7);
+}
+function mrMonthLabel(monthStr){
+  const cur = monthStr || getDefaultScheduleMonth();
+  const [y, m] = cur.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
 function getDefaultScheduleWeekStart(){
   const t=typeof today==='function'?today():'2026-09-08';
   const b=typeof SessionCore!=='undefined'&&SessionCore.getWeekBounds?SessionCore.getWeekBounds(t):null;
@@ -948,7 +979,10 @@ function calendarButton(r,t,options={}){
  if (c && (c.category === RECORD_CATEGORY.SOURCE_HEADING || c.category === RECORD_CATEGORY.PLACEHOLDER)) return '';
  const pendingTime=Object.keys(r.session?.legacyOverrides||{}).some(k=>/Date|time/i.test(k));
  const timing=pendingTime?{status:'unresolved',reason:'review earlier row-level date/time edits first'}:SessionCore.parseSessionTime(r);
- if(timing.status!=='resolved')return `<span class="calendar-status muted" title="${esc(timing.reason||'confirm date and time')}">Calendar unavailable: ${esc(timing.reason||'confirm the source date and time')}</span>`;
+ if(timing.status!=='resolved'){
+   if(options.compact)return `<button type="button" class="icon-button calendar-icon-btn is-disabled" disabled title="Calendar export unavailable: ${esc(timing.reason||'confirm date and time')}" aria-label="Calendar export unavailable" aria-disabled="true">📅</button>`;
+   return `<span class="calendar-status muted" title="${esc(timing.reason||'confirm date and time')}">Calendar unavailable: ${esc(timing.reason||'confirm the source date and time')}</span>`;
+ }
  const assumedText = timing.durationAssumed ? ' (60m duration assumed)' : '';
  if(options.compact)return `<span class="calendar-control compact"><button type="button" class="icon-button calendar-icon-btn" data-calendar="${esc(r.id)}" data-area="${esc(t)}" title="Download .ics calendar event${assumedText}" aria-label="Add to calendar${assumedText}">📅</button>${timing.durationAssumed ? '<small class="calendar-assumed-badge" title="60m duration assumed">60m*</small>' : ''}</span>`;
  return `<span class="calendar-control"><button type="button" class="button secondary small" data-calendar="${esc(r.id)}" data-area="${esc(t)}" title="Download .ics calendar event${assumedText}" aria-label="Add to calendar${assumedText}">Add to calendar</button>${timing.durationAssumed ? '<small class="muted">60m duration assumed</small>' : ''}</span>`;
@@ -962,6 +996,10 @@ function downloadCalendar(id,t){
  const r=records(t).find(x=>x.id===id);if(!r)return toast('Session no longer available.');
  try{
   if(Object.keys(r.session?.legacyOverrides||{}).some(k=>/Date|time/i.test(k)))throw Error('Review earlier row-level date/time edits first.');
+  const timing = typeof SessionCore !== 'undefined' && SessionCore.parseSessionTime ? SessionCore.parseSessionTime(r) : { status: 'unresolved' };
+  if (timing.status !== 'resolved') {
+    return toast(`Calendar export unavailable: Session time is unconfirmed (${timing.reason || 'unresolved'}).`);
+  }
   const payload=SessionCore.createCalendar(r,{title:title(r,t)});
   const blob=new Blob([payload],{type:'text/calendar;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');
   a.href=url;a.download='cps-session-'+id.replace(/[^a-z0-9_-]/gi,'-')+'.ics';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -983,7 +1021,13 @@ function anchor(url,label){return `<a class="button secondary small" href="${esc
 function chip(s,kind=''){return `<span class="tag ${kind}">${esc(s)}</span>`}
 function getResourceActionLabel(url){if(!url)return 'Open resource';if(/presentation/i.test(url))return 'Open whiteboard';if(/document/i.test(url))return 'Open document';if(/drive\.google/i.test(url))return 'Open folder';return 'Open resource';}
 function getResourceSubtitle(r){const linkField=(r.fields.Link||'').trim();if(!linkField||/^https?:\/\//i.test(linkField))return '';return linkField;}
-function isAdmin(){return Boolean(workspace.isAdmin||workspace.role==='Super admin'||workspace.role==='admin'||workspace.profile==='@admin')}
+function isAdmin(){
+  const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+  if (user && user.isAuthenticated && !user.isMock) {
+    return user.role === 'admin';
+  }
+  return Boolean(workspace.isAdmin || workspace.role === 'Super admin' || workspace.role === 'admin' || workspace.profile === '@admin');
+}
 function updateProfileDisplay(){
   const user=typeof Identity!=='undefined'?Identity.getCurrentUser():null;
   const isAdm=isAdmin()||user?.role==='admin';
@@ -1278,16 +1322,76 @@ function getUserAliases(userProfile, options = {}) {
   return names;
 }
 
+function isSessionCancelled(r) {
+  if (!r || !r.fields) return false;
+  const f = r.fields;
+  const text = [f.Facilitator, f.Type, f.Notes, f['Date / time (source)']].filter(Boolean).join(' ');
+  return /canceled|cancelled/i.test(text);
+}
+
+function getSessionRoleEntries(r) {
+  const f = r.fields || {};
+  const signups = String(f['Scribe / teaching points sign-ups'] || '');
+  const details = String(f.Details || '');
+  const entries = [];
+
+  const add = (role, val) => {
+    if (val && String(val).trim()) entries.push({ role, val: String(val).trim() });
+  };
+
+  // 1. Facilitator
+  const facSignups = signups.match(/(?:^|[\n|])\s*(?:Facilitator \d+|Facilitator):[^\S\r\n]*([^\r\n|]*)/i)?.[1] || '';
+  const facVal = [f.Facilitator, facSignups].filter(Boolean).join(' & ');
+  add('Facilitator', facVal);
+
+  // 2. Presenter
+  const presSignups = signups.match(/(?:^|[\n|])\s*(?:Case Presenter|Presenter):[^\S\r\n]*([^\r\n|]*)/i)?.[1] || '';
+  const presDetails = details.match(/(?:^|[\n|.]|[;])\s*(?:Case Presenter|Presenter):[^\S\r\n]*([^.;|\r\n]*)/i)?.[1] || '';
+  const presVal = [f.Presenter, presSignups, presDetails].filter(Boolean).join(' & ');
+  add('Presenter', presVal);
+
+  // 3. Scribe
+  const scribeSignups = signups.match(/(?:^|[\n|])\s*Scribe:[^\S\r\n]*([^\r\n|]*)/i)?.[1] || '';
+  const scribeVal = [f.Scribe, scribeSignups].filter(Boolean).join(' & ');
+  add('Scribe', scribeVal);
+
+  // 4. Teaching Points
+  const tpSignups = signups.match(/(?:^|[\n|])\s*(?:Teaching Points|TP):[^\S\r\n]*([^\r\n|]*)/i)?.[1] || '';
+  const tpVal = [f['Teaching Points'], tpSignups].filter(Boolean).join(' & ');
+  add('Teaching Points', tpVal);
+
+  // 5. Discussant (explicit field, residency, or signups/details)
+  const discField = [f.Discussant, f['Case Discussant'], f['Student Discussant'], f['Resident/attending discussant']].filter(Boolean).join(' & ');
+  const discSignups = signups.match(/(?:^|[\n|])\s*(?:Case Discussant|Student Discussant|Discussant):[^\S\r\n]*([^\r\n|]*)/i)?.[1] || '';
+  const discDetails = details.match(/(?:^|[\n|.]|[;])\s*(?:Case Discussant|Student Discussant|Discussant):[^\S\r\n]*([^.;|\r\n]*)/i)?.[1] || '';
+  const discVal = [discField, discSignups, discDetails].filter(Boolean).join(' & ');
+  add('Discussant', discVal);
+
+  // 6. Active Participant (separate from Discussant)
+  const activeParts = [f['Active participant 1'], f['Active participant 2'], f['Active participant 3'], f['Active participant 4']].filter(Boolean).join(' & ');
+  const activeSignups = signups.match(/(?:^|[\n|])\s*Active [Pp]articipant(?:\s*\d+)?:[^\S\r\n]*([^\r\n|]*)/i)?.[1] || '';
+  const activeVal = [activeParts, activeSignups].filter(Boolean).join(' & ');
+  add('Active Participant', activeVal);
+
+  // 7. Chat Support
+  const chatSignups = signups.match(/(?:^|[\n|])\s*(?:Chat Support|Discord Chat|Zoom Chat|Chat):[^\S\r\n]*([^\r\n|]*)/i)?.[1] || '';
+  const chatVal = [f['Chat support'], chatSignups].filter(Boolean).join(' & ');
+  add('Chat Support', chatVal);
+
+  // 8. Person in charge & Expert
+  if (f['Person in charge']) add('Person in Charge', f['Person in charge']);
+  if (f.Expert) add('Expert', f.Expert);
+
+  return entries;
+}
+
 function isUserAssignedToSession(r, userProfile, options = {}) {
   if (!r || !userProfile) return false;
   const userNames = getUserAliases(userProfile, options);
   if (!userNames.size) return false;
 
-  const rolesToCheck = ['Facilitator', 'Presenter', 'Scribe', 'Teaching Points'];
-
-  for (const role of rolesToCheck) {
-    const val = typeof staffingRoleValue === 'function' ? staffingRoleValue(r, role) : (r.fields?.[role] || '');
-    if (!val) continue;
+  const roleEntries = getSessionRoleEntries(r);
+  for (const { val } of roleEntries) {
     const tokens = typeof SessionCore !== 'undefined' && SessionCore.facilitatorNames ? SessionCore.facilitatorNames(val) : [val];
     for (const token of tokens) {
       const cleanToken = token.replace(/\([^)]*\)/g, '').trim().toLowerCase();
@@ -1305,48 +1409,59 @@ function getUserCommitments(userProfile, windowDays = 7, options = {}) {
   if (!userNames.size) return [];
 
   const refDate = options.referenceDate || today();
-  const sessionList = options.records || [
+  const rawList = options.records || [
     ...(typeof records === 'function' ? records('Morning Report') : (db['Morning Report']?.records || [])),
-    ...(typeof records === 'function' ? records('CPS Academy VMRs') : (db['CPS Academy VMRs']?.records || []))
+    ...(typeof records === 'function' ? records('CPS Academy VMRs') : (db['CPS Academy VMRs']?.records || [])),
+    ...(typeof records === 'function' ? records('Special VMRs') : (db['Special VMRs']?.records || [])),
+    ...(typeof records === 'function' ? records('Student Forum') : (db['Student Forum']?.records || []))
   ];
 
+  // Preserve split session identity if raw records were supplied
+  const sessionList = options.records
+    ? rawList.flatMap(r => (!r.session && typeof SessionCore !== 'undefined' ? SessionCore.splitMorningReport(r) : [r]))
+    : rawList;
+
   const commitments = [];
-  const rolesToCheck = ['Facilitator', 'Presenter', 'Scribe', 'Teaching Points'];
+  // Window: today plus the following six calendar days (0 <= d <= 6)
+  const maxDayOffset = typeof options.maxDays === 'number'
+    ? options.maxDays
+    : (typeof windowDays === 'number' && windowDays < 6 ? windowDays : 6);
 
   for (const r of sessionList) {
+    if (isSessionCancelled(r)) continue;
     const sDate = typeof recordDate === 'function' ? recordDate(r) : (r.fields?.Date?.slice(0, 10) || '');
     if (!sDate) continue;
     const d = staffingDays(sDate, refDate);
-    if (d === null || d < 0 || d > windowDays) continue;
+    if (d === null || d < 0 || d > maxDayOffset) continue;
 
     const assignedRoles = [];
+    const coStaff = [];
+    const roleEntries = getSessionRoleEntries(r);
 
-    for (const role of rolesToCheck) {
-      const val = typeof staffingRoleValue === 'function' ? staffingRoleValue(r, role) : (r.fields?.[role] || '');
-      if (!val) continue;
+    for (const { role, val } of roleEntries) {
       const tokens = typeof SessionCore !== 'undefined' && SessionCore.facilitatorNames ? SessionCore.facilitatorNames(val) : [val];
+      let userHasRole = false;
+      const others = [];
+
       for (const token of tokens) {
         const cleanToken = token.replace(/\([^)]*\)/g, '').trim().toLowerCase();
-        if (cleanToken && !/^(?:tbd|none|n\/a|-|—)$/i.test(cleanToken) && userNames.has(cleanToken) && !assignedRoles.includes(role)) {
-          assignedRoles.push(role);
+        if (!cleanToken || /^(?:tbd|none|n\/a|-|—)$/i.test(cleanToken)) continue;
+        if (userNames.has(cleanToken)) {
+          userHasRole = true;
+        } else {
+          others.push(token.replace(/\([^)]*\)/g, '').trim());
         }
+      }
+
+      if (userHasRole && !assignedRoles.includes(role)) {
+        assignedRoles.push(role);
+      }
+      if (others.length > 0) {
+        coStaff.push(`${role}: ${others.join(', ')}`);
       }
     }
 
     if (assignedRoles.length > 0) {
-      const coStaff = [];
-      for (const role of rolesToCheck) {
-        const val = typeof staffingRoleValue === 'function' ? staffingRoleValue(r, role) : (r.fields?.[role] || '');
-        if (!val) continue;
-        const tokens = typeof SessionCore !== 'undefined' && SessionCore.facilitatorNames ? SessionCore.facilitatorNames(val) : [val];
-        const others = tokens
-          .map(t => t.replace(/\([^)]*\)/g, '').trim())
-          .filter(t => t && !/^(?:tbd|none|n\/a|-|—)$/i.test(t) && !userNames.has(t.toLowerCase()));
-        if (others.length > 0) {
-          coStaff.push(`${role}: ${others.join(', ')}`);
-        }
-      }
-
       const urgency = d < 2 ? 'urgent' : 'upcoming';
       const parsedTime = typeof SessionCore !== 'undefined' ? SessionCore.parseSessionTime(r) : null;
       const timeStr = typeof SessionCore !== 'undefined' ? SessionCore.formatSessionTime(r) : (r.fields?.['Pacific time (source)'] || '');
@@ -1412,13 +1527,15 @@ function renderMyCommitmentsWidget() {
     return `<section class="commitments-quiet" id="my-commitments-widget">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
         <div>
-          <p class="eyebrow" style="margin-bottom:2px;">My Upcoming Commitments</p>
+          <p class="eyebrow" style="margin-bottom:2px;">Your roles · Next 7 days</p>
           <p class="commitments-quiet-text">No scheduled commitments in the next 7 days.</p>
         </div>
         <button type="button" class="button secondary small" data-go="Morning Report">Browse schedule →</button>
       </div>
     </section>`;
   }
+
+  const userZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : null;
 
   const itemsHtml = commitments.map(c => {
     const zoomButton = c.zoomUrl
@@ -1427,32 +1544,61 @@ function renderMyCommitmentsWidget() {
     const calButton = `<button type="button" class="button secondary small commitment-cal-btn" data-calendar="${esc(c.sessionId)}" data-area="${esc(c.tab)}">Add to Calendar</button>`;
     const swapLink = `<button type="button" class="text-button swap-link" data-swap="${esc(c.sessionId)}" data-role="${esc(c.roles[0])}">Need to swap?</button>`;
 
-    return `<article class="commitment-card">
+    const tzBreakdown = typeof SessionCore !== 'undefined' && SessionCore.formatSessionTimeBreakdown
+      ? SessionCore.formatSessionTimeBreakdown(c.record, userZone)
+      : { hasDisclosure: false, primaryText: c.timeLabel };
+
+    let timeHtml = '';
+    if (tzBreakdown.hasDisclosure) {
+      const disclosureDetails = `
+       <span class="mr-tz-details">
+        <span class="mr-tz-line"><strong>Your time:</strong> ${esc(tzBreakdown.local ? tzBreakdown.local.text : tzBreakdown.eastern.text + ' (ET default)')}</span>
+        <span class="mr-tz-line"><strong>Eastern:</strong> ${esc(tzBreakdown.eastern.text)}</span>
+        <span class="mr-tz-line"><strong>Pacific:</strong> ${esc(tzBreakdown.pacific.text)}</span>
+       </span>`;
+      timeHtml = `
+       <div class="mr-tz-popover-anchor" tabindex="0" role="button" aria-haspopup="true" title="Click to view timezone breakdown (Local / ET / PT)">
+        <span class="mr-clock-icon" aria-hidden="true">🕒</span>
+        <span class="mr-time-primary">${esc(tzBreakdown.primaryText)}</span>
+        ${disclosureDetails}
+       </div>`;
+    } else {
+      timeHtml = `<span>🕒</span> <span>${esc(tzBreakdown.primaryText || c.timeLabel)}</span>`;
+    }
+
+    const titleMeta = typeof SessionCore !== 'undefined' && SessionCore.getSessionDisplayTitle
+      ? SessionCore.getSessionDisplayTitle(c.record)
+      : { mainTitle: c.title, sessionTypeTag: c.type, hasDistinctTag: false };
+
+    return `<article class="commitment-card mr-card" data-record-id="${esc(c.sessionId)}">
       <div class="commitment-card-head">
         <div class="commitment-badges">
           ${formatUrgencyBadge(c)}
           ${c.roles.map(role => `<span class="role-pill">${esc(role)}</span>`).join(' ')}
-          <span class="tag">${esc(c.type)}</span>
+          <span class="tag">${esc(titleMeta.sessionTypeTag || c.type)}</span>
         </div>
-        <div class="commitment-date-time">
-          <strong>${esc(c.date)}</strong> · <span>${esc(c.timeLabel)}</span>
-        </div>
-      </div>
-      <div class="commitment-meta-grid">
-        <div class="commitment-meta-item">
-          <small>Role</small>
-          <strong>${esc(c.role)}</strong>
-        </div>
-        <div class="commitment-meta-item">
-          <small>Co-Staff</small>
-          <span class="co-staff-text">${esc(c.coStaff)}</span>
+        <div class="commitment-date-time mr-card-time">
+          <strong>${esc(c.date)}</strong> · ${timeHtml}
         </div>
       </div>
-      <div class="commitment-actions">
+      <div class="commitment-card-body">
+        <h3 class="commitment-title mr-card-title">${esc(titleMeta.mainTitle || c.title)}</h3>
+        <div class="commitment-meta-grid">
+          <div class="commitment-meta-item">
+            <small>Role</small>
+            <strong>${esc(c.role)}</strong>
+          </div>
+          <div class="commitment-meta-item">
+            <small>Co-Staff</small>
+            <span class="co-staff-text">${esc(c.coStaff)}</span>
+          </div>
+        </div>
+      </div>
+      <div class="commitment-actions mr-card-actions">
         <div class="commitment-action-group">
           ${zoomButton}
           ${calButton}
-          <button type="button" class="button secondary small" data-open="${esc(c.sessionId)}" data-area="${esc(c.tab)}">View Session</button>
+          <button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(c.sessionId)}" data-area="${esc(c.tab)}">View Session</button>
         </div>
         <div>
           ${swapLink}
@@ -1462,12 +1608,62 @@ function renderMyCommitmentsWidget() {
   }).join('');
 
   return `<section class="commitments-widget" id="my-commitments-widget">
-    <div class="commitments-widget-head">
-      <h2><span>📋</span> My Upcoming Commitments (${commitments.length})</h2>
+    <div class="commitments-widget-head mr-section-head">
+      <div class="mr-section-title-wrap">
+        <h2><span>📋</span> Your roles · Next 7 days (${commitments.length})</h2>
+        <span class="mr-section-sub">· Upcoming personal assignments</span>
+      </div>
       <span class="tag ready-chip">Active Schedule</span>
     </div>
     <div class="commitments-list">
       ${itemsHtml}
+    </div>
+  </section>`;
+}
+
+function getBirthdaysToday(options = {}) {
+  const refDate = options.referenceDate || (typeof today === 'function' ? today() : '2026-09-15');
+  const parts = String(refDate).split('-');
+  if (parts.length < 3) return [];
+  const refMonth = parseInt(parts[1], 10);
+  const refDay = parseInt(parts[2], 10);
+  if (!refMonth || !refDay) return [];
+
+  const members = options.records || (typeof records === 'function' ? records('Members') : (db['Members']?.records || []));
+  const matches = [];
+
+  for (const m of members) {
+    const bdayRaw = m.fields?.Birthday;
+    if (!bdayRaw) continue;
+    const parsed = typeof parseBirthdayMonthDay === 'function' ? parseBirthdayMonthDay(bdayRaw) : null;
+    if (!parsed || !parsed.month || !parsed.day || parsed.day <= 0) continue;
+    if (parsed.month === refMonth && parsed.day === refDay) {
+      matches.push(m);
+    }
+  }
+
+  return matches;
+}
+
+function renderBirthdaysTodayWidget(options = {}) {
+  const matches = getBirthdaysToday(options);
+  if (!matches || matches.length === 0) {
+    return '';
+  }
+
+  const namesList = matches
+    .map(m => `<span class="birthday-name">${esc(m.fields?.Name || 'Academy Member')}</span>`)
+    .join('<span class="birthday-sep"> · </span>');
+
+  return `<section class="panel birthdays-today-panel" id="birthdays-today-section">
+    <div class="birthdays-today-content">
+      <div class="birthdays-today-badge">
+        <span class="birthday-cake-icon" aria-hidden="true">🎂</span>
+        <strong>Birthdays today</strong>
+      </div>
+      <div class="birthdays-today-names">
+        ${namesList}
+      </div>
     </div>
   </section>`;
 }
@@ -1552,38 +1748,51 @@ function bindSwapEvents() {
 }
 
 function home(){
- const upcoming=records('Morning Report').filter(r=>recordDate(r)&&recordDate(r)>=today()).sort((a,b)=>recordDate(a).localeCompare(recordDate(b)));
- const next=upcoming.slice(0,3);
- const nextSession=upcoming[0];
- const pinned=Object.keys(db).flatMap(t=>records(t).filter(r=>workspace.favorites.includes(r.id)).map(r=>({r,t})));
  const leader=currentLeader();
- const recents=(workspace.recent||[]).map(item=>{const r=records(item.tab).find(x=>x.id===item.id);return r?{r,t:item.tab}:null;}).filter(Boolean).slice(0,3);
- const localChanges=workspace.history.filter(h=>h.tab!=='Workspace').slice(0,4);
- const editCount=Object.keys(workspace.edits).length+workspace.added.length;
  const allLinks=records('Important links');
  const pinnedLinks=allLinks.filter(r=>workspace.favorites.includes(r.id));
  const defaultLinkKeys=['Google Drive Academy Folder - Schemas','VMR overview','CPS VMR New Whiteboard','Case Review Operating Procedures'];
  const displayLinks=pinnedLinks.length?pinnedLinks:allLinks.filter(r=>defaultLinkKeys.includes(r.fields.Resource)).slice(0,4);
  const commitmentsHtml = renderMyCommitmentsWidget();
+ const birthdaysHtml = renderBirthdaysTodayWidget();
+
+ const next7 = getNextSevenVMRs();
+ const next7VMRsHtml = next7.length ? `
+  <section class="home-next-vmrs" id="home-next-vmrs">
+   <div class="mr-section-head">
+    <div class="mr-section-title-wrap">
+      <h2>Next 7 VMR sessions</h2>
+      <span class="mr-section-sub">· Consecutive clinical case schedule</span>
+    </div>
+    <div class="mr-legend">
+     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--warning-fg)"></span> Open Slot</span>
+     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--urgent-fg)"></span> Canceled/Blackout</span>
+    </div>
+   </div>
+   <div class="mr-stream">${next7.map(r=>editorialCard(r)).join('')}</div>
+  </section>` : `
+  <section class="home-next-vmrs" id="home-next-vmrs">
+   <div class="mr-section-head">
+    <div class="mr-section-title-wrap">
+      <h2>Next 7 VMR sessions</h2>
+      <span class="mr-section-sub">· Consecutive clinical case schedule</span>
+    </div>
+   </div>
+   <div class="empty-state panel">
+     <p class="muted">No upcoming Morning Report sessions scheduled in this snapshot.</p>
+     <button type="button" class="button secondary small" data-go="Morning Report">Browse full schedule →</button>
+   </div>
+  </section>`;
+
  let leaderHtml='';
  if(leader){
   const f=leader.fields;
   leaderHtml=`<section class="panel leader-banner"><div class="leader-badge">${chip('Active Leader of the Week')}<span class="snapshot-label">Workbook snapshot · ${esc(f.Dates||'')}</span></div><div class="leader-content"><div><h2>${esc(f.Member||'Unassigned')}</h2><p class="muted">${esc(f.Week||'Current week')}${f.Comments?` · ${esc(f.Comments)}`:''}</p></div><div class="card-actions"><button class="button secondary small" data-open="${esc(leader.id)}" data-area="Leader of the Week">Open details</button><button class="button secondary small" data-go="Leader of the Week">All leaders →</button></div></div></section>`;
  }
- let nextSessionCard='';
- if(nextSession){
-  const nf=nextSession.fields,countdown=sessionCountdown(dateValue(nextSession));
-  const timeStr=SessionCore.formatSessionTime(nextSession);
-  const cleanSignups=(nf['Scribe / teaching points sign-ups']||'').split(/\r?\n[-_]{3,}/)[0];
-  const pres=nf.Presenter||cleanSignups.match(/(?:Case Presenter|Presenter):[^\S\r\n]*([^\r\n|]+)/i)?.[1]?.trim()||'Unassigned';
-  nextSessionCard=`<article class="panel op-card"><div class="op-card-head"><span class="tag ${countdown==='Today'?'ready-chip':''}">${esc(countdown)} · ${esc(dateValue(nextSession))}</span><span class="op-sub">${esc(timeStr)}</span></div><div class="op-card-body"><small class="op-label">Next Scheduled Session</small><h3 class="op-title">${esc(title(nextSession,'Morning Report'))}</h3><div class="op-meta-grid"><div><small>Type</small><strong>${esc(nf.Type||'Morning Report')}</strong></div><div><small>Facilitator</small><strong>${esc(nf.Facilitator||'Unassigned')}</strong></div><div><small>Presenter</small><strong>${esc(pres)}</strong></div></div></div><div class="op-card-foot">${calendarButton(nextSession,'Morning Report')}<button class="button primary small" data-open="${esc(nextSession.id)}" data-area="Morning Report" data-action="staff">Staff session</button><button class="button secondary small" data-go="Morning Report">Open staffing schedule</button></div></article>`;
- }else{
-  nextSessionCard=`<article class="panel op-card"><div class="op-card-head"><span class="tag">Schedule</span></div><div class="op-card-body"><small class="op-label">Next Scheduled Session</small><h3 class="op-title">No upcoming dated sessions</h3><p class="muted">Check schedule for pending or past sessions.</p></div><div class="op-card-foot"><button class="button secondary small" data-go="Morning Report">Open staffing schedule</button></div></article>`;
- }
- const backupCard=`<article class="panel op-card"><div class="op-card-head"><span class="tag ${editCount>0?'local-chip':'ready-chip'}">${editCount>0?`ℹ ${editCount} local change${editCount===1?'':'s'}`:'✓ Clean state'}</span><span class="op-sub">Last backup export requested: ${esc(backupAgeText())}</span></div><div class="op-card-body"><small class="op-label">Local Data &amp; Backup</small><h3 class="op-title">${editCount} local change${editCount===1?'':'s'} retained on this device</h3><p class="muted">${editCount>0?'Retained on this device in this browser. Exporting requests a local JSON download, but the browser cannot verify filesystem storage.':'Workspace matches the snapshot with no local edits retained in this browser.'}</p><details class="backup-expandable-info" style="margin-top:6px;font-size:12px;"><summary style="cursor:pointer;color:var(--muted);">About backups &amp; device storage</summary><p style="margin:4px 0 0;color:var(--muted);font-size:12px;">Changes are stored device-locally. Backups are portable JSON files bound to workbook snapshot <code>workbook-2026-09-06</code>. The app cannot verify external file storage after requesting download.</p></details></div><div class="op-card-foot"><button class="button secondary small" id="home-backup-btn">Download backup</button><button class="text-button" data-go="Workspace">Backups & activity →</button></div></article>`;
- const linksCard=`<article class="panel op-card"><div class="op-card-head"><span class="tag">Resources</span><span class="op-sub">${pinnedLinks.length?`${pinnedLinks.length} pinned`:'Core Drives & Guidelines'}</span></div><div class="op-card-body"><small class="op-label">Important Links</small><h3 class="op-title">Essential Resources</h3><div class="quick-links-grid">${displayLinks.map(r=>{const u=urls(r,'Link')[0]||r.links?.Link||'';return u?`<a class="button secondary small quick-resource-btn" href="${esc(u)}" target="_blank" rel="noopener noreferrer">↗ ${esc(r.fields.Resource)}</a>`:`<button class="button secondary small quick-resource-btn" data-open="${esc(r.id)}" data-area="Important links">${esc(r.fields.Resource)}</button>`;}).join('')}</div></div><div class="op-card-foot"><button class="button secondary small" data-go="Important links">All ${allLinks.length} resources →</button></div></article>`;
- $('#page').innerHTML=`<div class="home-container" id="Home">${header('Home Dashboard','Operational status, upcoming sessions and active Academy resources.')}${banner()}<section class="operational-lead-grid" style="display:grid;gap:16px;margin-bottom:20px;">${nextSessionCard}</section>${commitmentsHtml}<section class="operational-grid">${backupCard}${linksCard}</section>${leaderHtml}<div class="dashboard-heading"><div><h2>Upcoming in the workbook</h2><p class="muted">Workbook snapshot records (2026-09-06)</p></div><button class="text-button" data-go="Morning Report">View schedule →</button></div><section class="hub-grid">${next.map(r=>card(r,'Morning Report')).join('')||'<div class="empty-state">No future dated sessions in this snapshot.</div>'}</section><div class="dashboard-heading"><h2>Recently opened records</h2><span class="muted">Opened in this browser</span></div><section class="hub-grid">${recents.map(({r,t})=>card(r,t)).join('')||'<div class="empty-state panel">Records you open will appear here for quick access.</div>'}</section><div class="dashboard-heading"><h2>Recent local changes</h2><button class="text-button" data-go="Workspace">All activity & backups →</button></div><section class="panel activity-list">${localChanges.map(h=>`<div><strong>${esc(h.action)} · ${esc(h.title)}</strong><small>${esc(h.tab)} · ${esc(new Date(h.at).toLocaleString())} · Saved on this device</small></div>`).join('')||'<div class="empty-state">No local changes yet. Edits and drafts saved on this device will appear here.</div>'}</section><div class="dashboard-heading"><h2>Pinned for quick access</h2><span class="muted">Use ☆ on any record</span></div><section class="hub-grid">${pinned.slice(0,9).map(({r,t})=>card(r,t)).join('')||'<div class="empty-state panel">Pin a session, member or resource to keep it here.</div>'}</section></div>`;
- if($('#home-backup-btn'))$('#home-backup-btn').onclick=()=>{exportBackup();render();};
+
+ const linksCard=`<article class="panel op-card essential-resources-card" id="home-essential-resources"><div class="op-card-head"><span class="tag">Resources</span><span class="op-sub">${pinnedLinks.length?`${pinnedLinks.length} pinned`:'Core Drives & Guidelines'}</span></div><div class="op-card-body"><small class="op-label">Important Links</small><h3 class="op-title">Essential Resources</h3><div class="quick-links-grid">${displayLinks.map(r=>{const u=urls(r,'Link')[0]||r.links?.Link||'';return u?`<a class="button secondary small quick-resource-btn" href="${esc(u)}" target="_blank" rel="noopener noreferrer">↗ ${esc(r.fields.Resource)}</a>`:`<button class="button secondary small quick-resource-btn" data-open="${esc(r.id)}" data-area="Important links">${esc(r.fields.Resource)}</button>`;}).join('')}</div></div><div class="op-card-foot"><button class="button secondary small" data-go="Important links">All ${allLinks.length} resources →</button></div></article>`;
+
+ $('#page').innerHTML=`<div class="home-container" id="Home">${header('Home Dashboard','Operational status, upcoming sessions and active Academy resources.')}${banner()}${commitmentsHtml}${birthdaysHtml}${next7VMRsHtml}${leaderHtml}<section class="operational-grid">${linksCard}</section></div>`;
 }
 function filtered(){
   let rr=records().filter(r=>Object.values(r.fields).join(' ').toLowerCase().includes((sectionQuery||query).toLowerCase()));
@@ -1641,7 +1850,7 @@ function filtered(){
   if(filter==='This Week'&&(tab!=='Morning Report'||mrScheduleRangeMode!=='week'))rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&d<=7});
   if(filter==='Needs Volunteers')rr=rr.filter(r=>{const d=staffingDays(SessionCore.parseDate(dateValue(r)));return d!==null&&d>=0&&mrGaps(r).length>0});
   if(['Morning Report','CPS Academy VMRs'].includes(tab)&&(mySessionsOnly||filter==='My Sessions')){const user=typeof Identity!=='undefined'?Identity.getCurrentUser():null;const profile=user||(workspace.reporterName?{name:workspace.reporterName}:null);rr=rr.filter(r=>Boolean(profile&&isUserAssignedToSession(r,profile)));}
-  if(secondaryScope==='Staffing gaps'||filter==='Staffing gaps')rr=rr.filter(r=>mrGaps(r).length>0);
+  if(secondaryScope==='Staffing gaps'||secondaryScope==='Open roles'||filter==='Staffing gaps'||filter==='Open roles')rr=rr.filter(r=>mrGaps(r).length>0);
   if(secondaryScope==='Has recording'||filter==='Has recording')rr=rr.filter(r=>urls(r,'Recording').length);
   if(secondaryScope==='Missing facilitator'||filter==='Missing facilitator')rr=rr.filter(r=>!r.fields.Facilitator||/tbd/i.test(r.fields.Facilitator));
   if(sort==='az')rr.sort((a,b)=>title(a).localeCompare(title(b)));
@@ -1942,6 +2151,31 @@ function bindWeekNavigatorEvents() {
       }
     };
   });
+  document.querySelectorAll('[data-month-jump]').forEach(btn => {
+    btn.onclick = () => {
+      const targetMonth = btn.dataset.monthJump;
+      if (targetMonth) {
+        mrScheduleMonth = targetMonth;
+        saveSectionState('Morning Report');
+        render();
+      }
+    };
+  });
+  const monthSel = document.querySelector('#mr-month-select');
+  const yearSel = document.querySelector('#mr-year-select');
+  if (monthSel && yearSel) {
+    const handleSelectChange = () => {
+      const y = yearSel.value;
+      const m = monthSel.value;
+      if (y && m) {
+        mrScheduleMonth = `${y}-${m}`;
+        saveSectionState('Morning Report');
+        render();
+      }
+    };
+    monthSel.onchange = handleSelectChange;
+    yearSel.onchange = handleSelectChange;
+  }
   const jumpInput = document.querySelector('#week-jump-date');
   if (jumpInput) {
     jumpInput.onchange = (e) => {
@@ -2042,29 +2276,8 @@ function listing(){
   ) : '<section class="empty-state panel"><h2>No matching records</h2><p>Clear the filters or try a broader search.</p><button class="button secondary" data-clear-filters>Clear filters</button></section>';
 
   if(tab==='Morning Report'){
-    const currentWeekStart = mrScheduleWeekStart || getDefaultScheduleWeekStart();
-    const bounds = typeof SessionCore !== 'undefined' && SessionCore.getWeekBounds ? SessionCore.getWeekBounds(currentWeekStart) : { start: currentWeekStart, end: currentWeekStart };
-    const wLbl = weekLabel(bounds.start, bounds.end);
-    const prevWeekStart = typeof SessionCore !== 'undefined' && SessionCore.addWeeks ? SessionCore.addWeeks(bounds.start, -1) : bounds.start;
-    const nextWeekStart = typeof SessionCore !== 'undefined' && SessionCore.addWeeks ? SessionCore.addWeeks(bounds.start, 1) : bounds.start;
-    const next7 = getNextSevenVMRs();
-    const stats = mrFilledStats(next7);
-
-    const mrTopBar = `
-      <div class="mr-top-bar">
-        <div class="mr-top-breadcrumb">
-          <span class="mr-crumb-root">Academic Portal</span>
-          <span class="mr-crumb-sep">/</span>
-          <span class="mr-crumb-current">Morning Report</span>
-        </div>
-        <div class="mr-top-tools">
-          <div class="mr-quick-week-selector">
-            <button type="button" class="mr-week-btn" data-week-jump="${esc(prevWeekStart)}" title="Previous week">‹</button>
-            <span class="mr-week-label">${esc(wLbl)}</span>
-            <button type="button" class="mr-week-btn" data-week-jump="${esc(nextWeekStart)}" title="Next week">›</button>
-          </div>
-        </div>
-      </div>`;
+    const activeMrFilters = getActiveFiltersList(tab, field);
+    const mrFilterCount = activeMrFilters.length;
 
     const mrSubHeader = `
       <section class="mr-subheader">
@@ -2073,31 +2286,73 @@ function listing(){
             <h1 class="mr-page-title">Virtual Morning Report (VMR)</h1>
           </div>
         </div>
-        <div class="mr-subheader-right">
-          <button type="button" class="button secondary small" id="mr-filter-toggle-btn">
-            <span>⚙ Filters</span>
+        <div class="mr-subheader-right" style="position:relative;display:flex;align-items:center;gap:8px;">
+          ${viewSwitcher}
+          <button type="button" class="button secondary small" id="mr-filter-toggle-btn" aria-haspopup="dialog" aria-expanded="${Boolean(scheduleFiltersOpen)}">
+            <span class="filter-toggle-icon" aria-hidden="true">⚙</span>
+            <span>Filters</span>
+            ${mrFilterCount > 0 ? `<span class="filter-badge">${mrFilterCount}</span>` : ''}
           </button>
+          <div class="schedule-secondary-filters mr-filters-popover panel" id="mr-filters-popover" style="${scheduleFiltersOpen?'':'display:none;'}position:absolute;right:0;top:calc(100% + 6px);width:340px;z-index:var(--z-popover, 30);box-shadow:var(--shadow-popover);padding:14px;border:1px solid var(--border-control);border-radius:var(--radius-panel);">
+            <div class="secondary-filters-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <h3 class="secondary-filters-title" style="margin:0;font-size:14px;font-weight:600;">Filters</h3>
+              <button type="button" class="icon-button secondary-filters-close" id="mr-filters-close-btn" aria-label="Close filters">×</button>
+            </div>
+            <div class="secondary-filters-grid" style="display:flex;flex-direction:column;gap:10px;">
+              <label class="filter-field-label">
+                <span>Status / Scope</span>
+                <select class="select" id="scope-select">
+                  ${['All','Upcoming','This Week','Needs Volunteers','My Sessions','Open roles','Pinned','Needs review','Local edits','All history','Unresolved dates'].map(f => `<option value="${esc(f)}" ${(secondaryScope === f || (!secondaryScope && (f === 'All' || f === filter))) ? 'selected' : ''}>${esc(f)}</option>`).join('')}
+                </select>
+              </label>
+              ${extraFilters()}
+              <label class="filter-field-label">
+                <span>Order</span>
+                <select class="select" id="sort">
+                  <option value="source">Workbook order</option>
+                  <option value="az" ${sort==='az'?'selected':''}>Title A–Z</option>
+                  <option value="date" ${sort==='date'?'selected':''}>Newest recognised dates</option>
+                </select>
+              </label>
+            </div>
+            <div class="secondary-filters-footer" style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:10px;border-top:1px solid var(--border-subtle);">
+              <button type="button" class="button secondary small" id="secondary-clear-btn">Clear filters</button>
+              <button type="button" class="button primary small" id="secondary-filters-done-btn">Done</button>
+            </div>
+          </div>
         </div>
       </section>`;
 
-    const mrFiltersDrawer = `
-      <div class="mr-filters-collapsible" id="mr-filters-panel" style="${scheduleFiltersOpen?'':'display:none;'}">
-        <div class="toolbar area-tabs" style="margin-bottom:8px;">
-          ${groups[Object.keys(groups).find(g=>groups[g].includes(tab))].map(t=>`<button class="button ${t===tab?'primary':'secondary'} small" data-go="${esc(t)}">${esc(sectionLabel(t))}</button>`).join('')}
-        </div>
-        ${renderFilters(rr, tab, filters, field, options, viewSwitcher)}
-        ${renderWeekNavigator(rr)}
-      </div>`;
-
-    $('#page').innerHTML = `<div class="mr-portal-container">${mrTopBar}${mrSubHeader}${mrFiltersDrawer}${recordsContent}</div>`;
+    const mrResultsAnnouncer = `<p class="muted results-count" id="results-count-announcer" aria-live="polite" style="display:none;">${formatResultsCount(rr,tab,records())}</p>`;
+    $('#page').innerHTML = `<div class="mr-portal-container">${mrSubHeader}${mrResultsAnnouncer}${recordsContent}</div>`;
     
     const ftBtn = document.getElementById('mr-filter-toggle-btn');
-    if(ftBtn){
-      ftBtn.onclick = () => {
+    const popover = document.getElementById('mr-filters-popover');
+    if(ftBtn && popover){
+      if (!Object.getOwnPropertyDescriptor(popover, 'open')) {
+        Object.defineProperty(popover, 'open', {
+          get() { return popover.style.display !== 'none'; },
+          set(val) {
+            scheduleFiltersOpen = Boolean(val);
+            popover.style.display = val ? '' : 'none';
+            ftBtn.setAttribute('aria-expanded', String(Boolean(val)));
+          },
+          configurable: true
+        });
+      }
+      ftBtn.onclick = (e) => {
+        e.stopPropagation();
         scheduleFiltersOpen = !scheduleFiltersOpen;
-        const panel = document.getElementById('mr-filters-panel');
-        if(panel) panel.style.display = scheduleFiltersOpen ? 'block' : 'none';
+        popover.style.display = scheduleFiltersOpen ? '' : 'none';
+        ftBtn.setAttribute('aria-expanded', String(scheduleFiltersOpen));
       };
+      document.getElementById('mr-filters-close-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        scheduleFiltersOpen = false;
+        popover.style.display = 'none';
+        ftBtn.setAttribute('aria-expanded', 'false');
+        ftBtn.focus();
+      });
     }
   } else {
     $('#page').innerHTML = header(sectionLabel(tab), descriptions[tab]||'Programme records, assignments and source details.') +
@@ -2226,6 +2481,9 @@ function listing(){
     owner = '';
     sessionType = '';
     sessionFacilitator = '';
+    gapsOnly = false;
+    mySessionsOnly = false;
+    sectionQuery = '';
     skill = '';
     dateFrom = '';
     dateTo = '';
@@ -2234,13 +2492,34 @@ function listing(){
     podcastPeriodFilter = 'all';
     sort = tab === 'CPS Academy VMRs' ? 'date' : 'source';
     secondaryScope = '';
-    const quickChips = getQuickFilterNames(tab);
-    if (!quickChips.includes(filter) && filter !== 'Needs Volunteers' && filter !== 'My Sessions') {
-      filter = 'All';
-    }
-    if (tab === 'Morning Report' && (filter === 'All' || !filter)) {
+    filter = tab === 'Morning Report' ? 'Upcoming' : 'All';
+    if (tab === 'Morning Report') {
       mrScheduleRangeMode = 'week';
       mrScheduleWeekStart = getDefaultScheduleWeekStart();
+    }
+    if (tab === 'Members') {
+      memberSearchQuery = '';
+      memberCohortFilter = 'all';
+      memberCountryFilter = 'all';
+      memberSort = 'source';
+    } else if (tab === 'OrgStructure') {
+      orgSearchQuery = '';
+      orgGroupFilter = 'all';
+    } else if (tab === 'Research @CPSolvers') {
+      researchSearchQuery = '';
+      researchSkillFilter = 'all';
+      researchAvailabilityFilter = 'all';
+      researchFilter = 'all';
+    } else if (tab === 'Important links') {
+      linksSearchQuery = '';
+      linksFilter = 'all';
+      linksCategoryFilter = 'all';
+    } else if (tab === 'Conferences') {
+      conferenceSearchQuery = '';
+      conferenceFilter = 'all';
+    } else if (tab === 'Residency Programs') {
+      residencySearchQuery = '';
+      residencyFilter = 'all';
     }
     page = 0;
     saveSectionState(tab);
@@ -2306,10 +2585,14 @@ function listing(){
         details.open = false;
         details.setAttribute('aria-expanded', 'false');
       }
-      const toggleBtn = document.querySelector('#filter-toggle-btn');
+      const mrPopover = document.getElementById('mr-filters-popover');
+      if (mrPopover) {
+        mrPopover.open = false;
+      }
+      const toggleBtn = document.querySelector('#filter-toggle-btn') || document.querySelector('#mr-filter-toggle-btn');
       if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
       scheduleFiltersOpen = false;
-      document.querySelector('#filter-toggle-btn')?.focus();
+      (document.querySelector('#filter-toggle-btn') || document.querySelector('#mr-filter-toggle-btn'))?.focus();
     };
   }
 
@@ -2704,7 +2987,7 @@ function personalLogbookView(){
   const slice=(typeof Logbook!=='undefined'?Logbook.getPersonalSlice():null)||currentLogbookSlice;
   let content='';
   if(!slice){
-    content=`<section class="panel"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;"><div><h2>Import Personal Assignment Slice</h2><p class="muted" style="margin:4px 0 12px 0;">Import a personal slice generated offline via the CLI command:</p><pre style="background:#f1f5f9;padding:10px 14px;border-radius:8px;font-size:12px;overflow-x:auto;"><code>node scripts/export-personal-logbook.cjs --person-id ${esc(expectedPersonId||'<canonical-id>')} --output private-logbook.json</code></pre><p class="muted" style="font-size:12px;margin-top:8px;">Saved only in browser memory. Discarded upon profile change or page reload.</p></div><div><label class="button primary" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;"><span>📁 Import Slice JSON</span><input type="file" id="logbook-slice-file" accept="application/json,.json" hidden></label></div></div><div id="logbook-error" class="alert-error" style="display:none;margin-top:16px;padding:12px;background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;color:#991b1b;font-size:13px;"></div></section>`;
+    content=`<section class="panel"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;"><div style="min-width:0;max-width:100%;"><h2>Import Personal Assignment Slice</h2><p class="muted" style="margin:4px 0 12px 0;">Import a personal slice generated offline via the CLI command:</p><pre style="background:#f1f5f9;padding:10px 14px;border-radius:8px;font-size:12px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;"><code>node scripts/export-personal-logbook.cjs --person-id ${esc(expectedPersonId||'<canonical-id>')} --output private-logbook.json</code></pre><p class="muted" style="font-size:12px;margin-top:8px;">Saved only in browser memory. Discarded upon profile change or page reload.</p></div><div><label class="button primary" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;"><span>📁 Import Slice JSON</span><input type="file" id="logbook-slice-file" accept="application/json,.json" hidden></label></div></div><div id="logbook-error" class="alert-error" style="display:none;margin-top:16px;padding:12px;background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;color:#991b1b;font-size:13px;"></div></section>`;
   }else{
     const data=Logbook.processLogbook(slice);
     const m=data.metrics;
@@ -5142,8 +5425,11 @@ function claimRole(sessionId, role) {
     log(w, `Claimed ${role}`, r, 'Morning Report');
     if (user.name) w.reporterName = user.name;
   }, r.id)) {
+    const targetStableId = r.session?.parentStableId || r.parentId || r.stableId || r.id;
     lastClaim = {
       sessionId: r.id,
+      stableId: targetStableId,
+      childSessionIndex: r.session?.index || null,
       role,
       field: changedField,
       previousValue: prevValue,
@@ -5153,7 +5439,6 @@ function claimRole(sessionId, role) {
     render();
     if (user && user.isAuthenticated && !user.isMock) {
       if (typeof fetch === 'function') {
-        const targetStableId = r.stableId || r.parentId || r.id;
         const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -5182,7 +5467,7 @@ function claimRole(sessionId, role) {
               toast(`Failed to sync to Google Sheets: ${errData.message || 'Server error'}`);
             }
           } else {
-            toast(`✓ Saved: Signed up as ${role}`);
+            toast(`✓ Saved: Signed up as ${role}`, { undo: true });
           }
         })
         .catch(err => {
@@ -5230,20 +5515,28 @@ function undoClaim() {
     log(w, `Undid claim for ${role}`, originalRecord(sessionId, 'Morning Report') || { id: sessionId, fields: {} }, 'Morning Report');
   }, sessionId);
 
+  const targetUndoStableId = lastClaim?.stableId || sessionId;
+  const targetUndoChildIndex = lastClaim?.childSessionIndex || null;
   lastClaim = null;
   render();
 
   const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
   if (user && user.isAuthenticated && !user.isMock && typeof fetch === 'function') {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     fetch('/api/mutate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         dataset: 'Morning Report',
-        stableId: sessionId,
+        stableId: targetUndoStableId,
+        childSessionIndex: targetUndoChildIndex,
         field: field,
         value: previousValue || '',
         expectedPreviousValue: claimedValue,
+        operationId: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         user: {
           name: user.name,
           email: user.email,
@@ -5591,6 +5884,14 @@ function renderFieldControl(c,val,r,req){
   let opts=['','Yes','No'];if(val&&!opts.includes(val))opts.unshift(val);
   return `<select class="select" data-field="${esc(c)}" ${req}>${opts.map(o=>`<option value="${esc(o)}" ${o===val?'selected':''}>${esc(o||'Select…')}</option>`).join('')}</select>`;
  }
+  if(editingTab==='Members'&&c==='Category'){
+   let opts=['Participant','Core team','Leader'];if(val&&!opts.includes(val))opts.unshift(val);
+   return `<select class="select" data-field="${esc(c)}" ${req}>${opts.map(o=>`<option value="${esc(o)}" ${o===val?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+  }
+  if(editingTab==='Members'&&c==='Active Status'){
+   let opts=['Active','Inactive'];if(val&&!opts.includes(val))opts.unshift(val);
+   return `<select class="select" data-field="${esc(c)}" ${req}>${opts.map(o=>`<option value="${esc(o)}" ${o===val?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+  }
  if(editingTab==='CRC'&&c==='Status'){
   let opts=['','Presented','Inactive','Scheduled','Mentoring'];if(val&&!opts.includes(val))opts.unshift(val);
   return `<select class="select" data-field="${esc(c)}" ${req}>${opts.map(o=>`<option value="${esc(o)}" ${o===val?'selected':''}>${esc(o||'Select status…')}</option>`).join('')}</select>`;
@@ -5885,7 +6186,7 @@ $('#dialog-primary').onclick=e=>{
   const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
   const isOnlineEligible = user && user.isAuthenticated && !user.isMock && !isNew && ['Morning Report', 'CPS Academy VMRs', 'OrgStructure', 'Members', 'Important links'].includes(editingTab);
   if (isOnlineEligible && Object.keys(updatedChanges).length > 0 && typeof fetch === 'function') {
-    const targetStableId = r.stableId || r.parentId || r.id;
+    const targetStableId = r.session?.parentStableId || r.parentId || r.stableId || r.id;
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -6275,6 +6576,382 @@ if ($('#mobile-auth-btn')) $('#mobile-auth-btn').onclick = openAuthDialog;
 if ($('#auth-cancel-btn')) $('#auth-cancel-btn').onclick = () => $('#auth-dialog')?.close();
 if ($('#auth-dialog-close')) $('#auth-dialog-close').onclick = () => $('#auth-dialog')?.close();
 if ($('#auth-signed-in-close-btn')) $('#auth-signed-in-close-btn').onclick = () => $('#auth-dialog')?.close();
+if ($('#auth-my-profile-btn')) $('#auth-my-profile-btn').onclick = () => {
+  $('#auth-dialog')?.close();
+  openProfileDialog({ isFirstSignIn: false });
+};
+if ($('#nav-my-profile-btn')) $('#nav-my-profile-btn').onclick = () => {
+  $('#admin-prefs-dialog')?.close();
+  openProfileDialog({ isFirstSignIn: false });
+};
+
+// ==========================================
+// First-Sign-In & My Profile Controller
+// ==========================================
+let currentProfileRecord = null;
+let profileDialogMode = 'edit'; // 'onboarding' | 'edit'
+let profileBirthdayTouched = false;
+let profileBirthdayCleared = false;
+let profileOriginalBirthday = '';
+
+function populateDayOptions(monthNum, selectedDay = '') {
+  const daySelect = document.getElementById('prof-bday-day');
+  if (!daySelect) return;
+  const prevVal = selectedDay || daySelect.value;
+  daySelect.innerHTML = '<option value="">Day</option>';
+  
+  // Leap-year friendly days count: February supports 29 days
+  const maxDays = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const count = monthNum && maxDays[monthNum] ? maxDays[monthNum] : 31;
+  for (let d = 1; d <= count; d++) {
+    const opt = document.createElement('option');
+    opt.value = String(d);
+    opt.textContent = String(d);
+    if (String(d) === String(prevVal)) opt.selected = true;
+    daySelect.appendChild(opt);
+  }
+}
+
+const bdayMonthSelect = document.getElementById('prof-bday-month');
+if (bdayMonthSelect) {
+  bdayMonthSelect.onchange = (e) => {
+    profileBirthdayTouched = true;
+    profileBirthdayCleared = false;
+    const m = parseInt(e.target.value, 10);
+    populateDayOptions(m);
+  };
+}
+
+const bdayDaySelect = document.getElementById('prof-bday-day');
+if (bdayDaySelect) {
+  bdayDaySelect.onchange = () => {
+    profileBirthdayTouched = true;
+    profileBirthdayCleared = false;
+  };
+}
+
+const bdayClearBtn = document.getElementById('prof-bday-clear-btn');
+if (bdayClearBtn) {
+  bdayClearBtn.onclick = () => {
+    profileBirthdayTouched = true;
+    profileBirthdayCleared = true;
+    if ($('#prof-bday-month')) $('#prof-bday-month').value = '';
+    if ($('#prof-bday-day')) $('#prof-bday-day').value = '';
+    const noticeEl = document.getElementById('prof-bday-raw-notice');
+    if (noticeEl) noticeEl.style.display = 'none';
+  };
+}
+
+const singleNameChk = document.getElementById('prof-single-name-chk');
+if (singleNameChk) {
+  singleNameChk.onchange = (e) => {
+    const isSingle = e.target.checked;
+    const surnameGroup = document.getElementById('prof-surname-group');
+    const surnameInput = document.getElementById('prof-surname');
+    if (surnameGroup) surnameGroup.style.display = isSingle ? 'none' : 'block';
+    if (surnameInput) {
+      surnameInput.required = !isSingle;
+      if (isSingle) surnameInput.value = '';
+    }
+  };
+}
+
+async function loadOnlineProfile() {
+  const loadingEl = document.getElementById('profile-loading-state');
+  const errorEl = document.getElementById('profile-error-state');
+  const contentEl = document.getElementById('profile-form-content');
+  const errorMsg = document.getElementById('profile-error-msg');
+  const noticeEl = document.getElementById('prof-bday-raw-notice');
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+
+  if (loadingEl) loadingEl.style.display = 'block';
+  if (errorEl) errorEl.style.display = 'none';
+  if (contentEl) contentEl.style.display = 'none';
+  if (noticeEl) { noticeEl.textContent = ''; noticeEl.style.display = 'none'; }
+
+  profileBirthdayTouched = false;
+  profileBirthdayCleared = false;
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch('/api/profile', { headers });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Could not reach Google Sheets. Please verify your connection.');
+    }
+
+    const data = await res.json();
+    if (!data || !data.member) throw new Error('Invalid profile response from server.');
+    currentProfileRecord = data.member;
+
+    // Populate form fields from current online record
+    const f = data.member.fields || {};
+    const firstInput = document.getElementById('prof-first-name');
+    const surnameInput = document.getElementById('prof-surname');
+    const emailInput = document.getElementById('prof-email');
+    const nickInput = document.getElementById('prof-nicknames');
+    const singleChk = document.getElementById('prof-single-name-chk');
+    const surnameGroup = document.getElementById('prof-surname-group');
+
+    if (firstInput) firstInput.value = f['First Name'] || '';
+    if (surnameInput) surnameInput.value = f['Surname'] || '';
+    if (emailInput) emailInput.value = f['Email'] || '';
+    if (nickInput) nickInput.value = f['AKA / Nicknames'] || '';
+
+    // Original sheet Name review & suggestion banner
+    const nameReviewBanner = document.getElementById('profile-name-review-banner');
+    const originalNameDisplay = document.getElementById('prof-original-name-display');
+    const nameSuggestionNote = document.getElementById('prof-name-suggestion-note');
+    const existingFullName = String(f['Name'] || '').trim();
+    const nameStatus = f['_nameStatus'] || 'unconfirmed';
+
+    if (nameReviewBanner && originalNameDisplay && nameSuggestionNote) {
+      if (existingFullName) {
+        originalNameDisplay.textContent = existingFullName;
+        if (nameStatus === 'complex') {
+          nameSuggestionNote.innerHTML = `<strong>Review multi-part / preferred name:</strong> We derived candidate name components below from your directory record without modifying your full name. Please confirm or adjust your first name, surname, and nicknames as needed.`;
+          nameReviewBanner.style.display = 'block';
+        } else if (nameStatus === 'suggested') {
+          nameSuggestionNote.innerHTML = `We prefilled candidate first name and surname suggestions for your review. Please confirm or adjust them before saving.`;
+          nameReviewBanner.style.display = 'block';
+        } else {
+          nameSuggestionNote.innerHTML = `Confirmed name on file in Google Sheets.`;
+          nameReviewBanner.style.display = 'block';
+        }
+      } else {
+        nameReviewBanner.style.display = 'none';
+      }
+    }
+
+    const isSingle = Boolean(f['First Name'] && !f['Surname'] && f['Name'] && f['Name'] === f['First Name']);
+    if (singleChk) singleChk.checked = isSingle;
+    if (surnameGroup) surnameGroup.style.display = isSingle ? 'none' : 'block';
+    if (surnameInput) surnameInput.required = !isSingle;
+
+    // Birthday parsing & clarification
+    const bdayRaw = String(f['Birthday'] || '').trim();
+    profileOriginalBirthday = bdayRaw;
+    let bMonth = '';
+    let bDay = '';
+    let isParseable = false;
+
+    if (bdayRaw && typeof parseBirthdayMonthDay === 'function') {
+      const parsed = parseBirthdayMonthDay(bdayRaw);
+      if (parsed) {
+        isParseable = true;
+        bMonth = String(parsed.month);
+        bDay = parsed.day ? String(parsed.day) : '';
+      }
+    }
+
+    if (bdayRaw && !isParseable) {
+      if (noticeEl) {
+        noticeEl.innerHTML = `<strong>Existing birthday on file:</strong> "${esc(bdayRaw)}"<br><span class="muted" style="font-size:11px;">Select month/day below to update, click Clear to remove, or leave untouched to preserve existing text verbatim.</span>`;
+        noticeEl.style.display = 'block';
+      }
+    }
+
+    if ($('#prof-bday-month')) $('#prof-bday-month').value = bMonth;
+    populateDayOptions(bMonth ? parseInt(bMonth, 10) : 0, bDay);
+
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (contentEl) contentEl.style.display = 'block';
+  } catch (err) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (errorEl) errorEl.style.display = 'block';
+    if (errorMsg) errorMsg.textContent = err.message || 'Failed to load member profile from Google Sheets.';
+  }
+}
+
+const retryFetchBtn = document.getElementById('profile-retry-fetch-btn');
+if (retryFetchBtn) {
+  retryFetchBtn.onclick = () => loadOnlineProfile();
+}
+
+function openProfileDialog(options = {}) {
+  const isFirstSignIn = Boolean(options.isFirstSignIn);
+  profileDialogMode = isFirstSignIn ? 'onboarding' : 'edit';
+  const dialog = document.getElementById('profile-onboarding-dialog');
+  if (!dialog) return;
+
+  const eyebrow = document.getElementById('profile-dialog-eyebrow');
+  const title = document.getElementById('profile-dialog-title');
+  const intro = document.getElementById('profile-dialog-intro');
+  const closeBtn = document.getElementById('profile-dialog-close-btn');
+  const cancelBtn = document.getElementById('profile-cancel-btn');
+  const saveBtn = document.getElementById('profile-save-btn');
+  const saveErr = document.getElementById('profile-save-error');
+
+  if (saveErr) { saveErr.textContent = ''; saveErr.style.display = 'none'; }
+
+  if (isFirstSignIn) {
+    if (eyebrow) eyebrow.textContent = 'Welcome to CPS Academy';
+    if (title) title.textContent = 'First Sign-In: Confirm Your Profile';
+    if (intro) intro.textContent = 'Welcome! Before entering the Academy Portal, please review and confirm your personal details. This ensures your schedule assignments and directory entry are accurate.';
+    if (closeBtn) closeBtn.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    if (saveBtn) saveBtn.textContent = 'Confirm Details & Enter Portal';
+  } else {
+    if (eyebrow) eyebrow.textContent = 'Personal Details';
+    if (title) title.textContent = 'My Profile';
+    if (intro) intro.textContent = 'Review and update your personal details. Changes update your member record in Google Sheets and synchronize across the portal.';
+    if (closeBtn) closeBtn.style.display = '';
+    if (cancelBtn) cancelBtn.style.display = '';
+    if (saveBtn) saveBtn.textContent = 'Save Changes';
+  }
+
+  dialog.showModal();
+  loadOnlineProfile();
+}
+
+const profileCloseBtn = document.getElementById('profile-dialog-close-btn');
+if (profileCloseBtn) {
+  profileCloseBtn.onclick = () => {
+    if (profileDialogMode === 'onboarding') return; // Cannot dismiss onboarding gate
+    document.getElementById('profile-onboarding-dialog')?.close();
+  };
+}
+
+const profileCancelBtn = document.getElementById('profile-cancel-btn');
+if (profileCancelBtn) {
+  profileCancelBtn.onclick = () => {
+    if (profileDialogMode === 'onboarding') return;
+    document.getElementById('profile-onboarding-dialog')?.close();
+  };
+}
+
+const profileSaveBtn = document.getElementById('profile-save-btn');
+if (profileSaveBtn) {
+  profileSaveBtn.onclick = async (e) => {
+    if (e) e.preventDefault();
+    const firstInput = document.getElementById('prof-first-name');
+    const surnameInput = document.getElementById('prof-surname');
+    const nickInput = document.getElementById('prof-nicknames');
+    const monthSelect = document.getElementById('prof-bday-month');
+    const daySelect = document.getElementById('prof-bday-day');
+    const singleChk = document.getElementById('prof-single-name-chk');
+    const saveErr = document.getElementById('profile-save-error');
+    const btn = document.getElementById('profile-save-btn');
+
+    if (saveErr) { saveErr.textContent = ''; saveErr.style.display = 'none'; }
+
+    const firstName = firstInput?.value?.trim() || '';
+    const isSingle = Boolean(singleChk?.checked);
+    const surname = isSingle ? '' : (surnameInput?.value?.trim() || '');
+    const nicknames = nickInput?.value?.trim() || '';
+
+    if (!firstName) {
+      if (saveErr) { saveErr.textContent = 'First name is required.'; saveErr.style.display = 'block'; }
+      firstInput?.focus();
+      return;
+    }
+    if (!isSingle && !surname) {
+      if (saveErr) { saveErr.textContent = 'Surname is required (or check "I have a single legal name").'; saveErr.style.display = 'block'; }
+      surnameInput?.focus();
+      return;
+    }
+
+    // Format birthday: Month + Day without forcing a birth year
+    let birthday = '';
+    const mVal = monthSelect?.value ? parseInt(monthSelect.value, 10) : 0;
+    const dVal = daySelect?.value ? parseInt(daySelect.value, 10) : 0;
+    if (mVal) {
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      birthday = dVal ? `${monthNames[mVal - 1]} ${dVal}` : monthNames[mVal - 1];
+    }
+
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+    const isFirstSignIn = profileDialogMode === 'onboarding';
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving to Google Sheets...'; }
+
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const originalFields = currentProfileRecord?.fields || {};
+      const expectedPreviousValues = {
+        'Name': originalFields['Name'] || '',
+        'First Name': originalFields['First Name'] || '',
+        'Surname': originalFields['Surname'] || '',
+        'AKA / Nicknames': originalFields['AKA / Nicknames'] || '',
+        'Birthday': originalFields['Birthday'] || ''
+      };
+
+      const res = await fetch('/api/profile', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          firstName,
+          surname,
+          isSingleName: isSingle,
+          nicknames,
+          birthday,
+          birthdayTouched: profileBirthdayTouched,
+          birthdayCleared: profileBirthdayCleared,
+          originalBirthday: profileOriginalBirthday,
+          expectedPreviousValues,
+          stableId: currentProfileRecord?.stableId,
+          markOnboarded: true
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Server error while saving profile to Google Sheets.');
+      }
+
+      const resData = await res.json();
+      
+      // Mark onboarded in Identity state and session
+      if (typeof Identity !== 'undefined' && typeof Identity.setOnboarded === 'function') {
+        Identity.setOnboarded(true, new Date().toISOString());
+      }
+      if (typeof localStorage !== 'undefined') {
+        const updatedName = isSingle || !surname ? firstName : `${firstName} ${surname}`;
+        localStorage.setItem('userName', updatedName);
+      }
+
+      document.getElementById('profile-onboarding-dialog')?.close();
+      updateProfileDisplay();
+      enforceAuthGate();
+      render();
+
+      // Refresh workbook in background to pull freshly committed sheet values
+      loadWb().then(freshData => { db = hydrateRecordStableIds(freshData); render(); }).catch(() => {});
+
+      toast(isFirstSignIn ? '✓ Welcome! Profile confirmed and saved to Google Sheets.' : '✓ Profile updated and saved to Google Sheets.');
+    } catch (err) {
+      if (saveErr) {
+        saveErr.textContent = err.message || 'Failed to save changes. Please try again.';
+        saveErr.style.display = 'block';
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = isFirstSignIn ? 'Confirm Details & Enter Portal' : 'Save Changes';
+      }
+    }
+  };
+}
+
+const navMyProfBtn = document.getElementById('nav-my-profile-btn');
+if (navMyProfBtn) {
+  navMyProfBtn.onclick = () => {
+    document.getElementById('admin-prefs-dialog')?.close();
+    openProfileDialog({ isFirstSignIn: false });
+  };
+}
+
+const authMyProfBtn = document.getElementById('auth-my-profile-btn');
+if (authMyProfBtn) {
+  authMyProfBtn.onclick = () => {
+    document.getElementById('auth-dialog')?.close();
+    openProfileDialog({ isFirstSignIn: false });
+  };
+}
 
 function enforceAuthGate() {
   if (typeof window === 'undefined' || typeof document === 'undefined') return true;
@@ -6283,7 +6960,7 @@ function enforceAuthGate() {
   if (!gate && !shell) return true;
 
   const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
-  const isAuth = Boolean(user && user.isAuthenticated);
+  const isAuth = Boolean(user && (user.isAuthenticated || user.isMock));
 
   if (document.documentElement && document.documentElement.classList && typeof document.documentElement.classList.toggle === 'function') {
     document.documentElement.classList.toggle('not-authenticated', !isAuth);
@@ -6295,6 +6972,17 @@ function enforceAuthGate() {
   } else {
     if (gate) gate.style.display = 'none';
     if (shell) shell.style.display = '';
+
+    // Check first-sign-in onboarding status for authenticated non-mock members
+    if (user.isAuthenticated && !user.isMock && user.role !== 'admin') {
+      if (!user.onboarded) {
+        const profDialog = document.getElementById('profile-onboarding-dialog');
+        if (profDialog && !profDialog.open) {
+          openProfileDialog({ isFirstSignIn: true });
+        }
+      }
+    }
+
     return true;
   }
 }
@@ -6324,6 +7012,7 @@ if (gateForm) {
         enforceAuthGate();
         updateProfileDisplay();
         render();
+        loadWb().then(freshData => { db = hydrateRecordStableIds(freshData); render(); }).catch(() => {});
         toast(`Welcome back, ${user.name}`);
       }
     } catch (err) {
@@ -6363,6 +7052,7 @@ if (authDialogForm) {
         enforceAuthGate();
         updateProfileDisplay();
         render();
+        loadWb().then(freshData => { db = hydrateRecordStableIds(freshData); render(); }).catch(() => {});
         toast(`Signed in as ${user.name}`);
       }
     } catch (err) {
@@ -6487,9 +7177,12 @@ const loadWb = async () => {
   }
   if (typeof fetch === 'function') {
     try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const syncRes = await fetch('/api/sync', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ schemaVersion: 1, operation: 'readSnapshot', requestId: `init-${Date.now()}` })
       });
       if (syncRes.ok) {
@@ -6501,7 +7194,24 @@ const loadWb = async () => {
   }
   throw new Error('No loader available');
 };
-loadWb().then(data=>{db=data;for(const[t,grp]of Object.entries(db))for(const r of grp.records)r._search=buildSearchIndex(r,t);let hash=decodeURIComponent(location.hash.slice(1));if(hash.startsWith('/'))hash=hash.slice(1);if(hash==='admin/issues'){if(isAdmin())tab='admin/issues';else tab='Home';}else if(hash==='profile/logbook'){tab='profile/logbook';}else if(hash==='Sessions'||hash==='sessions'){tab='Morning Report';}else if(hash==='People'){tab='OrgStructure';}else if(db[hash]||['Home','Workspace'].includes(hash))tab=hash;
+
+function hydrateRecordStableIds(workbookData) {
+  if (!workbookData || typeof workbookData !== 'object') return workbookData;
+  for (const [t, grp] of Object.entries(workbookData)) {
+    if (!grp || !Array.isArray(grp.records)) continue;
+    const seenIds = new Set();
+    for (const r of grp.records) {
+      if (!r.stableId && typeof SessionCore !== 'undefined' && SessionCore.generateDeterministicId) {
+        r.stableId = SessionCore.generateDeterministicId(t, r.fields, seenIds);
+      } else if (r.stableId) {
+        seenIds.add(r.stableId);
+      }
+    }
+  }
+  return workbookData;
+}
+
+loadWb().then(data=>{db=hydrateRecordStableIds(data);for(const[t,grp]of Object.entries(db))for(const r of grp.records)r._search=buildSearchIndex(r,t);let hash=decodeURIComponent(location.hash.slice(1));if(hash.startsWith('/'))hash=hash.slice(1);if(hash==='admin/issues'){if(isAdmin())tab='admin/issues';else tab='Home';}else if(hash==='profile/logbook'){tab='profile/logbook';}else if(hash==='Sessions'||hash==='sessions'){tab='Morning Report';}else if(hash==='People'){tab='OrgStructure';}else if(db[hash]||['Home','Workspace'].includes(hash))tab=hash;
 restoreSectionState(tab);
 const mrParsed=parseScheduleHash(hash);
 if(mrParsed){
@@ -6547,7 +7257,10 @@ function bindExtraFilters(){
   if($('#podcast-series-filter'))$('#podcast-series-filter').onchange=e=>{podcastSeriesFilter=e.target.value;page=0;render()};
   if($('#podcast-period-filter'))$('#podcast-period-filter').onchange=e=>{podcastPeriodFilter=e.target.value;page=0;render()};
   if($('#year-filter'))$('#year-filter').onchange=e=>{yearFilter=e.target.value;page=0;render()};
-  if($('#owner-filter'))$('#owner-filter').onchange=e=>{owner=e.target.value;page=0;render()};if($('#skill'))$('#skill').onchange=e=>{skill=e.target.value;page=0;render()};for(const id of ['date-from','date-to','panel-date-from','panel-date-to'])if($('#'+id))$('#'+id).onchange=e=>{if(id==='date-from'||id==='panel-date-from')dateFrom=e.target.value;else dateTo=e.target.value;page=0;render()}}
+  if($('#owner-filter'))$('#owner-filter').onchange=e=>{owner=e.target.value;page=0;render()};
+  if($('#skill'))$('#skill').onchange=e=>{skill=e.target.value;page=0;render()};
+  for(const id of ['date-from','date-to','panel-date-from','panel-date-to']){const el=$('#'+id);if(el)el.oninput=el.onchange=e=>{if(id==='date-from'||id==='panel-date-from')dateFrom=e.target.value;else dateTo=e.target.value;page=0;render()};}
+}
 function staffingTools(){return `<section class="staffing-tools"><h3>Quick staffing entry</h3><p>Choose a role and enter a name. This fills the form; use Save changes to keep it.</p><label>Role<select id="staff-role" class="select">${['Facilitator','Presenter','Scribe','Teaching Points','Active participant 1','Active participant 2','Active participant 3','Active participant 4','Chat support','Available team'].map(k=>`<option>${k}</option>`).join('')}</select></label><label>Name<input id="staff-name" placeholder="Name or team" autocomplete="off"></label><button type="button" class="button secondary" id="assign-name">Fill assignment</button><p id="staff-message" role="status"></p></section>`}
 function bindStaffingTools(targetRole){if(!$('#assign-name'))return;if(targetRole&&$('#staff-role')){$('#staff-role').value=targetRole;if(typeof window!=='undefined'&&(window.innerWidth||0)>760){setTimeout(()=>$('#staff-name')?.focus(),60);}}$('#assign-name').onclick=()=>{const name=$('#staff-name').value.trim(),role=$('#staff-role').value;if(!name){$('#staff-message').textContent='Enter a name first.';return}if(role==='Scribe'||role==='Teaching Points'){const el=[...$('#dialog-content').querySelectorAll('[data-field]')].find(el=>el.dataset.field==='Scribe / teaching points sign-ups');if(el){const rolePat=role==='Teaching Points'?'(?:Teaching Points|TP)':'Scribe';const lineRegex=new RegExp(`(^|\\r?\\n)([^\\S\\r\\n]*${rolePat}:[^\\S\\r\\n]*)([^\\r\\n|]*)(.*?)($|\\r?\\n)`,`i`);if(lineRegex.test(el.value)){el.value=el.value.replace(lineRegex,(match,p1,p2,p3,p4,p5)=>`${p1}${p2}${name}${p4}${p5}`);}else{el.value=(el.value?el.value+'\n':'')+`${role}: ${name}`}el.dispatchEvent(new Event('input',{bubbles:true}));$('#staff-message').textContent=`${role} filled. Save changes to keep the assignment.`;el.focus();return}}const el=[...$('#dialog-content').querySelectorAll('[data-field]')].find(el=>el.dataset.field===role);if(!el)return;const current=el.value.trim();if(current&&!/^(tbd|none|-|na|n\/a|—)$/i.test(current)){if(current.split(/[,;\n&+/]/).some(s=>s.trim().toLowerCase()===name.toLowerCase())){$('#staff-message').textContent='That name is already assigned.';return}if(/\b(tbd|none|-)\b/i.test(current)){el.value=current.replace(/\b(tbd|none|-)\b/i,name)}else{el.value=current+', '+name}}else el.value=name;el.dispatchEvent(new Event('input',{bubbles:true}));$('#staff-message').textContent=`${role} filled. Save changes to keep the assignment.`;el.focus()}}
 
@@ -6613,10 +7326,10 @@ function getRoleMilestoneIndex() {
   return _cachedMilestoneIndex;
 }
 
-function renderStaffTokens(namesArray, role, sessionId){
+function renderStaffTokens(namesArray, role, sessionId, options = {}){
  const tokens=Array.isArray(namesArray)?namesArray:tokenizeStaff(namesArray);
  if(!tokens.length)return '';
- const userIsAdmin = typeof isAdmin === 'function' ? isAdmin() : true;
+ const userIsAdmin = (typeof isAdmin === 'function' ? isAdmin() : true) && !options.hideAdd;
  const isTP = role === 'Teaching Points';
  const prefix = '';
  const mIndex = getRoleMilestoneIndex();
@@ -6696,7 +7409,7 @@ function updateRoleAssignment(sessionId, role, updateFn){
   render();
   const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
   if (user && user.isAuthenticated && !user.isMock && typeof fetch === 'function') {
-    const targetStableId = r.stableId || r.parentId || r.id;
+    const targetStableId = r.session?.parentStableId || r.parentId || r.stableId || r.id;
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -6776,7 +7489,7 @@ function updateSessionNote(sessionId, newNote) {
     render();
     const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
     if (user && user.isAuthenticated && !user.isMock && typeof fetch === 'function') {
-      const targetStableId = r.stableId || r.parentId || r.id;
+      const targetStableId = r.session?.parentStableId || r.parentId || r.stableId || r.id;
       const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -6835,20 +7548,21 @@ function addStaffToken(sessionId, role, newName){
  });
 }
 
-function staffingSlot(r,role){
+function staffingSlot(r,role,options={}){
  const isTP = role === 'Teaching Points';
  if(!mrGaps(r).includes(role)){
   const val=staffingRoleValue(r,role);
   const tokens=tokenizeStaff(val);
-  if(tokens.length)return `<div class="matrix-slot-assigned staffing-people${isTP ? ' tp-assigned-slot' : ''}">${renderStaffTokens(tokens,role,r.id)}</div>`;
+  if(tokens.length)return `<div class="matrix-slot-assigned staffing-people${isTP ? ' tp-assigned-slot' : ''}">${renderStaffTokens(tokens,role,r.id,options)}</div>`;
   return `<span class="matrix-slot-assigned staffing-people" title="${esc(val)}">${esc(val||'Not scheduled')}</span>`;
  }
  const timing=SessionCore.parseSessionTime(r);
  const isUncertain=(r.flags&&r.flags.some(f=>/moved|rescheduled|tentative|uncertain|verify|tbd/i.test(f)))||(r.session?.unresolved&&r.session.unresolved.length>0)||/moved|tentative|\?|tbd/i.test(r.fields.Date||'')||timing.status!=='resolved';
  const baseTier=getStaffingUrgency(SessionCore.parseDate(dateValue(r)));
  const tier=isUncertain?'open':baseTier;
- const label=tier==='urgent'?`● Urgent: ${role}`:tier==='upcoming'?`◷ ${role}`:`+ Open ${role}`;
- return `<button type="button" class="status-chip matrix-slot-btn matrix-slot-gap gap-action-btn slot-${tier}${isTP ? ' slot-tp' : ''}" data-status="${tier}" data-open="${esc(r.id)}" data-role="${esc(role)}" aria-label="${esc(label)}" title="${esc(label)}">${esc(label)}</button>`;
+ const dateDisplay = (typeof recordDate === 'function' ? recordDate(r) : (typeof dateValue === 'function' ? dateValue(r) : r.fields?.Date)) || 'session';
+ const ariaLabel = `Volunteer as ${role} for ${dateDisplay}`;
+ return `<div class="mr-slot-vacant-wrap"><span class="mr-slot-vacant-status">Open</span><button type="button" class="status-chip matrix-slot-btn matrix-slot-gap gap-action-btn mr-volunteer-btn slot-${tier}${isTP ? ' slot-tp' : ''}" data-status="${tier}" data-open="${esc(r.id)}" data-role="${esc(role)}" aria-label="${esc(ariaLabel)}" title="${esc(ariaLabel)}">Volunteer</button></div>`;
 }
 function staffingGrid(r){return `<div class="staffing-grid">${['Facilitator','Presenter','Scribe','Teaching Points'].map(role=>`<div class="staffing-role"><small>${role}</small>${staffingSlot(r,role)}</div>`).join('')}</div>`;}
 
@@ -6877,9 +7591,11 @@ function renderMatrixItem(item, index) {
    dateFormatted = dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   }
  }
- const sessionType = r.fields.Type || 'Morning Report';
+ const titleMeta = typeof SessionCore !== 'undefined' && SessionCore.getSessionDisplayTitle ? SessionCore.getSessionDisplayTitle(r) : { mainTitle: r.fields['Topic / Case'] || r.fields.Type || 'Morning Report', sessionTypeTag: r.fields.Type || 'Morning Report' };
+ const rawSessionType = titleMeta.sessionTypeTag || r.fields.Type || 'Morning Report';
+ const sessionType = typeof SessionCore !== 'undefined' && SessionCore.normalizeSessionTypeName ? SessionCore.normalizeSessionTypeName(rawSessionType) : rawSessionType;
  const isSpecial = /neuro|special|syndrome|solvers/i.test(sessionType);
-  return `<tr class="matrix-row${mrGaps(r).length ? ' matrix-row-has-gap' : ''}" data-index="${index}"><td class="matrix-col-date"><div class="matrix-date-cell"><span class="matrix-day-badge">${esc(dayBadge)}</span><div><div class="matrix-date-text">${esc(dateFormatted)}</div><span class="matrix-time-sub">${esc(SessionCore.formatSessionTime(r))}</span></div></div></td><td class="matrix-col-type"><div class="matrix-type-wrapper"><span class="matrix-type-badge${isSpecial?' matrix-type-special':''}">${esc(sessionType)}</span></div></td>${['Facilitator','Presenter','Scribe','Teaching Points'].map(role => `<td class="matrix-col-role matrix-col-${role.toLowerCase().replace(/[^a-z]/g,'')}">${staffingSlot(r, role)}</td>`).join('')}<td class="matrix-col-actions">${sessionNotice(r)}<div class="matrix-actions"><button type="button" class="button secondary small matrix-action-primary" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details and roster">Details</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" data-star="${esc(r.id)}" aria-label="${workspace.favorites.includes(r.id) ? 'Unpin' : 'Pin'} record">${workspace.favorites.includes(r.id) ? '★' : '☆'}</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button><span class="visually-hidden-accessible" style="position:absolute;left:0;top:0;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);">${calendarButton(r, 'Morning Report', { compact: true })}</span></div></td></tr>`;
+   return `<tr class="matrix-row${mrGaps(r).length ? ' matrix-row-has-gap' : ''}" data-index="${index}"><td class="matrix-col-date"><div class="matrix-date-cell"><span class="matrix-day-badge">${esc(dayBadge)}</span><div><div class="matrix-date-text">${esc(dateFormatted)}</div><span class="matrix-time-sub">${esc(SessionCore.formatSessionTime(r))}</span></div></div></td><td class="matrix-col-type"><div class="matrix-type-wrapper"><span class="matrix-type-badge${isSpecial?' matrix-type-special':''}">${esc(sessionType)}</span></div></td>${['Facilitator','Presenter','Scribe','Teaching Points'].map(role => `<td class="matrix-col-role matrix-col-${role.toLowerCase().replace(/[^a-z]/g,'')}">${staffingSlot(r, role, {hideAdd:true})}</td>`).join('')}<td class="matrix-col-actions">${sessionNotice(r)}<div class="matrix-actions"><button type="button" class="button secondary small matrix-action-primary" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details and roster">Details</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" data-star="${esc(r.id)}" aria-label="${workspace.favorites.includes(r.id) ? 'Unpin' : 'Pin'} record">${workspace.favorites.includes(r.id) ? '★' : '☆'}</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button><span class="visually-hidden-accessible" style="position:absolute;left:0;top:0;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);">${calendarButton(r, 'Morning Report', { compact: true })}</span></div></td></tr>`;
 }
 function matrixView(rr){
  const {weeks,unresolved}=scheduleGroups(rr);
@@ -6905,18 +7621,40 @@ function matrixView(rr){
  const windowToggleHtml = flatItems.length > threshold ? `<div class="window-toggle-bar" style="display:none;" aria-hidden="true"><button type="button" id="matrix-window-toggle-btn">Load all records</button></div>` : '';
  return `<section class="matrix-view">${scheduleSummary(rr)}${windowToggleHtml}<div class="matrix-card"><div class="matrix-container"><table class="matrix-table"><thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows||'<tr><td colspan="7">No dated sessions match these filters.</td></tr>'}</tbody></table></div></div>${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates</h2>${unresolved.map(r=>agendaCard(r,true)).join('')}</section>`:''}</section>`;
 }
-function getNextSevenVMRs(){
- const todayStr=typeof today==='function'?today():'2026-09-15';
- const allMr=records('Morning Report');
- const allSplit=allMr.flatMap(r=>typeof SessionCore!=='undefined'?SessionCore.splitMorningReport(r):[r]);
- const upcoming=allSplit.filter(r=>{
-  const d=recordDate(r);
-  return d&&d>=todayStr;
- }).sort((a,b)=>(recordDate(a)||'').localeCompare(recordDate(b)||''));
- if(upcoming.length>=7)return upcoming.slice(0,7);
- if(upcoming.length>0)return upcoming;
- const allResolved=allSplit.filter(r=>Boolean(recordDate(r))).sort((a,b)=>(recordDate(a)||'').localeCompare(recordDate(b)||''));
- return allResolved.slice(-7);
+function getNextSevenVMRs(options = {}){
+ const refDate = typeof options === 'string' ? options : (options.referenceDate || (typeof today === 'function' ? today() : '2026-09-15'));
+ const refTimestamp = options.referenceTimestamp || (typeof options === 'object' && options.now ? new Date(options.now).toISOString() : `${refDate}T00:00:00.000Z`);
+ const allMr = options.records || (typeof records === 'function' ? records('Morning Report') : (db['Morning Report']?.records || []));
+ const allSplit = allMr.flatMap(r => typeof SessionCore !== 'undefined' ? SessionCore.splitMorningReport(r) : [r]);
+ const upcoming = allSplit.filter(r => {
+  if (isSessionCancelled(r)) return false;
+  const timeInfo = typeof SessionCore !== 'undefined' ? SessionCore.parseSessionTime(r) : null;
+  if (timeInfo && timeInfo.status === 'resolved' && timeInfo.startUtc) {
+   const sessionCutoff = timeInfo.endUtc || timeInfo.startUtc;
+   return sessionCutoff >= refTimestamp;
+  }
+  const d = recordDate(r);
+  return d && d >= refDate;
+ }).sort((a, b) => {
+  const timeA = typeof SessionCore !== 'undefined' ? SessionCore.parseSessionTime(a) : null;
+  const timeB = typeof SessionCore !== 'undefined' ? SessionCore.parseSessionTime(b) : null;
+  const stampA = (timeA?.status === 'resolved' && timeA.startUtc) ? timeA.startUtc : null;
+  const stampB = (timeB?.status === 'resolved' && timeB.startUtc) ? timeB.startUtc : null;
+
+  if (stampA && stampB) {
+   const stampCmp = stampA.localeCompare(stampB);
+   if (stampCmp !== 0) return stampCmp;
+  }
+  const dateA = recordDate(a) || '';
+  const dateB = recordDate(b) || '';
+  const dateCmp = dateA.localeCompare(dateB);
+  if (dateCmp !== 0) return dateCmp;
+
+  if (stampA && !stampB) return -1;
+  if (!stampA && stampB) return 1;
+  return (a.id || '').localeCompare(b.id || '');
+ });
+ return upcoming.slice(0, 7);
 }
 function mrFilledStats(sessionList){
  let total=0,filled=0;
@@ -6935,18 +7673,14 @@ function editorialCardRail(r){
  if(/canceled|cancelled/i.test(fac)||/canceled|cancelled/i.test(r.fields.Type||'')||/canceled|cancelled/i.test(r.fields.Notes||''))return 'rail-canceled';
  const d=SessionCore.parseDate(dateValue(r));
  const urgency=getStaffingUrgency(d);
- if(urgency==='urgent')return 'rail-urgent';
- if(gaps.length>0)return 'rail-warning';
+ if(gaps.length>0){
+  if(urgency==='urgent')return 'rail-urgent';
+  return 'rail-warning';
+ }
  return '';
 }
 function editorialCardStatus(r){
- const gaps=mrGaps(r);
- if(gaps.length===0)return '';
- const d=SessionCore.parseDate(dateValue(r));
- const urgency=getStaffingUrgency(d);
- const dotBg=urgency==='urgent'?'var(--urgent-fg)':'var(--warning-fg)';
- const label=gaps.length===1?'1 Slot Open':`${gaps.length} Slots Open`;
- return `<span class="mr-card-status-tag status-open"><span class="mr-card-status-dot" style="background:${dotBg}"></span> ${label}</span>`;
+  return '';
 }
 function formatSessionTimeBreakdown(record, userZone) {
   const parsed = typeof SessionCore !== 'undefined' && SessionCore.parseSessionTime ? SessionCore.parseSessionTime(record) : { status: 'unresolved' };
@@ -7069,14 +7803,14 @@ function editorialCard(r){
  const staffingCells=['Facilitator','Presenter','Scribe','Teaching Points'].map(role=>{
   const isVacant=gaps.includes(role);
   const roleLabel=role==='Teaching Points'?'TEACHING POINTS':role.toUpperCase();
-  return `<div class="mr-role-cell">
+  return `<div class="mr-role-cell${isVacant?' role-cell-vacant is-vacant':''}">
    <span class="mr-role-label${isVacant?' role-vacant':''}">${roleLabel}</span>
-   <div class="mr-role-value">${staffingSlot(r,role)}</div>
+   <div class="mr-role-value">${staffingSlot(r,role,{hideAdd:true})}</div>
   </div>`;
  }).join('');
 
- const bypassMessage = /grand rounds/i.test(fac+rawNotes+sessionType) ? 'Session staffing bypassed for Grand Rounds' :
-   (/recess/i.test(fac+rawNotes+sessionType) ? 'Session staffing bypassed for Recess' : 'Session cancelled — staffing not required');
+ const bypassMessage = /grand rounds/i.test(fac+rawNotes+sessionType) ? 'Session team bypassed for Grand Rounds' :
+   (/recess/i.test(fac+rawNotes+sessionType) ? 'Session team bypassed for Recess' : 'Session cancelled — team not required');
 
  const staffingZone = (isCanceled || (gaps.length === 4 && /none|recess/i.test(fac))) ? `
   <div class="mr-card-bypassed">
@@ -7119,22 +7853,25 @@ function editorialCard(r){
  return `<article class="mr-card" data-record-id="${esc(r.id)}">
   <div class="mr-card-rail ${railClass}"></div>
   <div class="mr-card-date">
-   <div class="mr-card-day-num${gaps.length?' day-warning':''}">${dayNum}</div>
-   <div class="mr-card-day-meta">
-    <div class="mr-card-day-row">
+   <div class="mr-card-day-row">
+    <div class="mr-card-day-num${gaps.length?' day-warning':''}">${dayNum}</div>
+    <div class="mr-card-day-meta">
      <span class="mr-card-weekday">${esc(wday)}</span>
      <span class="mr-card-month">${esc(mon)}</span>
     </div>
-    <div class="mr-card-time">${timeHtml}</div>
    </div>
+   <div class="mr-card-time">${timeHtml}</div>
   </div>
   <div class="mr-card-content">
    ${(typeTagHtml || statusHtml) ? `<div class="mr-card-tags">${typeTagHtml}${statusHtml}</div>` : ''}
-   <h3 class="mr-card-title">${esc(titleMeta.mainTitle)}</h3>
+   <h3 class="mr-card-title"><button type="button" class="mr-card-title-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View details for ${esc(titleMeta.mainTitle)}">${esc(titleMeta.mainTitle)}</button></h3>
    ${noteHtml}
   </div>
-  ${staffingZone}
- </article>`;
+   ${staffingZone}
+   <div class="mr-card-actions">
+    <button type="button" class="icon-button mr-card-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button>
+   </div>
+  </article>`;
 }
 function agendaView(rr){
  const {weeks,unresolved}=scheduleGroups(rr);
@@ -7146,6 +7883,86 @@ function agendaView(rr){
    return `<section class="agenda-view"><section class="panel empty-state"><h3>No sessions found</h3><p class="muted">No Morning Report sessions match your active filters.</p></section></section>`;
  }
 
+function renderMonthlyScheduleRow(r, index) {
+  const dStr = recordDate(r);
+  let dayBadge = 'TBD';
+  let dateFormatted = dStr || 'Date TBD';
+  if (dStr) {
+    const dObj = new Date(dStr + 'T12:00:00Z');
+    if (!Number.isNaN(dObj.getTime())) {
+      dayBadge = dObj.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).toUpperCase();
+      dateFormatted = dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    }
+  }
+
+  const userZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : null;
+  const tzBreakdown = SessionCore.formatSessionTimeBreakdown(r, userZone);
+  const isCanceled = isSessionCancelled(r);
+  const gaps = mrGaps(r);
+
+  const titleMeta = typeof SessionCore !== 'undefined' && SessionCore.getSessionDisplayTitle 
+    ? SessionCore.getSessionDisplayTitle(r) 
+    : { mainTitle: r.fields['Topic / Case'] || r.fields.Type || 'Virtual Morning Report', sessionTypeTag: '', hasDistinctTag: false };
+  const rawType = r.fields.Type || 'Virtual Morning Report';
+  const normType = typeof SessionCore !== 'undefined' && SessionCore.normalizeSessionTypeName 
+    ? SessionCore.normalizeSessionTypeName(rawType) 
+    : rawType;
+  const typeTag = (titleMeta.hasDistinctTag && titleMeta.sessionTypeTag) 
+    ? titleMeta.sessionTypeTag 
+    : (titleMeta.mainTitle.toLowerCase() !== normType.toLowerCase() ? normType : '');
+
+  let timeHtml = '';
+  if (isCanceled) {
+    timeHtml = '<span class="mr-time-canceled">⊘ No Session</span>';
+  } else if (tzBreakdown.hasDisclosure) {
+    timeHtml = `<div class="mr-tz-popover-anchor" tabindex="0" role="button" aria-haspopup="true" title="Click to view timezone breakdown (Local / ET / PT)">
+      <span class="mr-clock-icon" aria-hidden="true">🕒</span>
+      <span class="mr-time-primary">${esc(tzBreakdown.primaryText)}</span>
+      <span class="mr-tz-details">
+        <span class="mr-tz-line"><strong>Your time:</strong> ${esc(tzBreakdown.local ? tzBreakdown.local.text : tzBreakdown.eastern.text + ' (ET default)')}</span>
+        <span class="mr-tz-line"><strong>Eastern:</strong> ${esc(tzBreakdown.eastern.text)}</span>
+        <span class="mr-tz-line"><strong>Pacific:</strong> ${esc(tzBreakdown.pacific.text)}</span>
+      </span>
+    </div>`;
+  } else {
+    timeHtml = `<span>🕒 ${esc(tzBreakdown.primaryText)}</span>`;
+  }
+
+  let roleCells = '';
+  if (isCanceled) {
+    roleCells = `<td colspan="4" class="mr-cell-canceled"><span class="mr-table-canceled-badge">Session cancelled — team not required</span></td>`;
+  } else {
+    roleCells = ['Facilitator', 'Presenter', 'Scribe', 'Teaching Points'].map(role => {
+      const isVacant = gaps.includes(role);
+      const roleLabel = role === 'Teaching Points' ? 'TEACHING POINTS' : role.toUpperCase();
+      return `<td class="mr-table-role-cell${isVacant ? ' is-vacant role-cell-vacant' : ''}">
+        <div class="mr-table-role-wrap">
+          <span class="mr-table-role-label${isVacant ? ' role-vacant' : ''}">${roleLabel}</span>
+          <div class="mr-table-role-content">${staffingSlot(r, role, { hideAdd: true })}</div>
+        </div>
+      </td>`;
+    }).join('');
+  }
+
+  return `<tr class="mr-schedule-row${gaps.length ? ' has-open-role' : ''}" data-record-id="${esc(r.id)}">
+    <td class="mr-schedule-col-date">
+      <div class="mr-table-date-wrap">
+        <span class="mr-table-weekday">${esc(dayBadge)}</span>
+        <span class="mr-table-date">${esc(dateFormatted)}</span>
+        <div class="mr-table-time">${timeHtml}</div>
+      </div>
+    </td>
+    <td class="mr-schedule-col-session">
+      <div class="mr-table-session-wrap">
+        ${typeTag ? `<span class="mr-card-type-tag">${esc(typeTag)}</span>` : ''}
+        <button type="button" class="mr-table-session-title" data-open="${esc(r.id)}" data-area="Morning Report" title="View details for ${esc(titleMeta.mainTitle)}">${esc(titleMeta.mainTitle)}</button>
+        ${r.fields.Notes && !/^(tbd|none|-|—|\?)$/i.test(r.fields.Notes) ? `<span class="mr-table-note"><em>${esc(r.fields.Notes)}</em></span>` : ''}
+      </div>
+    </td>
+    ${roleCells}
+  </tr>`;
+}
+
  // Next 7 VMRs stream (crosses week boundaries, always chronologically next 7)
  const next7=getNextSevenVMRs();
  const next7Html=next7.length?`
@@ -7153,24 +7970,23 @@ function agendaView(rr){
    <div class="mr-section-head">
     <div class="mr-section-title-wrap">
       <h2>Next 7 VMR Sessions</h2>
-      <span class="mr-section-sub">· Consecutive Day-by-Day Operations</span>
     </div>
     <div class="mr-legend">
-     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--warning-fg)"></span> Open Slot</span>
+     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--warning-fg)"></span> Needs volunteers</span>
      <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--urgent-fg)"></span> Canceled/Blackout</span>
     </div>
    </div>
    <div class="mr-stream">${next7.map(r=>editorialCard(r)).join('')}</div>
   </section>`:'';
 
- // Weekly staffing table (week-scoped, from current week selection)
- const isMobile = typeof window !== 'undefined' && (window.innerWidth || 0) <= 760;
- const isSingleWeek = mrScheduleRangeMode !== 'all';
- const weekRows = weeks.length ? weeks.flatMap(w => w.records.map((r, i) => renderMatrixItem({type:'record', record:r}, i))).join('') : '<tr><td colspan="7" style="text-align:center;padding:16px;">No dated sessions scheduled for this week.</td></tr>';
+  // Tablet and mobile (<1280px) preserve weekly staffing master roster
+  const isDesktop = typeof window !== 'undefined' && (window.innerWidth || 0) >= 1280;
+  const isSingleWeek = mrScheduleRangeMode !== 'all';
+  const weekRows = weeks.length ? weeks.flatMap(w => w.records.map((r, i) => renderMatrixItem({type:'record', record:r}, i))).join('') : '<tr><td colspan="7" style="text-align:center;padding:16px;">No dated sessions scheduled for this week.</td></tr>';
   const weekSessionsCount = weeks.flatMap(w=>w.records).length;
   const isFiltered = (filter && !['All', 'Upcoming', 'This Week'].includes(filter)) || gapsOnly || mySessionsOnly || Boolean(query && query.trim()) || Boolean(sectionQuery && sectionQuery.trim()) || Boolean(facet) || Boolean(secondaryScope && secondaryScope !== 'All');
   const countDisplayHtml = isFiltered ? `<div style="font-size:12px;color:var(--text-muted);">Showing ${weekSessionsCount} Session${weekSessionsCount===1?'':'s'}</div>` : '';
-  const lowerStaffingTable = (!isMobile && isSingleWeek) ? `
+  const lowerStaffingTable = (!isDesktop && isSingleWeek) ? `
     <section class="agenda-staffing-section" style="margin-top:16px;">
       <div class="agenda-staffing-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <div>
@@ -7178,36 +7994,127 @@ function agendaView(rr){
           <p class="muted" style="margin:2px 0 0 0;font-size:12px;">Consolidated institutional staffing audit matrix with role verification markers.</p>
         </div>
         ${countDisplayHtml}
-      </div><div class="matrix-card">
-       <div class="matrix-container">
-         <table class="matrix-table">
-           <thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead>
-           <tbody>${weekRows}</tbody>
-         </table>
-       </div>
-     </div>
-   </section>` : '';
+      </div>
+      <div class="matrix-card">
+        <div class="matrix-container">
+          <table class="matrix-table">
+            <thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead>
+            <tbody>${weekRows}</tbody>
+          </table>
+        </div>
+      </div>
+    </section>` : '';
 
- // Full week-by-week historical archive view
- const weekContent = (mrScheduleRangeMode === 'all') ? weeks.map(w=>{
-   const dayGroups=new Map();
-   for(const r of w.records){
-     const d=recordDate(r)||'Date TBD';
-     if(!dayGroups.has(d))dayGroups.set(d,[]);
-     dayGroups.get(d).push(r);
-   }
-   const dayGroupsHtml=[...dayGroups.entries()].map(([dateStr,dayRecs])=>{
-     const dObj=new Date(dateStr+'T12:00:00Z');
-     const dayLabel=Number.isNaN(dObj.getTime())?dateStr:dObj.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric',timeZone:'UTC'});
-     return `<div class="agenda-day-group"><div class="agenda-day-head"><h4>${esc(dayLabel)}</h4><span class="badge">${dayRecs.length} session${dayRecs.length===1?'':'s'}</span></div><div class="agenda-session-list">${dayRecs.map(r=>agendaCard(r)).join('')}</div></div>`;
-   }).join('');
-   return `<section class="agenda-week panel"><div class="agenda-week-head"><h3>${esc(weekLabel(w.start,w.end))}</h3><span>${w.records.length} sessions</span></div>${dayGroupsHtml}</section>`;
- }).join('') : '';
+  // Monthly Schedule strictly for Desktop (>= 1280px)
+  const currentMonth = mrScheduleMonth || getDefaultScheduleMonth();
+  const monthLabel = mrMonthLabel(currentMonth);
+  const prevMonth = mrShiftMonth(currentMonth, -1);
+  const nextMonth = mrShiftMonth(currentMonth, 1);
+  const thisMonth = getDefaultScheduleMonth();
+  const isThisMonth = currentMonth === thisMonth;
 
- return `<section class="agenda-view">${next7Html}${lowerStaffingTable}${weekContent}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
+  const [curYearStr, curMonthNumStr] = currentMonth.split('-');
+  const curYear = parseInt(curYearStr, 10);
+  const curMonthNum = parseInt(curMonthNumStr, 10);
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const baseYears = [2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027];
+  if (!baseYears.includes(curYear)) baseYears.push(curYear);
+  const yearOptions = Array.from(new Set(baseYears)).sort((a, b) => a - b);
+
+  const allMrRecords = typeof records === 'function' ? records('Morning Report') : (db['Morning Report']?.records || []);
+  const allSplitSessions = allMrRecords.flatMap(r => typeof SessionCore !== 'undefined' ? SessionCore.splitMorningReport(r) : [r]);
+  let monthSessions = allSplitSessions.filter(r => {
+    const d = recordDate(r);
+    return d && d.startsWith(currentMonth);
+  });
+  if (sessionType || sessionFacilitator || gapsOnly) {
+    monthSessions = monthSessions.filter(r => SessionCore.matchesFacets(r, { type: sessionType, facilitator: sessionFacilitator, gapsOnly }, mrGaps));
+  }
+  if (mySessionsOnly) {
+    const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+    const profile = user || (workspace.reporterName ? { name: workspace.reporterName } : null);
+    monthSessions = monthSessions.filter(r => Boolean(profile && isUserAssignedToSession(r, profile)));
+  }
+  if (sectionQuery || query) {
+    const q = (sectionQuery || query).toLowerCase().trim();
+    monthSessions = monthSessions.filter(r => Object.values(r.fields).join(' ').toLowerCase().includes(q));
+  }
+  monthSessions.sort((a, b) => {
+    const dateA = recordDate(a) || '';
+    const dateB = recordDate(b) || '';
+    const dateCmp = dateA.localeCompare(dateB);
+    if (dateCmp !== 0) return dateCmp;
+    const timeA = typeof SessionCore !== 'undefined' ? SessionCore.parseSessionTime(a) : null;
+    const timeB = typeof SessionCore !== 'undefined' ? SessionCore.parseSessionTime(b) : null;
+    if (timeA?.startUtc && timeB?.startUtc) {
+      return timeA.startUtc.localeCompare(timeB.startUtc);
+    }
+    return 0;
+  });
+
+  const monthRows = monthSessions.length ? monthSessions.map((r, i) => renderMonthlyScheduleRow(r, i)).join('') : `<tr><td colspan="6" class="mr-table-empty-cell" style="text-align:center;padding:32px 16px;color:var(--text-muted);">No sessions scheduled for ${esc(monthLabel)}.</td></tr>`;
+  const monthSessionsCount = monthSessions.length;
+
+  const lowerMonthlyScheduleTable = isDesktop ? `
+    <section class="mr-monthly-schedule-section" style="margin-top:24px;">
+      <div class="mr-monthly-schedule-header">
+        <div class="mr-monthly-schedule-title-wrap">
+          <h3 class="mr-monthly-schedule-title">Schedule</h3>
+          <span class="mr-monthly-count">${monthSessionsCount} session${monthSessionsCount===1?'':'s'}</span>
+        </div>
+        <div class="mr-monthly-nav-controls">
+          <button type="button" class="mr-month-btn" data-month-jump="${esc(prevMonth)}" title="Previous month" aria-label="Previous month">‹</button>
+          <div class="mr-month-year-pickers">
+            <select class="select small mr-picker-select" id="mr-month-select" aria-label="Select month">
+              ${monthNames.map((name, idx) => `<option value="${String(idx+1).padStart(2, '0')}" ${idx+1===curMonthNum?'selected':''}>${name}</option>`).join('')}
+            </select>
+            <select class="select small mr-picker-select" id="mr-year-select" aria-label="Select year">
+              ${yearOptions.map(yr => `<option value="${yr}" ${yr===curYear?'selected':''}>${yr}</option>`).join('')}
+            </select>
+          </div>
+          <button type="button" class="mr-month-btn" data-month-jump="${esc(nextMonth)}" title="Next month" aria-label="Next month">›</button>
+          <button type="button" class="button ${isThisMonth ? 'secondary' : 'primary'} small mr-this-month-btn" data-month-jump="${esc(thisMonth)}" ${isThisMonth?'disabled':''}>This month</button>
+        </div>
+      </div>
+      <div class="mr-monthly-table-card">
+        <div class="mr-monthly-table-container">
+          <table class="mr-monthly-table">
+            <thead>
+              <tr>
+                <th style="width:16%;">Date / local time</th>
+                <th style="width:24%;">Session</th>
+                <th style="width:15%;">Facilitator</th>
+                <th style="width:15%;">Presenter</th>
+                <th style="width:15%;">Scribe</th>
+                <th style="width:15%;">Teaching Points</th>
+              </tr>
+            </thead>
+            <tbody>${monthRows}</tbody>
+          </table>
+        </div>
+      </div>
+    </section>` : '';
+
+  // Full week-by-week historical archive view
+  const weekContent = (mrScheduleRangeMode === 'all') ? weeks.map(w=>{
+    const dayGroups=new Map();
+    for(const r of w.records){
+      const d=recordDate(r)||'Date TBD';
+      if(!dayGroups.has(d))dayGroups.set(d,[]);
+      dayGroups.get(d).push(r);
+    }
+    const dayGroupsHtml=[...dayGroups.entries()].map(([dateStr,dayRecs])=>{
+      const dObj=new Date(dateStr+'T12:00:00Z');
+      const dayLabel=Number.isNaN(dObj.getTime())?dateStr:dObj.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric',timeZone:'UTC'});
+      return `<div class="agenda-day-group"><div class="agenda-day-head"><h4>${esc(dayLabel)}</h4><span class="badge">${dayRecs.length} session${dayRecs.length===1?'':'s'}</span></div><div class="agenda-session-list">${dayRecs.map(r=>agendaCard(r)).join('')}</div></div>`;
+    }).join('');
+    return `<section class="agenda-week panel"><div class="agenda-week-head"><h3>${esc(weekLabel(w.start,w.end))}</h3><span>${w.records.length} sessions</span></div>${dayGroupsHtml}</section>`;
+  }).join('') : '';
+
+  return `<section class="agenda-view">${next7Html}${isDesktop ? lowerMonthlyScheduleTable : lowerStaffingTable}${weekContent}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
 }
 function agendaCard(r,isUnresolved=false){
- return `<article class="agenda-card"><div class="agenda-card-date"><strong>${esc(recordDate(r)||dateValue(r)||'Date TBD')}</strong></div><div class="agenda-card-body"><div class="agenda-card-top"><span class="tag">${esc(r.fields.Type||'Morning Report')}</span><span class="muted agenda-times">${esc(SessionCore.formatSessionTime(r))}</span></div>${staffingGrid(r)}</div><div class="agenda-card-actions">${sessionNotice(r)}<button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details">Details</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></article>`;
+ return `<article class="agenda-card"><div class="agenda-card-date"><strong>${esc(recordDate(r)||dateValue(r)||'Date TBD')}</strong></div><div class="agenda-card-body"><div class="agenda-card-top"><span class="tag">${esc(r.fields.Type||'Morning Report')}</span><span class="muted agenda-times">${esc(SessionCore.formatSessionTime(r))}</span></div>${staffingGrid(r)}</div><div class="agenda-card-actions">${sessionNotice(r)}${calendarButton(r, 'Morning Report', { compact: true })}<button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details">Details</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></article>`;
 }
 function getPodcastSeries(title){
   if(!title)return '';
@@ -7401,6 +8308,7 @@ function bindCompoundSessionFilters(){
  }
 }
 
+let mrFiltersPanelCollapsed=false;
 let scheduleFiltersOpen=false;
 function arrangeScheduleFilters(){
  const bar=document.querySelector('.filter-bar');if(!bar)return;
@@ -7463,4 +8371,24 @@ if(typeof globalThis!=='undefined'){
   globalThis.currentLeader=currentLeader;
   globalThis.isPodcastStageInferred=isPodcastStageInferred;
   globalThis.formatPodcastStageBadge=formatPodcastStageBadge;
+  globalThis.isSessionCancelled=isSessionCancelled;
+  globalThis.getSessionRoleEntries=getSessionRoleEntries;
+  globalThis.getUserCommitments=getUserCommitments;
+  globalThis.renderMyCommitmentsWidget=renderMyCommitmentsWidget;
+  globalThis.getBirthdaysToday=getBirthdaysToday;
+  globalThis.renderBirthdaysTodayWidget=renderBirthdaysTodayWidget;
+  globalThis.getNextSevenVMRs=getNextSevenVMRs;
+  globalThis.parseBirthdayMonthDay=parseBirthdayMonthDay;
+  globalThis.home=home;
+}
+if(typeof module!=='undefined'&&module.exports){
+  module.exports.isSessionCancelled=isSessionCancelled;
+  module.exports.getSessionRoleEntries=getSessionRoleEntries;
+  module.exports.getUserCommitments=getUserCommitments;
+  module.exports.renderMyCommitmentsWidget=renderMyCommitmentsWidget;
+  module.exports.getBirthdaysToday=getBirthdaysToday;
+  module.exports.renderBirthdaysTodayWidget=renderBirthdaysTodayWidget;
+  module.exports.getNextSevenVMRs=getNextSevenVMRs;
+  module.exports.parseBirthdayMonthDay=parseBirthdayMonthDay;
+  module.exports.home=home;
 }

@@ -69,28 +69,7 @@
   }
 
   function getCurrentUser() {
-    // 1. Check persistent authentication (shared with Scheduler)
-    if (typeof localStorage !== 'undefined') {
-      try {
-        if (localStorage.getItem('isAuthenticated') === 'true') {
-          const email = localStorage.getItem('userEmail') || '';
-          const name = localStorage.getItem('userName') || (email ? email.split('@')[0] : 'Member');
-          const role = localStorage.getItem('userRole') || 'member';
-          const id = localStorage.getItem('userId') || `mem-${email.replace(/[^a-z0-9]+/g, '-')}`;
-          return {
-            id,
-            name,
-            email,
-            role,
-            isMock: false,
-            isAuthenticated: true,
-            productionAuthorized: true
-          };
-        }
-      } catch {}
-    }
-
-    // 2. Check local mock storage (loopback testing only)
+    // 1. Check local mock storage (loopback testing only, active in-session test profile takes precedence)
     if (isLoopbackOrigin()) {
       const stored = getRawStored();
       if (stored && stored.id) {
@@ -101,6 +80,31 @@
           isLocalTestProfile: true
         };
       }
+    }
+
+    // 2. Check persistent authentication (shared with Scheduler)
+    if (typeof localStorage !== 'undefined') {
+      try {
+        if (localStorage.getItem('isAuthenticated') === 'true') {
+          const email = localStorage.getItem('userEmail') || '';
+          const name = localStorage.getItem('userName') || (email ? email.split('@')[0] : 'Member');
+          const role = localStorage.getItem('userRole') || 'member';
+          const id = localStorage.getItem('userId') || `mem-${email.replace(/[^a-z0-9]+/g, '-')}`;
+          const onboarded = localStorage.getItem('userOnboarded') === 'true';
+          const onboardedAt = localStorage.getItem('userOnboardedAt') || '';
+          return {
+            id,
+            name,
+            email,
+            role,
+            onboarded,
+            onboardedAt,
+            isMock: false,
+            isAuthenticated: true,
+            productionAuthorized: true
+          };
+        }
+      } catch {}
     }
 
     return null;
@@ -132,13 +136,34 @@
         localStorage.setItem('userName', data.user.name);
         localStorage.setItem('userRole', data.user.role);
         localStorage.setItem('userId', data.user.id);
+        localStorage.setItem('userOnboarded', String(Boolean(data.user.onboarded)));
+        if (data.user.onboardedAt) localStorage.setItem('userOnboardedAt', data.user.onboardedAt);
         if (data.token) localStorage.setItem('cps_token', data.token);
+        try {
+          const KEY = 'cps-hub-workspace-v2';
+          const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+          if (saved) {
+            saved.isAdmin = data.user.role === 'admin';
+            saved.role = data.user.role === 'admin' ? 'Super admin' : 'Member';
+            localStorage.setItem(KEY, JSON.stringify(saved));
+          }
+        } catch {}
       }
       const user = getCurrentUser();
       notify(user);
       return user;
     }
     throw new Error('Unexpected login response');
+  }
+
+  function setOnboarded(status = true, timestamp = '') {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('userOnboarded', String(Boolean(status)));
+      if (timestamp) localStorage.setItem('userOnboardedAt', timestamp);
+    }
+    const user = getCurrentUser();
+    notify(user);
+    return user;
   }
 
   function logout() {
@@ -148,7 +173,18 @@
       localStorage.removeItem('userName');
       localStorage.removeItem('userRole');
       localStorage.removeItem('userId');
+      localStorage.removeItem('userOnboarded');
+      localStorage.removeItem('userOnboardedAt');
       localStorage.removeItem('cps_token');
+      try {
+        const KEY = 'cps-hub-workspace-v2';
+        const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+        if (saved) {
+          saved.isAdmin = false;
+          saved.role = 'VMR Leadership';
+          localStorage.setItem(KEY, JSON.stringify(saved));
+        }
+      } catch {}
     }
     // Call server to expire HttpOnly cookie
     try {
@@ -227,6 +263,7 @@
     isLoopbackOrigin,
     getLedgerPersonId,
     setLedgerPersonMapping,
+    setOnboarded,
     isProductionAuthorized,
     getDevelopmentProfile,
     SESSION_KEY

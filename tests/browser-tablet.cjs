@@ -177,6 +177,8 @@ async function runAssertionsOnPage(width, evaluate) {
   assert.notEqual(themeChecks.lightBg, themeChecks.darkBg, 'Dark theme has different background token');
 }
 
+const { injectAuth, injectAuthCDP } = require('./test-auth-helper.cjs');
+
 async function runWithCDP(baseUrl) {
   const DEBUG_PORT = 9225;
   const tempProfile = path.resolve(__dirname, '..', '.edge-tmp-tablet-profile');
@@ -212,6 +214,7 @@ async function runWithCDP(baseUrl) {
 
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
+    await injectAuthCDP(cdp, 'admin');
 
     for (const width of [768, 820, 1024]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -244,6 +247,7 @@ async function runWithPlaywright(baseUrl) {
   try {
     for (const width of [768, 820, 1024]) {
       const context = await browser.newContext({ viewport: { width, height: 900 } });
+      await injectAuth(context, 'admin');
       const page = await context.newPage();
       await page.goto(baseUrl + '/#Morning%20Report');
       await page.locator('.matrix-container').waitFor();

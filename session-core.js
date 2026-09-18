@@ -26,6 +26,52 @@
     return text(value).replace(/\r\n?/g, '\n').split(/\n[ \t]*(?:&|[-_─━=]{3,})[ \t]*(?:\n|$)/).map(s => s.trim());
   }
 
+  function slugify(val) {
+    return String(val || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 30);
+  }
+
+  function generateDeterministicId(dataset, fields, seenIds = new Set()) {
+    let baseId = '';
+    const f = fields || {};
+    if (f._cps_id && String(f._cps_id).trim()) {
+      baseId = String(f._cps_id).trim();
+    } else if (dataset === 'Morning Report') {
+      const d = f.Date || 'undated';
+      const type = slugify(f.Type) || 'mr';
+      const time = slugify(f['Pacific time (source)']) || 'time';
+      baseId = `mr-${d}-${type}-${time}`;
+    } else if (dataset === 'CPS Academy VMRs') {
+      const d = f['Date / time (source)'] ? slugify(f['Date / time (source)']).slice(0, 15) : 'undated';
+      const title = slugify(f['Session title']) || 'vmr';
+      baseId = `vmr-${d}-${title}`;
+    } else if (dataset === 'Members') {
+      const emailSlug = f.Email ? slugify(f.Email.split('@')[0]) : '';
+      const nameSlug = slugify(f.Name) || 'member';
+      baseId = `mem-${emailSlug || nameSlug}`;
+    } else if (dataset === 'OrgStructure') {
+      const teamSlug = f['Team / responsibility'] ? slugify(f['Team / responsibility']) : 'team';
+      const roleSlug = slugify(f.Role) || 'role';
+      baseId = `org-${teamSlug}-${roleSlug}`;
+    } else if (dataset === 'Important links') {
+      baseId = `link-${slugify(f.Resource) || 'res'}`;
+    } else {
+      baseId = `${slugify(dataset)}-rec`;
+    }
+
+    let candidateId = baseId;
+    let counter = 1;
+    while (seenIds.has(candidateId)) {
+      counter++;
+      candidateId = `${baseId}-seq${counter}`;
+    }
+    seenIds.add(candidateId);
+    return candidateId;
+  }
+
   function splitMorningReport(record) {
     if (record.session) return [record];
     splitCalls++;
@@ -48,6 +94,7 @@
       splitCache.set(cacheKey, res.map(r => Object.freeze({ ...r, fields: Object.freeze({ ...r.fields }), flags: Object.freeze([...r.flags]) })));
       return res;
     }
+    const parentStableId = record.stableId || generateDeterministicId('Morning Report', fields);
     const unresolved = [];
     const unassignedFields = {};
     for (const [key, values] of Object.entries(parts)) {
@@ -67,10 +114,23 @@
           : index === 0 ? fields[key] : '';
       }
       return {
-        ...record, id: `${record.id}::session:${index + 1}`, fields: childFields,
-        links: { ...(record.links || {}) }, flags: [...(record.flags || []), ...unresolved],
-        session: { parentId: record.id, index: index + 1, count, unresolved: [...unresolved],
-          sourceFields: { ...fields }, unassignedFields: { ...unassignedFields }, version: VERSION }
+        ...record,
+        id: `${record.id}::session:${index + 1}`,
+        stableId: `${parentStableId}#${index + 1}`,
+        parentId: parentStableId,
+        fields: childFields,
+        links: { ...(record.links || {}) },
+        flags: [...(record.flags || []), ...unresolved],
+        session: {
+          parentId: record.id,
+          parentStableId: parentStableId,
+          index: index + 1,
+          count,
+          unresolved: [...unresolved],
+          sourceFields: { ...fields },
+          unassignedFields: { ...unassignedFields },
+          version: VERSION
+        }
       };
     });
     if (splitCache.size >= MAX_CACHE_SIZE) splitCache.delete(splitCache.keys().next().value);
@@ -255,6 +315,83 @@
       return fallback;
     }
   }
+
+  function formatSessionTimeBreakdown(record, userZone) {
+    const parsed = parseSessionTime(record);
+    if (parsed.status !== 'resolved' || !parsed.startUtc) {
+      return {
+        status: 'unresolved',
+        startUtc: null,
+        primaryText: 'Time TBD',
+        sourceLabel: parsed.sourceLabel || 'Time TBD',
+        reason: parsed.reason || 'Time unconfirmed in source',
+        hasDisclosure: false,
+        isLocal: false,
+        fallbackMode: null,
+        userZoneName: null,
+        local: null,
+        eastern: null,
+        pacific: null
+      };
+    }
+    const d = new Date(parsed.startUtc);
+
+    function formatZone(targetZone) {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: targetZone,
+        timeZoneName: 'short'
+      });
+      const parts = formatter.formatToParts(d);
+      const time = parts.filter(p => p.type !== 'timeZoneName').map(p => p.value).join('').trim();
+      const zoneLabel = parts.find(p => p.type === 'timeZoneName')?.value || targetZone;
+      return { time, zoneLabel, zoneId: targetZone, text: `${time} ${zoneLabel}` };
+    }
+
+    const eastern = formatZone('America/New_York');
+    const pacific = formatZone('America/Los_Angeles');
+
+    let local = null;
+    let isLocal = false;
+    if (userZone && typeof userZone === 'string') {
+      try {
+        local = formatZone(userZone.trim());
+        isLocal = true;
+      } catch {}
+    }
+
+    if (isLocal && local) {
+      return {
+        status: 'resolved',
+        startUtc: parsed.startUtc,
+        primaryText: local.text,
+        isLocal: true,
+        fallbackMode: null,
+        userZoneName: userZone,
+        hasDisclosure: true,
+        local,
+        eastern,
+        pacific,
+        sourceLabel: parsed.sourceLabel
+      };
+    }
+
+    return {
+      status: 'resolved',
+      startUtc: parsed.startUtc,
+      primaryText: eastern.text,
+      isLocal: false,
+      fallbackMode: 'institutional-eastern',
+      userZoneName: null,
+      hasDisclosure: true,
+      local: null,
+      eastern,
+      pacific,
+      sourceLabel: parsed.sourceLabel
+    };
+  }
+
   function escapeCalendar(value) {
     return text(value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').replace(/\\/g, '\\\\').replace(/\r\n|\r|\n/g, '\\n').replace(/;/g, '\\;').replace(/,/g, '\\,');
   }
@@ -314,6 +451,135 @@
     facilitatorCache.set(raw, res);
     return res;
   }
+
+  function normalizeSessionTypeName(raw) {
+    const val = text(raw).trim();
+    if (!val || /^(?:tbd|none|-|—|\?)$/i.test(val)) return 'Virtual Morning Report';
+    if (/^spontaneous$/i.test(val)) return 'Virtual Morning Report';
+    if (/^spontaneous\s*&\s*no\s*academy$/i.test(val)) return 'Virtual Morning Report (No Academy)';
+    return val;
+  }
+
+  function getSessionDisplayTitle(record) {
+    const f = (record && record.fields) || {};
+    const rawType = text(f.Type).trim();
+    const rawTopic = text(f['Topic / Case']).trim();
+    const rawDetails = text(f.Details).trim();
+    const typeDisplay = normalizeSessionTypeName(rawType);
+
+    let specificTitle = '';
+    if (rawTopic && !/^(?:tbd|none|-|—|\?)$/i.test(rawTopic)) specificTitle = rawTopic;
+    else if (rawDetails && !/^(?:tbd|none|-|—|\?)$/i.test(rawDetails)) specificTitle = rawDetails;
+
+    // If there is a distinct topic/case, title is that topic, type is contextual tag
+    if (specificTitle && specificTitle.toLowerCase() !== typeDisplay.toLowerCase() && specificTitle.toLowerCase() !== rawType.toLowerCase()) {
+      return {
+        mainTitle: specificTitle,
+        sessionTypeTag: typeDisplay,
+        hasDistinctTag: true
+      };
+    }
+
+    // Otherwise, title is the normalized session name once (no duplicate tag)
+    return {
+      mainTitle: typeDisplay,
+      sessionTypeTag: '',
+      hasDistinctTag: false
+    };
+  }
+
+  function normalizePersonKey(name) {
+    if (!name || typeof name !== 'string') return '';
+    const cleaned = name.replace(/\([^)]*\)/g, '').trim();
+    return cleaned.toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function extractSessionRolePeople(r) {
+    const f = r.fields || {};
+    const getParsedPeople = (raw) => facilitatorNames(raw);
+
+    const facilitator = getParsedPeople(f.Facilitator);
+    let presenter = getParsedPeople(f.Presenter);
+    let scribe = [];
+    let teachingPoints = [];
+
+    const signups = text(f['Scribe / teaching points sign-ups']);
+    if (signups) {
+      if (!presenter.length) {
+        const presMatch = signups.match(/(?:^|[\r\n|])\s*(?:Case Presenter|Presenter):[^\S\r\n]*([^\r\n|]*)/i);
+        if (presMatch && presMatch[1]) presenter = getParsedPeople(presMatch[1]);
+      }
+      const scribeMatch = signups.match(/(?:^|[\r\n|])\s*Scribe:[^\S\r\n]*([^\r\n|]*)/i);
+      if (scribeMatch && scribeMatch[1]) scribe = getParsedPeople(scribeMatch[1]);
+
+      const tpMatch = signups.match(/(?:^|[\r\n|])\s*(?:Teaching Points|TP):[^\S\r\n]*([^\r\n|]*)/i);
+      if (tpMatch && tpMatch[1]) teachingPoints = getParsedPeople(tpMatch[1]);
+    }
+
+    return { Facilitator: facilitator, Presenter: presenter, Scribe: scribe, 'Teaching Points': teachingPoints };
+  }
+
+  function buildRoleMilestoneIndex(allRecords) {
+    const validSessions = [];
+    for (const r of allRecords) {
+      const f = r.fields || {};
+      const isCanceled = /canceled|cancelled|recess|blackout/i.test(text(f.Facilitator) + text(f.Type) + text(f.Notes));
+      if (isCanceled) continue;
+      const dateIso = validDate(f.Date);
+      if (!dateIso) continue;
+
+      const timing = parseSessionTime(r);
+      const sortTime = timing.startUtc ? timing.startUtc : `${dateIso}T12:00:00.000Z`;
+      validSessions.push({
+        id: r.id,
+        dateIso,
+        sortTime,
+        roles: extractSessionRolePeople(r)
+      });
+    }
+
+    validSessions.sort((a, b) => a.sortTime.localeCompare(b.sortTime) || a.id.localeCompare(b.id));
+
+    const roleHistories = { Facilitator: new Map(), Presenter: new Map(), Scribe: new Map(), 'Teaching Points': new Map() };
+    const milestoneIndex = new Map();
+
+    for (const session of validSessions) {
+      const sessionMilestones = { Facilitator: {}, Presenter: {}, Scribe: {}, 'Teaching Points': {} };
+      for (const role of ['Facilitator', 'Presenter', 'Scribe', 'Teaching Points']) {
+        const people = session.roles[role] || [];
+        const history = roleHistories[role];
+        for (const person of people) {
+          const key = normalizePersonKey(person);
+          if (!key) continue;
+          const priorCount = history.get(key) || 0;
+          let ordinal = null;
+          if (priorCount === 0) ordinal = '1st time';
+          else if (priorCount === 1) ordinal = '2nd time';
+          else if (priorCount === 2) ordinal = '3rd time';
+          sessionMilestones[role][key] = { priorCount, ordinal };
+        }
+      }
+      for (const role of ['Facilitator', 'Presenter', 'Scribe', 'Teaching Points']) {
+        const people = session.roles[role] || [];
+        const history = roleHistories[role];
+        for (const person of people) {
+          const key = normalizePersonKey(person);
+          if (key) history.set(key, (history.get(key) || 0) + 1);
+        }
+      }
+      milestoneIndex.set(session.id, sessionMilestones);
+    }
+
+    return {
+      getMilestone: (sessionId, role, personName) => {
+        const sessionMap = milestoneIndex.get(sessionId);
+        if (!sessionMap || !sessionMap[role]) return null;
+        const key = normalizePersonKey(personName);
+        return sessionMap[role][key] || null;
+      }
+    };
+  }
+
   function matchesFacets(record, selection = {}, gapFn = () => []) {
     const f = record.fields || {};
     return (!selection.type || text(f.Type) === selection.type)
@@ -364,13 +630,19 @@
     parseClock,
     parseSessionTime,
     formatSessionTime,
+    formatSessionTimeBreakdown,
     createCalendar,
     facilitatorNames,
+    normalizeSessionTypeName,
+    getSessionDisplayTitle,
+    buildRoleMilestoneIndex,
     matchesFacets,
     invalidateRecord,
     clearCaches,
     getCacheStats,
     getWeekBounds,
-    addWeeks
+    addWeeks,
+    slugify,
+    generateDeterministicId
   });
 });

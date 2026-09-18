@@ -118,6 +118,8 @@ async function runPerformanceAudit() {
 
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
+    const { injectAuthCDP } = require('./test-auth-helper.cjs');
+    await injectAuthCDP(cdp, 'admin');
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width: 1024,
       height: 768,

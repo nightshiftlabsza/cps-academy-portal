@@ -74,6 +74,8 @@ module.exports = async function loginHandler(req, res) {
   let memberName = cleanEmail.split('@')[0];
   let memberId = `mem-${cleanEmail.replace(/[^a-z0-9]+/g, '-')}`;
   let isAcademyMember = false;
+  let onboarded = false;
+  let onboardedAt = '';
 
   try {
     const snapshot = await sheetsReader();
@@ -87,6 +89,8 @@ module.exports = async function loginHandler(req, res) {
       isAcademyMember = true;
       memberName = matched.fields?.Name || memberName;
       memberId = matched.stableId || matched.id;
+      onboarded = String(matched.fields?.Onboarded || '').trim().toLowerCase() === 'true' || matched.fields?.Onboarded === true;
+      onboardedAt = matched.fields?.['Onboarded At'] || '';
     }
   } catch (err) {
     // If sheets reader fails or is offline, allow login with email fallback
@@ -101,6 +105,8 @@ module.exports = async function loginHandler(req, res) {
     name: memberName,
     role,
     id: memberId,
+    onboarded,
+    onboardedAt,
     isAuthenticated: true
   };
 

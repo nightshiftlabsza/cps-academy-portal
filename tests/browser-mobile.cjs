@@ -4,6 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {createServer}=require('../scripts/serve.cjs');
 const {chromium}=require('playwright-core');
+const {injectAuth}=require('./test-auth-helper.cjs');
 const routes=['Home','Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs','Leader of the Week','Members','OrgStructure','CRC','CRC - retired','Podcast Episodes','Schema review','Research @CPSolvers','Conferences','Important links','Workspace','profile/logbook'];
 (async()=>{
  const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -13,6 +14,7 @@ const routes=['Home','Morning Report','CPS Academy VMRs','Special VMRs','Student
  try{
  for(const width of [320,360,390,430,820,1440]){
   const context=await browser.newContext({viewport:{width,height:850},serviceWorkers:'block'});
+  await injectAuth(context, 'admin');
   const p=await context.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));
   const fits=async label=>{
    assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${width}px document overflow: ${label}`);
@@ -57,7 +59,9 @@ const routes=['Home','Morning Report','CPS Academy VMRs','Special VMRs','Student
   if(!/date|time|status|type|recording|uploaded|yes|no/i.test(key))r.fields[key]=/link|url/i.test(key)?'https://example.invalid/'+long:long+' · '+('Participant Name; '.repeat(12));
  }}
  for(const width of [320,360,390,430]){
-  const c=await browser.newContext({viewport:{width,height:740},serviceWorkers:'block'});const p=await c.newPage();
+  const c=await browser.newContext({viewport:{width,height:740},serviceWorkers:'block'});
+  await injectAuth(c, 'admin');
+  const p=await c.newPage();
   await p.route('**/workbook.json',r=>r.fulfill({contentType:'application/json',body:JSON.stringify(fixture)}));
   for(const route of ['Members','OrgStructure','Important links','Podcast Episodes','Schema review','Research @CPSolvers']){
    await p.goto(base+'/#'+encodeURIComponent(route));await p.locator('#page h1').waitFor();

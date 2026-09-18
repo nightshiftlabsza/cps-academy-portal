@@ -6,6 +6,9 @@
     <meta name="theme-color" content="#142c3f" />
     <title>CPS Academy Hub</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%23142c3f'/%3E%3Ctext x='20' y='25' text-anchor='middle' font-family='sans-serif' font-size='13' fill='white'%3ECPS%3C/text%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&amp;display=swap" rel="stylesheet" />
     <script>
       (() => {
         const KEY = "cps-hub-appearance-v1";
@@ -338,6 +341,13 @@
         </div>
         <div class="pref-item" style="border-top:1px solid var(--line);padding-top:12px;">
           <div class="pref-meta">
+            <strong>My Profile</strong>
+            <p class="muted">Review and update your personal details and preferences.</p>
+          </div>
+          <button type="button" class="button secondary small" id="nav-my-profile-btn">Edit Profile</button>
+        </div>
+        <div class="pref-item" style="border-top:1px solid var(--line);padding-top:12px;">
+          <div class="pref-meta">
             <strong>Personal Logbook</strong>
             <p class="muted">View recorded assignments and distinct sessions.</p>
           </div>
@@ -397,8 +407,113 @@
             <span id="auth-user-role" class="tag small" style="margin-top:6px;display:inline-block;"></span>
           </div>
           <div class="dialog-actions">
+            <button type="button" class="button secondary" id="auth-my-profile-btn">My Profile</button>
             <button type="button" class="button secondary" id="auth-signed-in-close-btn">Close</button>
             <button type="button" class="button primary" id="auth-logout-btn" style="background:#e53e3e;border-color:#e53e3e;">Sign Out</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="profile-onboarding-dialog" class="dialog" aria-labelledby="profile-dialog-title">
+      <form class="dialog-card profile-dialog-card" id="profile-onboarding-form" onsubmit="return false;">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow" id="profile-dialog-eyebrow">Personal Details</p>
+            <h2 id="profile-dialog-title">Review &amp; Confirm Your Profile</h2>
+          </div>
+          <button type="button" class="icon-button" id="profile-dialog-close-btn" aria-label="Close">×</button>
+        </div>
+
+        <div id="profile-loading-state" style="padding:24px 0;text-align:center;">
+          <p class="muted">Fetching current online profile from Google Sheets…</p>
+        </div>
+
+        <div id="profile-error-state" class="auth-error" style="display:none;margin-bottom:14px;">
+          <p id="profile-error-msg" style="margin:0 0 8px 0;"></p>
+          <button type="button" class="button secondary small" id="profile-retry-fetch-btn">↻ Retry Loading From Sheets</button>
+        </div>
+
+        <div id="profile-form-content" style="display:none;">
+          <p id="profile-dialog-intro" class="muted" style="margin-bottom:14px;font-size:13px;line-height:1.45;">
+            Please review and confirm your details. Changes update your personal directory record in the connected Google Sheets document.
+          </p>
+
+          <div id="profile-name-review-banner" style="display:none;margin-bottom:14px;padding:10px 12px;border-radius:6px;background:var(--surface-raised,#f1f5f9);border-left:3px solid var(--primary,#2563eb);font-size:12px;line-height:1.45;">
+            <div style="margin-bottom:4px;">
+              <span class="muted" style="font-weight:600;text-transform:uppercase;letter-spacing:0.04em;font-size:10px;">Directory Record Name:</span>
+              <strong id="prof-original-name-display" style="display:block;font-size:13px;color:var(--text,#1e293b);margin-top:2px;"></strong>
+            </div>
+            <p id="prof-name-suggestion-note" style="margin:4px 0 0 0;" class="muted"></p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;" class="profile-name-grid">
+            <div class="form-group">
+              <label for="prof-first-name" style="display:block;font-weight:700;margin-bottom:4px;">First name <span class="required-asterisk" style="color:var(--danger,#e53e3e);">*</span></label>
+              <input type="text" id="prof-first-name" class="input" placeholder="e.g. Alex" required autocomplete="given-name" style="width:100%;box-sizing:border-box;" />
+            </div>
+            <div class="form-group" id="prof-surname-group">
+              <label for="prof-surname" style="display:block;font-weight:700;margin-bottom:4px;">Surname <span class="required-asterisk" style="color:var(--danger,#e53e3e);">*</span></label>
+              <input type="text" id="prof-surname" class="input" placeholder="e.g. Carter" required autocomplete="family-name" style="width:100%;box-sizing:border-box;" />
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:12px;">
+            <label class="checkbox-label" style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+              <input type="checkbox" id="prof-single-name-chk" />
+              <span>I have a single legal name (no separate surname)</span>
+            </label>
+          </div>
+
+          <div class="form-group" style="margin-bottom:12px;">
+            <label for="prof-email" style="display:block;font-weight:700;margin-bottom:4px;">Email <span class="required-asterisk" style="color:var(--danger,#e53e3e);">*</span></label>
+            <input type="email" id="prof-email" class="input" readonly style="width:100%;box-sizing:border-box;background:var(--surface-raised,#f1f5f9);cursor:not-allowed;" />
+            <small class="muted" style="font-size:11px;display:block;margin-top:2px;">
+              Your login email is bound to your account matching key and shared password. Self-service login-email changes are protected to prevent account lockout.
+            </small>
+          </div>
+
+          <div class="form-group" style="margin-bottom:12px;">
+            <label for="prof-nicknames" style="display:block;font-weight:700;margin-bottom:4px;">AKA / Nicknames <small class="muted" style="font-weight:400;">(Optional)</small></label>
+            <input type="text" id="prof-nicknames" class="input" placeholder="e.g. Sasha, Ali" autocomplete="nickname" style="width:100%;box-sizing:border-box;" />
+            <small class="muted" style="font-size:11px;display:block;margin-top:2px;">
+              Aliases and spelling variations help match your session assignments and logbook accurately without confusing distinct colleagues.
+            </small>
+          </div>
+
+          <div class="form-group" style="margin-bottom:16px;">
+            <label style="display:block;font-weight:700;margin-bottom:4px;">Birthday <small class="muted" style="font-weight:400;">(Optional)</small></label>
+            <div id="prof-bday-raw-notice" style="display:none;font-size:12px;background:var(--surface-raised,#f1f5f9);padding:6px 10px;border-radius:4px;margin-bottom:8px;border-left:3px solid var(--primary,#2563eb);"></div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select id="prof-bday-month" class="select" style="flex:1;">
+                <option value="">Month</option>
+                <option value="1">January</option>
+                <option value="2">February</option>
+                <option value="3">March</option>
+                <option value="4">April</option>
+                <option value="5">May</option>
+                <option value="6">June</option>
+                <option value="7">July</option>
+                <option value="8">August</option>
+                <option value="9">September</option>
+                <option value="10">October</option>
+                <option value="11">November</option>
+                <option value="12">December</option>
+              </select>
+              <select id="prof-bday-day" class="select" style="flex:1;">
+                <option value="">Day</option>
+              </select>
+              <button type="button" class="button secondary small" id="prof-bday-clear-btn" title="Clear birthday">Clear</button>
+            </div>
+            <small class="muted" style="font-size:11px;display:block;margin-top:2px;">
+              No birth year required. Supports February 29 leap day birthdays.
+            </small>
+          </div>
+
+          <div id="profile-save-error" class="auth-error" style="display:none;margin-bottom:12px;"></div>
+
+          <div class="dialog-actions" style="margin-top:16px;">
+            <button type="button" class="button secondary" id="profile-cancel-btn">Cancel</button>
+            <button type="button" class="button primary" id="profile-save-btn">Confirm &amp; Save Details</button>
           </div>
         </div>
       </form>

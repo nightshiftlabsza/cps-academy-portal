@@ -83,6 +83,8 @@ async function getAccessToken(creds) {
   return cachedToken;
 }
 
+const { slugify, generateDeterministicId } = require('../../session-core.js');
+
 function normalizeDate(val) {
   if (!val) return '';
   const s = String(val).trim();
@@ -95,52 +97,6 @@ function normalizeDate(val) {
     return `${y}-${m}-${day}`;
   }
   return s;
-}
-
-function slugify(val) {
-  return String(val || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 30);
-}
-
-// Generate deterministic collision-resistant stable IDs for bulk row additions
-function generateDeterministicId(dataset, fields, seenIds = new Set()) {
-  let baseId = '';
-  if (fields._cps_id && String(fields._cps_id).trim()) {
-    baseId = String(fields._cps_id).trim();
-  } else if (dataset === 'Morning Report') {
-    const d = fields.Date || 'undated';
-    const type = slugify(fields.Type) || 'mr';
-    const time = slugify(fields['Pacific time (source)']) || 'time';
-    baseId = `mr-${d}-${type}-${time}`;
-  } else if (dataset === 'CPS Academy VMRs') {
-    const d = fields['Date / time (source)'] ? slugify(fields['Date / time (source)']).slice(0, 15) : 'undated';
-    const title = slugify(fields['Session title']) || 'vmr';
-    baseId = `vmr-${d}-${title}`;
-  } else if (dataset === 'Members') {
-    const emailSlug = fields.Email ? slugify(fields.Email.split('@')[0]) : '';
-    const nameSlug = slugify(fields.Name) || 'member';
-    baseId = `mem-${emailSlug || nameSlug}`;
-  } else if (dataset === 'OrgStructure') {
-    const teamSlug = slugify(fields['Team / responsibility']) || 'team';
-    const roleSlug = slugify(fields.Role) || 'role';
-    baseId = `org-${teamSlug}-${roleSlug}`;
-  } else if (dataset === 'Important links') {
-    baseId = `link-${slugify(fields.Resource) || 'res'}`;
-  } else {
-    baseId = `${slugify(dataset)}-rec`;
-  }
-
-  let candidateId = baseId;
-  let counter = 1;
-  while (seenIds.has(candidateId)) {
-    counter++;
-    candidateId = `${baseId}-seq${counter}`;
-  }
-  seenIds.add(candidateId);
-  return candidateId;
 }
 
 function parseMorningReport(rows) {
@@ -254,7 +210,9 @@ function parseOrgStructure(rows) {
 
   const memberColumns = [
     'Name', 'Sponsor', 'Social handles', 'Country', 'Birthday',
-    'Email', 'Location', 'Subspecialty'
+    'Email', 'Location', 'Subspecialty',
+    'First Name', 'Surname', 'AKA / Nicknames', 'Onboarded', 'Onboarded At',
+    'Category', 'Active Status'
   ];
   const memberRecords = [];
   const seenMem = new Set();
@@ -299,7 +257,14 @@ function parseOrgStructure(rows) {
       'Email': String(r[5] ?? '').trim(),
       'Location': String(r[6] ?? '').trim(),
       'Subspecialty': String(r[7] ?? '').trim(),
-      '_cps_id': String(r[8] ?? '').trim()
+      '_cps_id': String(r[8] ?? '').trim(),
+      'First Name': String(r[9] ?? '').trim(),
+      'Surname': String(r[10] ?? '').trim(),
+      'AKA / Nicknames': String(r[11] ?? '').trim(),
+      'Onboarded': String(r[12] ?? '').trim(),
+      'Onboarded At': String(r[13] ?? '').trim(),
+      'Category': String(r[14] ?? '').trim(),
+      'Active Status': String(r[15] ?? '').trim()
     };
 
     const stableId = generateDeterministicId('Members', fields, seenMem);
@@ -363,11 +328,11 @@ async function findRowByStableId(sheetId, tabName, targetStableId) {
   const token = await getAccessToken(creds);
 
   let range = '';
-  if (tabName === 'Morning Report') range = "'Morning Report'!A1:S2500";
-  else if (tabName === 'CPS Academy VMRs') range = "'CPS Academy VMRs'!A1:I400";
-  else if (tabName === 'OrgStructure' || tabName === 'Members') range = "'OrgStructure'!A1:I300";
-  else if (tabName === 'Important links') range = "'Important links'!A1:C50";
-  else range = `'${tabName}'!A1:Z500`;
+  if (tabName === 'Morning Report') range = "'Morning Report'!A1:S";
+  else if (tabName === 'CPS Academy VMRs') range = "'CPS Academy VMRs'!A1:I";
+  else if (tabName === 'OrgStructure' || tabName === 'Members') range = "'OrgStructure'!A1:P";
+  else if (tabName === 'Important links') range = "'Important links'!A1:C";
+  else range = `'${tabName}'!A1:Z`;
 
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueRenderOption=FORMATTED_VALUE`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -442,12 +407,7 @@ async function findRowByStableId(sheetId, tabName, targetStableId) {
 
 function loadBaselineWorkbook() {
   const p = path.resolve(__dirname, '../../workbook.json');
-  if (fs.existsSync(p)) {
-    try {
-      return JSON.parse(fs.readFileSync(p, 'utf8'));
-    } catch {}
-  }
-  return {};
+  return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
 async function sheetsReader(config = {}, options = {}) {
@@ -472,10 +432,10 @@ async function sheetsReader(config = {}, options = {}) {
   const token = await getAccessToken(creds);
 
   const ranges = [
-    "'Morning Report'!A1:S2500",
-    "'CPS Academy VMRs'!A1:I400",
-    "'OrgStructure'!A1:I300",
-    "'Important links'!A1:C50"
+    "'Morning Report'!A1:S",
+    "'CPS Academy VMRs'!A1:I",
+    "'OrgStructure'!A1:P",
+    "'Important links'!A1:C"
   ];
 
   const params = ranges.map((r) => `ranges=${encodeURIComponent(r)}`).join('&');

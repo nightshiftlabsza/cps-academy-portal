@@ -85,9 +85,21 @@ test('Milestone 3: Sync endpoint requires authentication and enforces role-based
     assert.equal(result.body.error, 'UNAUTHORIZED');
   });
 
-  await t.test('redacts sensitive Member birthday for non-admin member session', async () => {
+  await t.test('preserves sensitive Member birthday for authenticated member session', async () => {
     const { req, res, getResult } = mockReqRes({
       headers: { authorization: `Bearer ${memberToken}` }
+    });
+    await handler(req, res);
+    const result = getResult();
+    assert.equal(result.status, 200);
+    assert.equal(result.body.workbook.Members.records[0].fields.Birthday, '1985-04-12');
+    assert.equal(result.body.workbook.Members.records[1].fields.Birthday, '1970-01-01');
+  });
+
+  await t.test('redacts sensitive Member birthday for unprivileged viewer session', async () => {
+    const viewerToken = createSessionToken({ email: 'viewer@cps.org', role: 'viewer', name: 'Viewer User' });
+    const { req, res, getResult } = mockReqRes({
+      headers: { authorization: `Bearer ${viewerToken}` }
     });
     await handler(req, res);
     const result = getResult();

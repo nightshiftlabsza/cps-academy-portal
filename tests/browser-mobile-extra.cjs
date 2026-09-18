@@ -2,11 +2,14 @@
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright-core');
 const {createServer}=require('../scripts/serve.cjs');
+const {injectAuth}=require('./test-auth-helper.cjs');
 (async()=>{
  const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
  try{for(const width of [320,360,390,430]){
-  const c=await browser.newContext({viewport:{width,height:740},serviceWorkers:'block'}),p=await c.newPage();
+  const c=await browser.newContext({viewport:{width,height:740},serviceWorkers:'block'});
+  await injectAuth(c, 'admin');
+  const p=await c.newPage();
   const base=`http://127.0.0.1:${server.address().port}`;
   const fits=async label=>assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1&&[...document.querySelectorAll('dialog[open]')].every(d=>d.scrollWidth<=d.clientWidth+1)),`${width}px overflow: ${label}`);
   await p.goto(base);await p.locator('#page h1').waitFor();

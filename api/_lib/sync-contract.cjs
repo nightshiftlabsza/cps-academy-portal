@@ -158,7 +158,8 @@ function createSyncHandler(options = {}) {
       });
 
       let finalWorkbook = result.workbook;
-      if (finalWorkbook && authUser?.role !== 'admin' && finalWorkbook.Members?.records) {
+      const canAccessBirthdays = authUser && (authUser.role === 'admin' || authUser.role === 'member');
+      if (finalWorkbook && !canAccessBirthdays && finalWorkbook.Members?.records) {
         finalWorkbook = {
           ...finalWorkbook,
           Members: {
