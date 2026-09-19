@@ -8,6 +8,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const workbook = JSON.parse(fs.readFileSync(path.join(root, 'workbook.json'), 'utf8'));
 const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const membersCode = fs.readFileSync(path.join(root, 'members.js'), 'utf8');
 
 function createHarness(edits = {}, added = []) {
   const sandbox = {
@@ -34,6 +35,7 @@ function createHarness(edits = {}, added = []) {
     location: { hash: '#Members' }
   };
   vm.createContext(sandbox);
+  vm.runInContext(membersCode, sandbox);
 
   // Extract from app.js up to render()
   const startIdx = appCode.indexOf('const tabAliases=');

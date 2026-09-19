@@ -1,6 +1,6 @@
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
 const root=path.resolve(__dirname,'..');
-const allowed=new Set(['index.html','session-core.js','search-core.js','identity.js','offline.js','logbook.js','windowed-list.js','app.js','styles.css','workbook.json','sw.js']);
+const allowed=new Set(['index.html','session-core.js','search-core.js','identity.js','offline.js','logbook.js','windowed-list.js','members.js','app.js','styles.css','members.css','workbook.json','sw.js']);
 const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json'};
 function createServer(){return http.createServer((req,res)=>{
  let name;try{name=decodeURIComponent(new URL(req.url,'http://localhost').pathname).replace(/^\//,'')||'index.html'}catch{res.writeHead(400).end();return}

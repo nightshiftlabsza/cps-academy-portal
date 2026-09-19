@@ -1,6 +1,8 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { createServer } = require('../scripts/serve.cjs');
+const workbook = require('../workbook.json');
+const { injectAuth } = require('./test-auth-helper.cjs');
 const { chromium } = require('playwright-core');
 
 (async () => {
@@ -14,6 +16,12 @@ const { chromium } = require('playwright-core');
     // 1. Responsive checks across 1440, 820, 390, 320px
     for (const width of [1440, 820, 390, 320]) {
       const context = await browser.newContext({ viewport: { width, height: 900 } });
+      await injectAuth(context, 'mock');
+      await context.route('**/api/sync', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ schemaVersion: 1, workbook })
+      }));
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', e => errors.push(e.message));
@@ -60,6 +68,12 @@ const { chromium } = require('playwright-core');
 
     // 2. Functional & Interaction checks at 1440px
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await injectAuth(ctx, 'mock');
+    await ctx.route('**/api/sync', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ schemaVersion: 1, workbook })
+    }));
     const p = await ctx.newPage();
     await p.goto(base + '/#Members');
     await p.locator('#page h1').waitFor();

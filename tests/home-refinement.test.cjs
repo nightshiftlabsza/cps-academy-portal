@@ -8,6 +8,7 @@ const SessionCore = require('../session-core.js');
 
 const root = path.resolve(__dirname, '..');
 const appCode = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const membersCode = fs.readFileSync(path.join(root, 'members.js'), 'utf8');
 
 function createMockElement() {
   return {
@@ -150,7 +151,7 @@ function setupTestEnvironment(customWorkspace = {}, customRecords = {}) {
   context.testDb = context.db;
   context.testWorkspace = context.workspace;
   vm.createContext(context);
-  const setupScript = appCode + `
+  const setupScript = membersCode + '\n' + appCode + `
     ; db = this.testDb;
     workspace = { ...workspace, ...this.testWorkspace };
   `;

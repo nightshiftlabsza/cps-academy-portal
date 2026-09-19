@@ -5,11 +5,14 @@ const SHELL_ASSETS = [
   '/',
   '/index.html',
   '/styles.css',
+  '/members.css',
   '/session-core.js',
   '/search-core.js',
   '/identity.js',
   '/offline.js',
   '/logbook.js',
+  '/windowed-list.js',
+  '/members.js',
   '/app.js',
   '/workbook.json'
 ];

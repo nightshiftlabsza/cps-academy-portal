@@ -169,12 +169,14 @@ test('Sprint Integration Gate: 7. Static Asset Allowlist and security boundaries
   const ALLOWED_ASSETS = [
     'index.html',
     'styles.css',
+    'members.css',
     'session-core.js',
     'search-core.js',
     'identity.js',
     'offline.js',
     'logbook.js',
     'windowed-list.js',
+    'members.js',
     'app.js',
     'workbook.json',
     'sw.js'
