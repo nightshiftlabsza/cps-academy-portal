@@ -17,6 +17,9 @@
     "test:tablet": "node tests/browser-tablet.cjs",
     "test:offline": "node tests/browser-offline.cjs",
     "test:all": "npm test && npm run build && node tests/browser-performance.cjs && node tests/browser-tablet.cjs",
+    "qa:feature": "npm run build && npm test && node tests/browser-home-verification.cjs && node tests/browser-operations.cjs",
+    "qa:full": "npm run build && npm test && node tests/browser-offline.cjs && node tests/browser-home-verification.cjs && node tests/browser-operations.cjs && node tests/browser-tablet.cjs && node tests/browser-performance.cjs && npm run test:mobile",
+    "visual:capture": "node scripts/capture-view.cjs",
     "compile:logbooks": "node scripts/compile-logbooks.cjs"
   }
 }

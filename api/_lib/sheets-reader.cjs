@@ -323,24 +323,7 @@ function parseImportantLinks(rows) {
 }
 
 // Find live row in Google Sheets matching stableId regardless of shifting
-async function findRowByStableId(sheetId, tabName, targetStableId) {
-  const creds = getCredentials();
-  const token = await getAccessToken(creds);
-
-  let range = '';
-  if (tabName === 'Morning Report') range = "'Morning Report'!A1:S";
-  else if (tabName === 'CPS Academy VMRs') range = "'CPS Academy VMRs'!A1:I";
-  else if (tabName === 'OrgStructure' || tabName === 'Members') range = "'OrgStructure'!A1:P";
-  else if (tabName === 'Important links') range = "'Important links'!A1:C";
-  else range = `'${tabName}'!A1:Z`;
-
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueRenderOption=FORMATTED_VALUE`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) throw new Error(`Failed to scan rows for stableId: ${res.statusText}`);
-
-  const data = await res.json();
-  const rows = data.values || [];
-
+function scanRowsForStableId(rows, tabName, targetStableId) {
   const seen = new Set();
   const startIndex = tabName === 'Morning Report' ? 6 : tabName === 'CPS Academy VMRs' ? 3 : tabName === 'Members' ? 56 : (tabName === 'Important links' ? 1 : 2);
 
@@ -402,7 +385,73 @@ async function findRowByStableId(sheetId, tabName, targetStableId) {
     }
   }
 
+  // Second pass: fallback matching for Morning Report if session time was modified
+  if (tabName === 'Morning Report' && targetStableId.startsWith('mr-')) {
+    const targetParts = targetStableId.split('-');
+    if (targetParts.length >= 5) {
+      const targetDate = `${targetParts[1]}-${targetParts[2]}-${targetParts[3]}`;
+      const targetType = targetParts[4];
+      const seen2 = new Set();
+      const candidates = [];
+      for (let i = startIndex; i < rows.length; i++) {
+        const rowNum = i + 1;
+        const r = rows[i] || [];
+        if (!r.some((c) => String(c).trim())) continue;
+        const rawDate = r[0] || '';
+        const dateVal = normalizeDate(rawDate);
+        const fields = {
+          _cps_id: String(r[18] ?? '').trim(),
+          Date: dateVal,
+          'Pacific time (source)': String(r[1] ?? '').trim(),
+          Type: String(r[3] ?? '').trim()
+        };
+        const rowStableId = generateDeterministicId('Morning Report', fields, seen2);
+        const currentParts = rowStableId.split('-');
+        if (currentParts.length >= 5) {
+          const currentDate = `${currentParts[1]}-${currentParts[2]}-${currentParts[3]}`;
+          const currentType = currentParts[4];
+          if (targetDate === currentDate && targetType === currentType) {
+            candidates.push({
+              rowNumber: rowNum,
+              stableId: rowStableId,
+              values: r
+            });
+          }
+        }
+      }
+
+      // Strict safety: exactly one candidate succeeds; multiple candidates or 0 fail safely
+      if (candidates.length === 1) {
+        return candidates[0];
+      }
+      if (candidates.length > 1) {
+        console.warn(`Ambiguous row match for stableId "${targetStableId}": found ${candidates.length} candidates. Failing safely without guessing.`);
+        return null;
+      }
+    }
+  }
+
   return null;
+}
+
+async function findRowByStableId(sheetId, tabName, targetStableId) {
+  const creds = getCredentials();
+  const token = await getAccessToken(creds);
+
+  let range = '';
+  if (tabName === 'Morning Report') range = "'Morning Report'!A1:S";
+  else if (tabName === 'CPS Academy VMRs') range = "'CPS Academy VMRs'!A1:I";
+  else if (tabName === 'OrgStructure' || tabName === 'Members') range = "'OrgStructure'!A1:P";
+  else if (tabName === 'Important links') range = "'Important links'!A1:C";
+  else range = `'${tabName}'!A1:Z`;
+
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}?valueRenderOption=FORMATTED_VALUE`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`Failed to scan rows for stableId: ${res.statusText}`);
+
+  const data = await res.json();
+  const rows = data.values || [];
+  return scanRowsForStableId(rows, tabName, targetStableId);
 }
 
 function loadBaselineWorkbook() {
@@ -512,6 +561,7 @@ module.exports = {
   slugify,
   generateDeterministicId,
   findRowByStableId,
+  scanRowsForStableId,
   parseMorningReport,
   parseVMRs,
   parseOrgStructure,

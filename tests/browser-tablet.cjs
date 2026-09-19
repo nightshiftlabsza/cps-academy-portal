@@ -225,7 +225,11 @@ async function runWithCDP(baseUrl) {
       });
       await cdp.send('Page.navigate', { url: `${baseUrl}/#Morning%20Report` });
       for (let i = 0; i < 40; i++) {
-        const loaded = await cdp.evaluate(() => !!document.querySelector('.matrix-container'));
+        const loaded = await cdp.evaluate(() => {
+          const btn = document.querySelector('[data-set-view="matrix"]');
+          if (btn) btn.click();
+          return !!document.querySelector('.matrix-container');
+        });
         if (loaded) break;
         await new Promise((r) => setTimeout(r, 100));
       }
@@ -250,6 +254,10 @@ async function runWithPlaywright(baseUrl) {
       await injectAuth(context, 'admin');
       const page = await context.newPage();
       await page.goto(baseUrl + '/#Morning%20Report');
+      await page.locator('#page h1').waitFor();
+      if (await page.locator('[data-set-view="matrix"]').count()) {
+        await page.locator('[data-set-view="matrix"]').click();
+      }
       await page.locator('.matrix-container').waitFor();
       await runAssertionsOnPage(width, async (fn) => page.evaluate(fn));
       await context.close();

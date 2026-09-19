@@ -438,6 +438,44 @@ function getDefaultScheduleWeekStart(){
   const b=typeof SessionCore!=='undefined'&&SessionCore.getWeekBounds?SessionCore.getWeekBounds(t):null;
   return b?b.start:'2026-09-07';
 }
+let mrMonthSelectedWeekIndex = null;
+let mrMonthExpandedId = null;
+
+function getMonthCalendarWeeks(yearMonth){
+  const [yStr, mStr] = (yearMonth || getDefaultScheduleMonth()).split('-');
+  const year = parseInt(yStr, 10);
+  const month = parseInt(mStr, 10);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const weeks = [];
+  let curWeek = null;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const d = new Date(`${dateStr}T12:00:00Z`);
+    const dayOfWeek = d.getUTCDay(); // 0 = Sun, 1 = Mon ...
+    if (!curWeek || dayOfWeek === 1) {
+      if (curWeek) weeks.push(curWeek);
+      curWeek = { index: weeks.length + 1, startDate: dateStr, endDate: dateStr, days: [dateStr] };
+    } else {
+      curWeek.endDate = dateStr;
+      curWeek.days.push(dateStr);
+    }
+  }
+  if (curWeek) weeks.push(curWeek);
+  return weeks;
+}
+
+function formatMonthWeekLabel(startDateStr, endDateStr){
+  const sObj = new Date(`${startDateStr}T12:00:00Z`);
+  const eObj = new Date(`${endDateStr}T12:00:00Z`);
+  const sMonth = sObj.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+  const eMonth = eObj.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+  const sDay = sObj.getUTCDate();
+  const eDay = eObj.getUTCDate();
+  if (sMonth === eMonth) {
+    return `${sMonth} ${sDay} – ${eDay}`;
+  }
+  return `${sMonth} ${sDay} – ${eMonth} ${eDay}`;
+}
 let db={},tab='Home',query='',searchPage=0,filter='All',facet='',sort='source',page=0,mode='cards',showAll=false,selected=null,editingTab='',quickClaimRecord=null,quickClaimRole='',issueFilter='All',issueSectionFilter='',workspace={edits:{},added:[],favorites:[],history:[],recent:[],issues:[],isAdmin:false,role:'VMR Leadership'},storageIssue=false;
 let memberSearchQuery='',memberCohortFilter='all',memberCountryFilter='all',memberSort='source',memberExpandedCohorts=new Set(['participants','core','leaders','inactive','other']),memberExpandedDetails=new Set(),memberShowStructural=false;
 let residencySearchQuery='',residencyShowSource=false,residencyExpandedMonths=new Set(['October','November','December','January','February']);
@@ -1104,7 +1142,7 @@ function nav(){
     }
   }
 }
-function header(t,sub){return `<div class="page-heading"><div><p class="eyebrow">CPS Academy · private workspace</p><h1>${esc(t)}</h1><p>${esc(sub)}</p></div></div>`}
+function header(t,sub,options={}){return `<div class="page-heading"><div>${options.hideEyebrow?'':`<p class="eyebrow">CPS Academy · private workspace</p>`}<h1>${esc(t)}</h1><p>${esc(sub)}</p></div></div>`}
 function banner(){return `<div class="mobile-snapshot">Workbook snapshot · saved on this device <button class="text-button" data-go="Workspace">Backups &amp; status</button></div>`+`<div class="snapshot-note"><span class="snapshot-dot"></span><span>Workbook snapshot (2026-09-06) · local changes saved on this device · no live Sheets connection · <button class="text-button" data-go="Workspace">Backups & activity</button></span></div>`}
 function actionButtons(r,t){return `${calendarButton(r,t)}<button class="button primary small" data-open="${esc(r.id)}" data-area="${esc(t)}" data-action="${t==='Morning Report'?'staff':'view'}">${t==='Morning Report'?'Staff session':'Open details'}</button><button class="icon-button star ${workspace.favorites.includes(r.id)?'is-starred':''}" aria-label="${workspace.favorites.includes(r.id)?'Unpin':'Pin'} record" data-star="${esc(r.id)}">${workspace.favorites.includes(r.id)?'★':'☆'}</button>`}
 function card(r,t=tab,inSearch=false){const f=r.fields;let body='',tag='';
@@ -1559,11 +1597,11 @@ function renderMyCommitmentsWidget() {
       timeHtml = `
        <div class="mr-tz-popover-anchor" tabindex="0" role="button" aria-haspopup="true" title="Click to view timezone breakdown (Local / ET / PT)">
         <span class="mr-clock-icon" aria-hidden="true">🕒</span>
-        <span class="mr-time-primary">${esc(tzBreakdown.primaryText)}</span>
+        ${isScheduleEditor() ? `<button type="button" class="mr-time-edit-trigger" data-edit-time="${esc(c.sessionId)}" title="Click to edit session time">${esc(tzBreakdown.primaryText)}</button>` : `<span class="mr-time-primary">${esc(tzBreakdown.primaryText)}</span>`}
         ${disclosureDetails}
        </div>`;
     } else {
-      timeHtml = `<span>🕒</span> <span>${esc(tzBreakdown.primaryText || c.timeLabel)}</span>`;
+      timeHtml = `<span>🕒</span> <span>${isScheduleEditor() ? `<button type="button" class="mr-time-edit-trigger" data-edit-time="${esc(c.sessionId)}" title="Click to edit session time">${esc(tzBreakdown.primaryText || c.timeLabel)}</button>` : esc(tzBreakdown.primaryText || c.timeLabel)}</span>`;
     }
 
     const titleMeta = typeof SessionCore !== 'undefined' && SessionCore.getSessionDisplayTitle
@@ -1762,11 +1800,6 @@ function home(){
    <div class="mr-section-head">
     <div class="mr-section-title-wrap">
       <h2>Next 7 VMR sessions</h2>
-      <span class="mr-section-sub">· Consecutive clinical case schedule</span>
-    </div>
-    <div class="mr-legend">
-     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--warning-fg)"></span> Open Slot</span>
-     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--urgent-fg)"></span> Canceled/Blackout</span>
     </div>
    </div>
    <div class="mr-stream">${next7.map(r=>editorialCard(r)).join('')}</div>
@@ -1775,7 +1808,6 @@ function home(){
    <div class="mr-section-head">
     <div class="mr-section-title-wrap">
       <h2>Next 7 VMR sessions</h2>
-      <span class="mr-section-sub">· Consecutive clinical case schedule</span>
     </div>
    </div>
    <div class="empty-state panel">
@@ -1792,7 +1824,7 @@ function home(){
 
  const linksCard=`<article class="panel op-card essential-resources-card" id="home-essential-resources"><div class="op-card-head"><span class="tag">Resources</span><span class="op-sub">${pinnedLinks.length?`${pinnedLinks.length} pinned`:'Core Drives & Guidelines'}</span></div><div class="op-card-body"><small class="op-label">Important Links</small><h3 class="op-title">Essential Resources</h3><div class="quick-links-grid">${displayLinks.map(r=>{const u=urls(r,'Link')[0]||r.links?.Link||'';return u?`<a class="button secondary small quick-resource-btn" href="${esc(u)}" target="_blank" rel="noopener noreferrer">↗ ${esc(r.fields.Resource)}</a>`:`<button class="button secondary small quick-resource-btn" data-open="${esc(r.id)}" data-area="Important links">${esc(r.fields.Resource)}</button>`;}).join('')}</div></div><div class="op-card-foot"><button class="button secondary small" data-go="Important links">All ${allLinks.length} resources →</button></div></article>`;
 
- $('#page').innerHTML=`<div class="home-container" id="Home">${header('Home Dashboard','Operational status, upcoming sessions and active Academy resources.')}${banner()}${commitmentsHtml}${birthdaysHtml}${next7VMRsHtml}${leaderHtml}<section class="operational-grid">${linksCard}</section></div>`;
+ $('#page').innerHTML=`<div class="home-container" id="Home">${header('Home Dashboard','Operational status, upcoming sessions and active Academy resources.',{hideEyebrow:true})}${commitmentsHtml}${birthdaysHtml}${next7VMRsHtml}${leaderHtml}<section class="operational-grid">${linksCard}</section></div>`;
 }
 function filtered(){
   let rr=records().filter(r=>Object.values(r.fields).join(' ').toLowerCase().includes((sectionQuery||query).toLowerCase()));
@@ -2152,15 +2184,50 @@ function bindWeekNavigatorEvents() {
     };
   });
   document.querySelectorAll('[data-month-jump]').forEach(btn => {
-    btn.onclick = () => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
       const targetMonth = btn.dataset.monthJump;
       if (targetMonth) {
         mrScheduleMonth = targetMonth;
+        // On month switch: if switching to current month, select week with today; else select Week 1
+        const defM = getDefaultScheduleMonth();
+        const weeks = getMonthCalendarWeeks(targetMonth);
+        if (targetMonth === defM) {
+          const tIso = typeof today === 'function' ? today() : '2026-09-08';
+          const matchIdx = weeks.findIndex(w => w.days.includes(tIso));
+          mrMonthSelectedWeekIndex = matchIdx !== -1 ? matchIdx + 1 : 1;
+        } else {
+          mrMonthSelectedWeekIndex = 1;
+        }
+        mrMonthExpandedId = null;
         saveSectionState('Morning Report');
         render();
       }
     };
   });
+
+  document.querySelectorAll('[data-month-week-index]').forEach(btn => {
+    btn.onclick = () => {
+      const idx = parseInt(btn.dataset.monthWeekIndex, 10);
+      if (!Number.isNaN(idx)) {
+        mrMonthSelectedWeekIndex = idx;
+        mrMonthExpandedId = null; // Reset accordion expansion on week switch
+        render();
+      }
+    };
+  });
+
+  const mobileMonthTrigger = document.querySelector('#mr-mobile-month-trigger');
+  const mobileMonthDropdown = document.querySelector('#mr-mobile-month-dropdown');
+  if (mobileMonthTrigger && mobileMonthDropdown) {
+    mobileMonthTrigger.onclick = (e) => {
+      e.stopPropagation();
+      const isClosed = mobileMonthDropdown.style.display === 'none';
+      mobileMonthDropdown.style.display = isClosed ? 'block' : 'none';
+      mobileMonthTrigger.setAttribute('aria-expanded', String(isClosed));
+    };
+  }
+
   const monthSel = document.querySelector('#mr-month-select');
   const yearSel = document.querySelector('#mr-year-select');
   if (monthSel && yearSel) {
@@ -2169,6 +2236,16 @@ function bindWeekNavigatorEvents() {
       const m = monthSel.value;
       if (y && m) {
         mrScheduleMonth = `${y}-${m}`;
+        const defM = getDefaultScheduleMonth();
+        const weeks = getMonthCalendarWeeks(mrScheduleMonth);
+        if (mrScheduleMonth === defM) {
+          const tIso = typeof today === 'function' ? today() : '2026-09-08';
+          const matchIdx = weeks.findIndex(w => w.days.includes(tIso));
+          mrMonthSelectedWeekIndex = matchIdx !== -1 ? matchIdx + 1 : 1;
+        } else {
+          mrMonthSelectedWeekIndex = 1;
+        }
+        mrMonthExpandedId = null;
         saveSectionState('Morning Report');
         render();
       }
@@ -7833,11 +7910,11 @@ function editorialCard(r){
   timeHtml = `
    <div class="mr-tz-popover-anchor" tabindex="0" role="button" aria-haspopup="true" title="Click to view timezone breakdown (Local / ET / PT)">
     <span class="mr-clock-icon" aria-hidden="true">🕒</span>
-    <span class="mr-time-primary">${esc(tzBreakdown.primaryText)}</span>
+    ${isScheduleEditor() ? `<button type="button" class="mr-time-edit-trigger" data-edit-time="${esc(r.id)}" title="Click to edit session time">${esc(tzBreakdown.primaryText)}</button>` : `<span class="mr-time-primary">${esc(tzBreakdown.primaryText)}</span>`}
     ${disclosureDetails}
    </div>`;
  } else {
-  timeHtml = `<span>🕒</span> <span>${esc(tzBreakdown.primaryText)}</span>`;
+  timeHtml = `<span>🕒</span> <span>${isScheduleEditor() ? `<button type="button" class="mr-time-edit-trigger" data-edit-time="${esc(r.id)}" title="Click to edit session time">${esc(tzBreakdown.primaryText)}</button>` : esc(tzBreakdown.primaryText)}</span>`;
  }
 
   let noteHtml = '';
@@ -7883,129 +7960,156 @@ function agendaView(rr){
    return `<section class="agenda-view"><section class="panel empty-state"><h3>No sessions found</h3><p class="muted">No Morning Report sessions match your active filters.</p></section></section>`;
  }
 
-function renderMonthlyScheduleRow(r, index) {
+function renderCompactMonthCard(r, index, options = {}) {
   const dStr = recordDate(r);
-  let dayBadge = 'TBD';
-  let dateFormatted = dStr || 'Date TBD';
+  let dayNum = '?', wday = 'TBD', mon = '', dateFormatted = dStr || 'Date TBD';
   if (dStr) {
     const dObj = new Date(dStr + 'T12:00:00Z');
     if (!Number.isNaN(dObj.getTime())) {
-      dayBadge = dObj.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).toUpperCase();
+      dayNum = dObj.getUTCDate();
+      wday = dObj.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }).toUpperCase();
+      mon = dObj.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' }).toUpperCase();
       dateFormatted = dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
     }
   }
 
   const userZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : null;
   const tzBreakdown = SessionCore.formatSessionTimeBreakdown(r, userZone);
+  const fac = (r.fields.Facilitator || '').trim();
   const isCanceled = isSessionCancelled(r);
   const gaps = mrGaps(r);
+  const railClass = editorialCardRail(r);
+  const sessionType = r.fields.Type || 'Morning Report';
+
+  const rawTopic = (r.fields['Topic / Case'] || '').trim();
+  const rawDetails = (r.fields['Details'] || '').trim();
+  const rawType = (r.fields['Type'] || '').trim();
+  const rawNotes = (r.fields['Notes'] || '').trim();
+
+  let titleText = '';
+  if (rawTopic && !/^(tbd|none|-|—|\?)$/i.test(rawTopic)) {
+    titleText = rawTopic;
+  } else if (rawDetails && !/^(tbd|none|-|—|\?)$/i.test(rawDetails)) {
+    titleText = rawDetails;
+  } else if (rawType && !/^(tbd|none|-|—|\?)$/i.test(rawType)) {
+    titleText = rawType;
+  } else {
+    titleText = 'Virtual Morning Report';
+  }
 
   const titleMeta = typeof SessionCore !== 'undefined' && SessionCore.getSessionDisplayTitle 
     ? SessionCore.getSessionDisplayTitle(r) 
-    : { mainTitle: r.fields['Topic / Case'] || r.fields.Type || 'Virtual Morning Report', sessionTypeTag: '', hasDistinctTag: false };
-  const rawType = r.fields.Type || 'Virtual Morning Report';
-  const normType = typeof SessionCore !== 'undefined' && SessionCore.normalizeSessionTypeName 
-    ? SessionCore.normalizeSessionTypeName(rawType) 
-    : rawType;
-  const typeTag = (titleMeta.hasDistinctTag && titleMeta.sessionTypeTag) 
-    ? titleMeta.sessionTypeTag 
-    : (titleMeta.mainTitle.toLowerCase() !== normType.toLowerCase() ? normType : '');
+    : { mainTitle: titleText, sessionTypeTag: sessionType, hasDistinctTag: false };
+  const typeTagHtml = titleMeta.hasDistinctTag && titleMeta.sessionTypeTag ? `<span class="mr-card-type-tag">${esc(titleMeta.sessionTypeTag)}</span>` : '';
 
   let timeHtml = '';
   if (isCanceled) {
     timeHtml = '<span class="mr-time-canceled">⊘ No Session</span>';
   } else if (tzBreakdown.hasDisclosure) {
-    timeHtml = `<div class="mr-tz-popover-anchor" tabindex="0" role="button" aria-haspopup="true" title="Click to view timezone breakdown (Local / ET / PT)">
-      <span class="mr-clock-icon" aria-hidden="true">🕒</span>
-      <span class="mr-time-primary">${esc(tzBreakdown.primaryText)}</span>
-      <span class="mr-tz-details">
-        <span class="mr-tz-line"><strong>Your time:</strong> ${esc(tzBreakdown.local ? tzBreakdown.local.text : tzBreakdown.eastern.text + ' (ET default)')}</span>
-        <span class="mr-tz-line"><strong>Eastern:</strong> ${esc(tzBreakdown.eastern.text)}</span>
-        <span class="mr-tz-line"><strong>Pacific:</strong> ${esc(tzBreakdown.pacific.text)}</span>
-      </span>
+    timeHtml = `
+      <div class="mr-tz-popover-anchor" tabindex="0" role="button" aria-haspopup="true" title="Click to view timezone breakdown (Local / ET / PT)">
+        <span class="mr-clock-icon" aria-hidden="true">🕒</span>
+        ${isScheduleEditor() ? `<button type="button" class="mr-time-edit-trigger" data-edit-time="${esc(r.id)}" title="Click to edit session time">${esc(tzBreakdown.primaryText)}</button>` : `<span class="mr-time-primary">${esc(tzBreakdown.primaryText)}</span>`}
+        <span class="mr-tz-details">
+          <span class="mr-tz-line"><strong>Your time:</strong> ${esc(tzBreakdown.local ? tzBreakdown.local.text : tzBreakdown.eastern.text + ' (ET default)')}</span>
+          <span class="mr-tz-line"><strong>Eastern:</strong> ${esc(tzBreakdown.eastern.text)}</span>
+          <span class="mr-tz-line"><strong>Pacific:</strong> ${esc(tzBreakdown.pacific.text)}</span>
+        </span>
+      </div>`;
+  } else {
+    timeHtml = `<span>🕒</span> <span>${isScheduleEditor() ? `<button type="button" class="mr-time-edit-trigger" data-edit-time="${esc(r.id)}" title="Click to edit session time">${esc(tzBreakdown.primaryText)}</button>` : esc(tzBreakdown.primaryText)}</span>`;
+  }
+
+  let noteHtml = '';
+  if (rawNotes && !/^(tbd|none|-|—|\?)$/i.test(rawNotes)) {
+    noteHtml = `<div class="mr-session-note"><em>${esc(rawNotes)}</em><button type="button" class="mr-note-edit-trigger" data-edit-note="${esc(r.id)}" title="Edit session note">✎</button></div>`;
+  } else {
+    noteHtml = `<div class="mr-note-hover-wrap"><button type="button" class="mr-note-edit-trigger" data-edit-note="${esc(r.id)}" title="Add session note">+ Note</button></div>`;
+  }
+
+  const staffingCells = ['Facilitator', 'Presenter', 'Scribe', 'Teaching Points'].map(role => {
+    const isVacant = gaps.includes(role);
+    const roleLabel = role === 'Teaching Points' ? 'TEACHING POINTS' : role.toUpperCase();
+    return `
+      <div class="mr-role-cell mr-month-role-cell${isVacant ? ' role-cell-vacant is-vacant' : ''}">
+        <span class="mr-role-label${isVacant ? ' role-vacant' : ''}">${roleLabel}</span>
+        <div class="mr-role-value mr-month-role-value">${staffingSlot(r, role, { hideAdd: true })}</div>
+      </div>`;
+  }).join('');
+
+  const bypassMessage = /grand rounds/i.test(fac + rawNotes + sessionType) ? 'Session team bypassed for Grand Rounds' :
+    (/recess/i.test(fac + rawNotes + sessionType) ? 'Session team bypassed for Recess' : 'Session cancelled — team not required');
+
+  const staffingZone = (isCanceled || (gaps.length === 4 && /none|recess/i.test(fac))) ? `
+    <div class="mr-card-bypassed mr-month-card-bypassed">
+      <span>${esc(bypassMessage)}</span>
+    </div>` : `
+    <div class="mr-card-staffing mr-month-card-staffing">
+      ${staffingCells}
     </div>`;
-  } else {
-    timeHtml = `<span>🕒 ${esc(tzBreakdown.primaryText)}</span>`;
-  }
 
-  let roleCells = '';
-  if (isCanceled) {
-    roleCells = `<td colspan="4" class="mr-cell-canceled"><span class="mr-table-canceled-badge">Session cancelled — team not required</span></td>`;
-  } else {
-    roleCells = ['Facilitator', 'Presenter', 'Scribe', 'Teaching Points'].map(role => {
-      const isVacant = gaps.includes(role);
-      const roleLabel = role === 'Teaching Points' ? 'TEACHING POINTS' : role.toUpperCase();
-      return `<td class="mr-table-role-cell${isVacant ? ' is-vacant role-cell-vacant' : ''}">
-        <div class="mr-table-role-wrap">
-          <span class="mr-table-role-label${isVacant ? ' role-vacant' : ''}">${roleLabel}</span>
-          <div class="mr-table-role-content">${staffingSlot(r, role, { hideAdd: true })}</div>
+  const isExpanded = options.isExpanded || (mrMonthExpandedId === r.id);
+
+  return `
+    <article class="mr-card mr-month-card${isExpanded ? ' is-mobile-expanded' : ''}" data-record-id="${esc(r.id)}">
+      <div class="mr-card-rail ${railClass}"></div>
+
+      <!-- Mobile Collapsed / Accordion Header -->
+      <div class="mr-month-mobile-toggle" role="button" tabindex="0" data-toggle-month-session="${esc(r.id)}" aria-expanded="${isExpanded ? 'true' : 'false'}" aria-label="Toggle details for ${esc(titleMeta.mainTitle)} on ${esc(dateFormatted)}">
+        <div class="mr-month-mobile-summary">
+          <div class="mr-month-mobile-date-line">
+            <span class="mr-month-mobile-date">${esc(dayNum)} ${esc(wday)} · ${esc(mon)}</span>
+            <div class="mr-month-mobile-time">${timeHtml}</div>
+          </div>
+          <div class="mr-month-mobile-title-line">
+            <span class="mr-month-mobile-title">${esc(titleMeta.mainTitle)}</span>
+            <span class="mr-month-mobile-chevron" aria-hidden="true">${isExpanded ? '▲' : '›'}</span>
+          </div>
         </div>
-      </td>`;
-    }).join('');
-  }
+      </div>
 
-  return `<tr class="mr-schedule-row${gaps.length ? ' has-open-role' : ''}" data-record-id="${esc(r.id)}">
-    <td class="mr-schedule-col-date">
-      <div class="mr-table-date-wrap">
-        <span class="mr-table-weekday">${esc(dayBadge)}</span>
-        <span class="mr-table-date">${esc(dateFormatted)}</span>
-        <div class="mr-table-time">${timeHtml}</div>
+      <!-- Desktop Date Block -->
+      <div class="mr-card-date mr-month-card-date">
+        <div class="mr-card-day-row">
+          <div class="mr-card-day-num${gaps.length ? ' day-warning' : ''}">${dayNum}</div>
+          <div class="mr-card-day-meta">
+            <span class="mr-card-weekday">${esc(wday)}</span>
+            <span class="mr-card-month">${esc(mon)}</span>
+          </div>
+        </div>
+        <div class="mr-card-time">${timeHtml}</div>
       </div>
-    </td>
-    <td class="mr-schedule-col-session">
-      <div class="mr-table-session-wrap">
-        ${typeTag ? `<span class="mr-card-type-tag">${esc(typeTag)}</span>` : ''}
-        <button type="button" class="mr-table-session-title" data-open="${esc(r.id)}" data-area="Morning Report" title="View details for ${esc(titleMeta.mainTitle)}">${esc(titleMeta.mainTitle)}</button>
-        ${r.fields.Notes && !/^(tbd|none|-|—|\?)$/i.test(r.fields.Notes) ? `<span class="mr-table-note"><em>${esc(r.fields.Notes)}</em></span>` : ''}
+
+      <!-- Content Block (Desktop & Mobile Expanded) -->
+      <div class="mr-card-content mr-month-card-content">
+        ${typeTagHtml ? `<div class="mr-card-tags">${typeTagHtml}</div>` : ''}
+        <h3 class="mr-card-title"><button type="button" class="mr-card-title-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View details for ${esc(titleMeta.mainTitle)}">${esc(titleMeta.mainTitle)}</button></h3>
+        ${noteHtml}
       </div>
-    </td>
-    ${roleCells}
-  </tr>`;
+
+      <!-- Staffing Zone (Desktop & Mobile Expanded) -->
+      ${staffingZone}
+
+      <!-- Actions Button -->
+      <div class="mr-card-actions mr-month-card-actions">
+        <button type="button" class="icon-button mr-card-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button>
+      </div>
+    </article>`;
 }
 
- // Next 7 VMRs stream (crosses week boundaries, always chronologically next 7)
- const next7=getNextSevenVMRs();
- const next7Html=next7.length?`
-  <section style="display:flex;flex-direction:column;gap:10px;">
-   <div class="mr-section-head">
-    <div class="mr-section-title-wrap">
-      <h2>Next 7 VMR Sessions</h2>
+  // Next 7 VMRs stream (crosses week boundaries, always chronologically next 7)
+  const next7 = getNextSevenVMRs();
+  const next7Html = next7.length ? `
+   <section style="display:flex;flex-direction:column;gap:10px;">
+    <div class="mr-section-head">
+     <div class="mr-section-title-wrap">
+       <h2>Next 7 VMR Sessions</h2>
+     </div>
     </div>
-    <div class="mr-legend">
-     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--warning-fg)"></span> Needs volunteers</span>
-     <span class="mr-legend-item"><span class="mr-legend-dot" style="background:var(--urgent-fg)"></span> Canceled/Blackout</span>
-    </div>
-   </div>
-   <div class="mr-stream">${next7.map(r=>editorialCard(r)).join('')}</div>
-  </section>`:'';
+    <div class="mr-stream">${next7.map(r => editorialCard(r)).join('')}</div>
+   </section>` : '';
 
-  // Tablet and mobile (<1280px) preserve weekly staffing master roster
-  const isDesktop = typeof window !== 'undefined' && (window.innerWidth || 0) >= 1280;
-  const isSingleWeek = mrScheduleRangeMode !== 'all';
-  const weekRows = weeks.length ? weeks.flatMap(w => w.records.map((r, i) => renderMatrixItem({type:'record', record:r}, i))).join('') : '<tr><td colspan="7" style="text-align:center;padding:16px;">No dated sessions scheduled for this week.</td></tr>';
-  const weekSessionsCount = weeks.flatMap(w=>w.records).length;
-  const isFiltered = (filter && !['All', 'Upcoming', 'This Week'].includes(filter)) || gapsOnly || mySessionsOnly || Boolean(query && query.trim()) || Boolean(sectionQuery && sectionQuery.trim()) || Boolean(facet) || Boolean(secondaryScope && secondaryScope !== 'All');
-  const countDisplayHtml = isFiltered ? `<div style="font-size:12px;color:var(--text-muted);">Showing ${weekSessionsCount} Session${weekSessionsCount===1?'':'s'}</div>` : '';
-  const lowerStaffingTable = (!isDesktop && isSingleWeek) ? `
-    <section class="agenda-staffing-section" style="margin-top:16px;">
-      <div class="agenda-staffing-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <div>
-          <h3 class="agenda-staffing-title" style="margin:0;font-size:16px;font-weight:600;">Weekly Staffing Master Roster</h3>
-          <p class="muted" style="margin:2px 0 0 0;font-size:12px;">Consolidated institutional staffing audit matrix with role verification markers.</p>
-        </div>
-        ${countDisplayHtml}
-      </div>
-      <div class="matrix-card">
-        <div class="matrix-container">
-          <table class="matrix-table">
-            <thead><tr>${['Date / Day','Session / Type','Facilitator','Presenter','Scribe','Teaching Points','Actions'].map(x=>`<th>${x}</th>`).join('')}</tr></thead>
-            <tbody>${weekRows}</tbody>
-          </table>
-        </div>
-      </div>
-    </section>` : '';
-
-  // Monthly Schedule strictly for Desktop (>= 1280px)
+  // Monthly Schedule (Unified across Desktop and Mobile)
   const currentMonth = mrScheduleMonth || getDefaultScheduleMonth();
   const monthLabel = mrMonthLabel(currentMonth);
   const prevMonth = mrShiftMonth(currentMonth, -1);
@@ -8017,6 +8121,7 @@ function renderMonthlyScheduleRow(r, index) {
   const curYear = parseInt(curYearStr, 10);
   const curMonthNum = parseInt(curMonthNumStr, 10);
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const curMonthName = monthNames[curMonthNum - 1] || 'Current Month';
   const baseYears = [2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027];
   if (!baseYears.includes(curYear)) baseYears.push(curYear);
   const yearOptions = Array.from(new Set(baseYears)).sort((a, b) => a - b);
@@ -8052,15 +8157,54 @@ function renderMonthlyScheduleRow(r, index) {
     return 0;
   });
 
-  const monthRows = monthSessions.length ? monthSessions.map((r, i) => renderMonthlyScheduleRow(r, i)).join('') : `<tr><td colspan="6" class="mr-table-empty-cell" style="text-align:center;padding:32px 16px;color:var(--text-muted);">No sessions scheduled for ${esc(monthLabel)}.</td></tr>`;
   const monthSessionsCount = monthSessions.length;
 
-  const lowerMonthlyScheduleTable = isDesktop ? `
+  // Desktop full-month cards
+  const desktopMonthCardsHtml = monthSessions.length 
+    ? monthSessions.map((r, i) => renderCompactMonthCard(r, i, { isExpanded: true })).join('')
+    : `<div class="empty-state panel" style="text-align:center;padding:32px 16px;color:var(--text-muted);">No sessions scheduled for ${esc(monthLabel)}.</div>`;
+
+  // Mobile Calendar Weeks calculation
+  const calWeeks = getMonthCalendarWeeks(currentMonth);
+  const todayIso = typeof today === 'function' ? today() : '2026-09-08';
+
+  // Determine active mobile week
+  if (mrMonthSelectedWeekIndex === null) {
+    if (isThisMonth) {
+      const matchIdx = calWeeks.findIndex(w => w.days.includes(todayIso));
+      mrMonthSelectedWeekIndex = matchIdx !== -1 ? matchIdx + 1 : 1;
+    } else {
+      mrMonthSelectedWeekIndex = 1;
+    }
+  } else if (mrMonthSelectedWeekIndex > calWeeks.length) {
+    mrMonthSelectedWeekIndex = 1;
+  }
+
+  const activeWeekObj = calWeeks.find(w => w.index === mrMonthSelectedWeekIndex) || calWeeks[0] || { startDate: '', endDate: '', days: [] };
+  const weekRangeFormatted = formatMonthWeekLabel(activeWeekObj.startDate, activeWeekObj.endDate);
+  
+  const mobileWeekSessions = monthSessions.filter(r => {
+    const d = recordDate(r);
+    return d && activeWeekObj.days.includes(d);
+  });
+  const mobileWeekCount = mobileWeekSessions.length;
+
+  const mobileWeekCardsHtml = mobileWeekSessions.length
+    ? mobileWeekSessions.map((r, i) => renderCompactMonthCard(r, i)).join('')
+    : `<div class="empty-state panel mr-month-empty-week">No VMR sessions scheduled this week.</div>`;
+
+  const monthWeekTabsHtml = calWeeks.map(w => {
+    const isSel = w.index === mrMonthSelectedWeekIndex;
+    return `<button type="button" class="mr-month-week-tab${isSel ? ' active' : ''}" data-month-week-index="${w.index}" aria-selected="${isSel}">Week ${w.index}</button>`;
+  }).join('');
+
+  const monthlyScheduleSection = `
     <section class="mr-monthly-schedule-section" style="margin-top:24px;">
-      <div class="mr-monthly-schedule-header">
+      <!-- Desktop & Tablet Header -->
+      <div class="mr-monthly-schedule-header desktop-only-header">
         <div class="mr-monthly-schedule-title-wrap">
-          <h3 class="mr-monthly-schedule-title">Schedule</h3>
-          <span class="mr-monthly-count">${monthSessionsCount} session${monthSessionsCount===1?'':'s'}</span>
+          <h3 class="mr-monthly-schedule-title">VMR Schedule</h3>
+          <span class="mr-monthly-count">${monthLabel} · ${monthSessionsCount} session${monthSessionsCount===1?'':'s'}</span>
         </div>
         <div class="mr-monthly-nav-controls">
           <button type="button" class="mr-month-btn" data-month-jump="${esc(prevMonth)}" title="Previous month" aria-label="Previous month">‹</button>
@@ -8076,24 +8220,63 @@ function renderMonthlyScheduleRow(r, index) {
           <button type="button" class="button ${isThisMonth ? 'secondary' : 'primary'} small mr-this-month-btn" data-month-jump="${esc(thisMonth)}" ${isThisMonth?'disabled':''}>This month</button>
         </div>
       </div>
-      <div class="mr-monthly-table-card">
-        <div class="mr-monthly-table-container">
-          <table class="mr-monthly-table">
-            <thead>
-              <tr>
-                <th style="width:16%;">Date / local time</th>
-                <th style="width:24%;">Session</th>
-                <th style="width:15%;">Facilitator</th>
-                <th style="width:15%;">Presenter</th>
-                <th style="width:15%;">Scribe</th>
-                <th style="width:15%;">Teaching Points</th>
-              </tr>
-            </thead>
-            <tbody>${monthRows}</tbody>
-          </table>
+
+      <!-- Mobile-only Clean Header & Controls -->
+      <div class="mr-monthly-mobile-header mobile-only-header">
+        <div class="mr-mobile-title-row">
+          <h3 class="mr-monthly-schedule-title">VMR Schedule</h3>
+          <button type="button" class="button secondary small mr-mobile-today-btn" data-month-jump="${esc(thisMonth)}" ${isThisMonth && mrMonthSelectedWeekIndex === (calWeeks.findIndex(w => w.days.includes(todayIso)) + 1) ? 'disabled' : ''}>This month</button>
+        </div>
+
+        <div class="mr-mobile-month-bar">
+          <button type="button" class="mr-month-btn" data-month-jump="${esc(prevMonth)}" title="Previous month" aria-label="Previous month">‹</button>
+          <div class="mr-mobile-month-display">
+            <button type="button" class="mr-mobile-month-picker-trigger" id="mr-mobile-month-trigger" aria-haspopup="listbox" aria-expanded="false" title="Click to choose month">
+              <span class="mr-mobile-month-name">${esc(curMonthName)}</span>
+              <span class="mr-mobile-year-context">${curYear}</span>
+            </button>
+            <div class="mr-mobile-month-dropdown" id="mr-mobile-month-dropdown" style="display:none;" role="listbox">
+              <div class="mr-mobile-dropdown-year-bar">
+                <button type="button" class="mr-dropdown-yr-btn" data-month-jump="${esc(mrShiftMonth(currentMonth, -12))}" title="Previous year">‹</button>
+                <span class="mr-dropdown-year-label">${curYear}</span>
+                <button type="button" class="mr-dropdown-yr-btn" data-month-jump="${esc(mrShiftMonth(currentMonth, 12))}" title="Next year">›</button>
+              </div>
+              <div class="mr-mobile-dropdown-months-grid">
+                ${monthNames.map((mName, idx) => {
+                  const mNumStr = String(idx + 1).padStart(2, '0');
+                  const isCurM = idx + 1 === curMonthNum;
+                  return `<button type="button" class="mr-mobile-month-opt${isCurM ? ' selected' : ''}" data-month-jump="${curYear}-${mNumStr}">${mName}${isCurM ? ' ✓' : ''}</button>`;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+          <button type="button" class="mr-month-btn" data-month-jump="${esc(nextMonth)}" title="Next month" aria-label="Next month">›</button>
+        </div>
+
+        <!-- Mobile Week Tabs -->
+        <div class="mr-month-week-tabs-container">
+          <div class="mr-month-week-tabs" role="tablist" aria-label="Month calendar weeks">
+            ${monthWeekTabsHtml}
+          </div>
+        </div>
+
+        <!-- Mobile Active Week Date Range and Count -->
+        <div class="mr-mobile-week-meta-bar">
+          <span class="mr-mobile-week-range">${esc(weekRangeFormatted)}</span>
+          <span class="mr-mobile-week-count">${mobileWeekCount} session${mobileWeekCount===1?'':'s'}</span>
         </div>
       </div>
-    </section>` : '';
+
+      <!-- Desktop Stream (Whole Month) -->
+      <div class="mr-month-desktop-stream desktop-only-stream">
+        <div class="mr-stream mr-month-stream">${desktopMonthCardsHtml}</div>
+      </div>
+
+      <!-- Mobile Stream (Week-at-a-time) -->
+      <div class="mr-month-mobile-stream mobile-only-stream">
+        <div class="mr-stream mr-month-stream">${mobileWeekCardsHtml}</div>
+      </div>
+    </section>`;
 
   // Full week-by-week historical archive view
   const weekContent = (mrScheduleRangeMode === 'all') ? weeks.map(w=>{
@@ -8111,7 +8294,7 @@ function renderMonthlyScheduleRow(r, index) {
     return `<section class="agenda-week panel"><div class="agenda-week-head"><h3>${esc(weekLabel(w.start,w.end))}</h3><span>${w.records.length} sessions</span></div>${dayGroupsHtml}</section>`;
   }).join('') : '';
 
-  return `<section class="agenda-view">${next7Html}${isDesktop ? lowerMonthlyScheduleTable : lowerStaffingTable}${weekContent}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
+  return `<section class="agenda-view">${next7Html}${monthlyScheduleSection}${weekContent}${unresolved.length?`<section class="panel unresolved-panel"><h2>Unresolved dates (${unresolved.length})</h2><p class="muted">These records have unrecognised or ambiguous source dates.</p><div class="agenda-session-list">${unresolved.map(r=>agendaCard(r,true)).join('')}</div></section>`:''}</section>`;
 }
 function agendaCard(r,isUnresolved=false){
  return `<article class="agenda-card"><div class="agenda-card-date"><strong>${esc(recordDate(r)||dateValue(r)||'Date TBD')}</strong></div><div class="agenda-card-body"><div class="agenda-card-top"><span class="tag">${esc(r.fields.Type||'Morning Report')}</span><span class="muted agenda-times">${esc(SessionCore.formatSessionTime(r))}</span></div>${staffingGrid(r)}</div><div class="agenda-card-actions">${sessionNotice(r)}${calendarButton(r, 'Morning Report', { compact: true })}<button type="button" class="button secondary small agenda-card-details-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View session details">Details</button><button type="button" class="icon-button record-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button></div></article>`;
@@ -8321,21 +8504,423 @@ function arrangeScheduleFilters(){
 
 if(typeof window!=='undefined'&&window.matchMedia){window.matchMedia('(max-width:760px)').addEventListener('change',()=>{if(!document.querySelector('dialog[open]'))render()});}
 if(typeof window!=='undefined'){window.addEventListener('resize',()=>{const d=document.querySelector('.schedule-secondary-filters[open]');if(d&&window.positionFiltersPanel)window.positionFiltersPanel();});}
+function isScheduleEditor() {
+  const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+  return Boolean(user && user.isAuthenticated);
+}
+
+let activeTimePickerState = null;
+
+function updateActivePickerInstant() {
+  if (!activeTimePickerState) return;
+  const s = activeTimePickerState;
+  const userZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'America/New_York';
+  const effZone = (s.inputZone === 'local' || !s.inputZone) ? userZone : s.inputZone;
+  let hour24 = s.hour % 12;
+  if (s.ampm === 'PM') hour24 += 12;
+  try {
+    if (typeof SessionCore !== 'undefined' && SessionCore.resolveInstantFromZone) {
+      const ms = SessionCore.resolveInstantFromZone(s.dateIso, hour24, s.minute, effZone);
+      s.instantUtc = new Date(ms).toISOString();
+    }
+  } catch {
+    // Keep existing instant if transition gap
+  }
+}
+
+function openTimePicker(sessionId) {
+  if (!sessionId) return;
+  const allMr = typeof records === 'function' ? records('Morning Report') : (db['Morning Report']?.records || []);
+  const allSplit = allMr.flatMap(r => typeof SessionCore !== 'undefined' ? SessionCore.splitMorningReport(r) : [r]);
+  const r = allSplit.find(x => x.id === sessionId || x.stableId === sessionId);
+  if (!r) {
+    toast('Could not locate session record.');
+    return;
+  }
+
+  const baseDateIso = (typeof recordDate === 'function' ? recordDate(r) : r.fields?.Date) || '';
+  if (!baseDateIso) {
+    toast('This session does not have a confirmed date.');
+    return;
+  }
+
+  const dlg = document.getElementById('time-picker-dialog');
+  if (!dlg) return;
+
+  const userZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'America/New_York';
+  const parsed = typeof SessionCore !== 'undefined' ? SessionCore.parseSessionTime(r) : null;
+  let initialInstantUtc;
+
+  if (parsed && parsed.status === 'resolved' && parsed.startUtc) {
+    initialInstantUtc = new Date(parsed.startUtc).toISOString();
+  } else {
+    const defaultMs = typeof SessionCore !== 'undefined' && SessionCore.resolveInstantFromZone
+      ? SessionCore.resolveInstantFromZone(baseDateIso, 9, 0, userZone)
+      : Date.parse(`${baseDateIso}T09:00:00Z`);
+    initialInstantUtc = new Date(defaultMs).toISOString();
+  }
+
+  const initialParts = typeof SessionCore !== 'undefined' && SessionCore.getZoneDateTimeParts
+    ? SessionCore.getZoneDateTimeParts(initialInstantUtc, userZone)
+    : { dateIso: baseDateIso, hour12: 9, minute: 0, ampm: 'AM' };
+
+  activeTimePickerState = {
+    record: r,
+    sessionId: r.id,
+    dateIso: initialParts.dateIso,
+    instantUtc: initialInstantUtc,
+    mode: 'hour', // 'hour' or 'minute'
+    hour: initialParts.hour12,
+    minute: initialParts.minute,
+    ampm: initialParts.ampm,
+    inputZone: 'local',
+    saving: false
+  };
+
+  const zoneSelect = document.getElementById('tp-zone-select');
+  if (zoneSelect) zoneSelect.value = 'local';
+
+  renderTimePickerClock();
+  dlg.showModal();
+}
+
+function renderTimePickerClock() {
+  if (!activeTimePickerState) return;
+  const s = activeTimePickerState;
+  const hourDisp = document.getElementById('tp-hour-disp');
+  const minDisp = document.getElementById('tp-min-disp');
+  const amBtn = document.getElementById('tp-am-btn');
+  const pmBtn = document.getElementById('tp-pm-btn');
+  const clockFace = document.getElementById('tp-clock-face');
+  const previewEl = document.getElementById('tp-tz-preview');
+  const savingEl = document.getElementById('tp-saving-indicator');
+  const saveBtn = document.getElementById('tp-save-btn');
+  const cancelBtn = document.getElementById('tp-cancel-btn');
+  const infoEl = document.getElementById('time-picker-session-info');
+
+  if (infoEl && s.record) {
+    const titleMeta = typeof SessionCore !== 'undefined' && SessionCore.getSessionDisplayTitle
+      ? SessionCore.getSessionDisplayTitle(s.record)
+      : { mainTitle: s.record.fields?.['Topic / Case'] || s.record.fields?.Type || 'Virtual Morning Report' };
+    const zoneName = s.inputZone === 'local' ? 'Local' : (s.inputZone === 'America/Los_Angeles' ? 'PT' : 'ET');
+    infoEl.textContent = `${titleMeta.mainTitle} · ${s.dateIso} (${zoneName})`;
+  }
+
+  if (hourDisp) {
+    hourDisp.textContent = String(s.hour).padStart(2, '0');
+    hourDisp.classList.toggle('active', s.mode === 'hour');
+  }
+  if (minDisp) {
+    minDisp.textContent = String(s.minute).padStart(2, '0');
+    minDisp.classList.toggle('active', s.mode === 'minute');
+  }
+  if (amBtn) amBtn.classList.toggle('active', s.ampm === 'AM');
+  if (pmBtn) pmBtn.classList.toggle('active', s.ampm === 'PM');
+
+  if (savingEl) savingEl.style.display = s.saving ? 'block' : 'none';
+  if (saveBtn) saveBtn.disabled = s.saving;
+  if (cancelBtn) cancelBtn.disabled = s.saving;
+
+  if (clockFace) {
+    clockFace.innerHTML = '';
+    const radius = 80;
+    const centerX = 105;
+    const centerY = 105;
+
+    if (s.mode === 'hour') {
+      const hours = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+      hours.forEach((h, idx) => {
+        const angle = (idx * 30 - 90) * (Math.PI / 180);
+        const x = centerX + radius * Math.cos(angle);
+        const y = centerY + radius * Math.sin(angle);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tp-clock-number' + (s.hour === h ? ' selected' : '');
+        btn.style.left = `${x}px`;
+        btn.style.top = `${y}px`;
+        btn.textContent = String(h);
+        btn.setAttribute('aria-label', `${h} o'clock`);
+        btn.onclick = (e) => {
+          e.preventDefault();
+          s.hour = h;
+          s.mode = 'minute';
+          updateActivePickerInstant();
+          renderTimePickerClock();
+        };
+        clockFace.appendChild(btn);
+      });
+    } else {
+      const minutes = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+      minutes.forEach((m, idx) => {
+        const angle = (idx * 30 - 90) * (Math.PI / 180);
+        const x = centerX + radius * Math.cos(angle);
+        const y = centerY + radius * Math.sin(angle);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tp-clock-number' + (s.minute === m ? ' selected' : '');
+        btn.style.left = `${x}px`;
+        btn.style.top = `${y}px`;
+        btn.textContent = String(m).padStart(2, '0');
+        btn.setAttribute('aria-label', `${m} minutes`);
+        btn.onclick = (e) => {
+          e.preventDefault();
+          s.minute = m;
+          updateActivePickerInstant();
+          renderTimePickerClock();
+        };
+        clockFace.appendChild(btn);
+      });
+    }
+  }
+
+  // Calculate and display PT / ET write-back projection
+  if (previewEl && typeof SessionCore !== 'undefined' && SessionCore.computeSheetsTimes) {
+    try {
+      const userZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'America/New_York';
+      const effZone = (s.inputZone === 'local' || !s.inputZone) ? userZone : s.inputZone;
+      let hour24 = s.hour % 12;
+      if (s.ampm === 'PM') hour24 += 12;
+
+      const computed = SessionCore.computeSheetsTimes(s.dateIso, hour24, s.minute, effZone);
+      previewEl.innerHTML = `
+        <div class="tp-preview-line">
+          <strong>Pacific Time (Sheet Col B):</strong>
+          <span>${esc(computed.ptValue)} (${esc(computed.ptZone)}) · ${esc(computed.ptDate)}</span>
+        </div>
+        <div class="tp-preview-line">
+          <strong>Eastern Time (Sheet Col C):</strong>
+          <span>${esc(computed.etValue)} (${esc(computed.etZone)}) · ${esc(computed.etDate)}</span>
+        </div>
+        <div class="tp-preview-line" style="color:var(--text-muted);font-size:11px;margin-top:2px;">
+          <span>Instant: ${esc(computed.instantUtc.slice(0, 16).replace('T', ' '))} UTC</span>
+          <span>Input date: ${esc(s.dateIso)}</span>
+        </div>
+      `;
+    } catch (err) {
+      previewEl.innerHTML = `<span style="color:var(--urgent-fg);">${esc(err.message)}</span>`;
+    }
+  }
+}
+
+async function saveTimePickerSelection() {
+  if (!activeTimePickerState || activeTimePickerState.saving) return;
+  const s = activeTimePickerState;
+  const r = s.record;
+
+  const userZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'America/New_York';
+  const effZone = (s.inputZone === 'local' || !s.inputZone) ? userZone : s.inputZone;
+  let hour24 = s.hour % 12;
+  if (s.ampm === 'PM') hour24 += 12;
+
+  let computed;
+  try {
+    computed = SessionCore.computeSheetsTimes(s.dateIso, hour24, s.minute, effZone);
+  } catch (err) {
+    toast(`Invalid time: ${err.message}`);
+    return;
+  }
+
+  s.saving = true;
+  renderTimePickerClock();
+
+  const prevPt = (r.fields && r.fields['Pacific time (source)']) || '';
+  const prevEt = (r.fields && r.fields['Eastern time (source)']) || '';
+  const newPt = computed.ptValue;
+  const newEt = computed.etValue;
+
+  const user = typeof Identity !== 'undefined' ? Identity.getCurrentUser() : null;
+  const isOnlineEligible = user && user.isAuthenticated && !user.isMock && typeof fetch === 'function';
+
+  if (isOnlineEligible) {
+    const targetStableId = r.session?.parentStableId || r.parentId || r.stableId || r.id;
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('cps_token') : null;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    try {
+      const res = await fetch('/api/mutate', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          dataset: 'Morning Report',
+          stableId: targetStableId,
+          childSessionIndex: r.session?.index || null,
+          fields: {
+            'Pacific time (source)': newPt,
+            'Eastern time (source)': newEt
+          },
+          expectedPreviousValues: {
+            'Pacific time (source)': prevPt,
+            'Eastern time (source)': prevEt
+          },
+          operationId: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        s.saving = false;
+        renderTimePickerClock();
+        if (res.status === 409) {
+          toast('Conflict: The session time was modified by another scheduler. Please reload.');
+        } else {
+          toast(`Could not update the session time. No changes were saved. (${err.message || 'Server error'})`);
+        }
+        return;
+      }
+    } catch (netErr) {
+      s.saving = false;
+      renderTimePickerClock();
+      toast('Could not update the session time. No changes were saved.');
+      return;
+    }
+  }
+
+  // Update in local workspace state
+  mutate(w => {
+    w.edits[s.sessionId] = {
+      ...(w.edits[s.sessionId] || {}),
+      'Pacific time (source)': newPt,
+      'Eastern time (source)': newEt
+    };
+    log(w, 'Updated Session Time', r, 'Morning Report');
+  }, s.sessionId);
+
+  // Directly update record cache fields
+  if (r.fields) {
+    r.fields['Pacific time (source)'] = newPt;
+    r.fields['Eastern time (source)'] = newEt;
+  }
+  if (typeof SessionCore !== 'undefined' && SessionCore.invalidateRecord) {
+    SessionCore.invalidateRecord(s.sessionId);
+  }
+
+  const dlg = document.getElementById('time-picker-dialog');
+  if (dlg) dlg.close();
+  activeTimePickerState = null;
+
+  render();
+  toast(`✓ Time updated: ${newPt} PT / ${newEt} ET`);
+}
+
 if(typeof document!=='undefined'){
   document.addEventListener('click', e => {
     const editBtn = e.target.closest('[data-edit-note]');
-    if (!editBtn) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const sessionId = editBtn.dataset.editNote;
-    const r = records('Morning Report').find(x => x.id === sessionId);
-    if (!r) return;
-    const existing = (r.fields && r.fields.Notes) || '';
-    const newNote = window.prompt('Session Note:\n(Optional context about this VMR. Keep role fields limited to names.)', existing);
-    if (newNote !== null) {
-      updateSessionNote(sessionId, newNote);
+    if (editBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const sessionId = editBtn.dataset.editNote;
+      const r = records('Morning Report').find(x => x.id === sessionId);
+      if (!r) return;
+      const existing = (r.fields && r.fields.Notes) || '';
+      const newNote = window.prompt('Session Note:\n(Optional context about this VMR. Keep role fields limited to names.)', existing);
+      if (newNote !== null) {
+        updateSessionNote(sessionId, newNote);
+      }
+      return;
+    }
+
+    const timeBtn = e.target.closest('[data-edit-time]');
+    if (timeBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      openTimePicker(timeBtn.dataset.editTime);
+      return;
+    }
+
+    const toggleMonthSessionBtn = e.target.closest('[data-toggle-month-session]');
+    if (toggleMonthSessionBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const sessionId = toggleMonthSessionBtn.dataset.toggleMonthSession;
+      if (mrMonthExpandedId === sessionId) {
+        mrMonthExpandedId = null;
+      } else {
+        mrMonthExpandedId = sessionId;
+      }
+      render();
+      return;
+    }
+
+    // Close mobile month dropdown when clicking outside
+    const mobileDropdown = document.querySelector('#mr-mobile-month-dropdown');
+    if (mobileDropdown && mobileDropdown.style.display !== 'none' && !e.target.closest('#mr-mobile-month-trigger') && !e.target.closest('#mr-mobile-month-dropdown')) {
+      mobileDropdown.style.display = 'none';
+      const trigger = document.querySelector('#mr-mobile-month-trigger');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
     }
   });
+
+  const hourDispBtn = document.getElementById('tp-hour-disp');
+  if (hourDispBtn) {
+    hourDispBtn.onclick = () => {
+      if (!activeTimePickerState) return;
+      activeTimePickerState.mode = 'hour';
+      renderTimePickerClock();
+    };
+  }
+
+  const minDispBtn = document.getElementById('tp-min-disp');
+  if (minDispBtn) {
+    minDispBtn.onclick = () => {
+      if (!activeTimePickerState) return;
+      activeTimePickerState.mode = 'minute';
+      renderTimePickerClock();
+    };
+  }
+
+  const amBtn = document.getElementById('tp-am-btn');
+  if (amBtn) {
+    amBtn.onclick = () => {
+      if (!activeTimePickerState) return;
+      activeTimePickerState.ampm = 'AM';
+      updateActivePickerInstant();
+      renderTimePickerClock();
+    };
+  }
+
+  const pmBtn = document.getElementById('tp-pm-btn');
+  if (pmBtn) {
+    pmBtn.onclick = () => {
+      if (!activeTimePickerState) return;
+      activeTimePickerState.ampm = 'PM';
+      updateActivePickerInstant();
+      renderTimePickerClock();
+    };
+  }
+
+  const zoneSelect = document.getElementById('tp-zone-select');
+  if (zoneSelect) {
+    zoneSelect.onchange = (e) => {
+      if (!activeTimePickerState) return;
+      const newZone = e.target.value;
+      const userZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'America/New_York';
+      const effZone = (newZone === 'local' || !newZone) ? userZone : newZone;
+      activeTimePickerState.inputZone = newZone;
+      if (activeTimePickerState.instantUtc && typeof SessionCore !== 'undefined' && SessionCore.getZoneDateTimeParts) {
+        const parts = SessionCore.getZoneDateTimeParts(activeTimePickerState.instantUtc, effZone);
+        activeTimePickerState.dateIso = parts.dateIso;
+        activeTimePickerState.hour = parts.hour12;
+        activeTimePickerState.minute = parts.minute;
+        activeTimePickerState.ampm = parts.ampm;
+      }
+      renderTimePickerClock();
+    };
+  }
+
+  const saveBtn = document.getElementById('tp-save-btn');
+  if (saveBtn) {
+    saveBtn.onclick = () => saveTimePickerSelection();
+  }
+
+  const cancelBtn = document.getElementById('tp-cancel-btn');
+  if (cancelBtn) {
+    cancelBtn.onclick = () => {
+      const dlg = document.getElementById('time-picker-dialog');
+      if (dlg) dlg.close();
+      activeTimePickerState = null;
+    };
+  }
 }
 if(typeof globalThis!=='undefined'){
   globalThis.RECORD_CATEGORY=RECORD_CATEGORY;

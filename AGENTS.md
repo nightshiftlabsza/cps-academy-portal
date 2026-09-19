@@ -106,6 +106,12 @@ npm install
 # Run 358 native Node unit and integration tests
 npm test
 
+# Fast development gate (build sanity, 358 unit tests, Home 6-theme matrix, operations & console.error check)
+npm run qa:feature
+
+# Mandatory comprehensive gate before completing any feature or PR
+npm run qa:full
+
 # Build static bundle into dist/ (copies the 11 allowlisted assets)
 npm run build
 
@@ -115,12 +121,39 @@ npm start   # or: npm run dev
 # Compile historical logbook ledger locally (offline utility)
 npm run compile:logbooks
 
-# Optional browser checks (requires Chromium / Edge CDP)
+# Granular browser check suites (requires Chromium / Edge CDP)
 npm run test:tablet     # Verifies matrix sticky headers at 768/820/1024px
 npm run test:perf       # Verifies virtual list DOM windowing benchmarks
 npm run test:offline    # Verifies service worker cache rules & recovery
 npm run test:mobile     # Verifies 18 routes across 320–1440px viewports
 ```
+
+> **QA Workflow Guidelines for Agents:**
+> - Run `npm run qa:feature` during normal development **plus any existing targeted test(s) relevant to the feature being changed**.
+>   Examples:
+>   - Members change → relevant Members tests (`tests/members-directory.test.cjs`)
+>   - Morning Report change → relevant Morning Report tests (`tests/session-core.test.cjs`, `tests/staffing-tokens.test.cjs`, `tests/ui-operations.test.cjs`)
+>   - auth/permissions change → relevant auth/permission tests (`tests/auth.test.cjs`, `tests/auth-permissions.test.cjs`, `tests/sync-auth-filtering.test.cjs`)
+>   - sync/mutation change → relevant sync/mutation tests (`tests/mutate.test.cjs`, `tests/sync-contract.test.cjs`, `tests/tier-expansion.test.cjs`)
+> - Run `npm run qa:full` as the final comprehensive PASS/FAIL gate before marking any significant feature or PR complete. Failures caused by changes must be fixed before reporting completion.
+> - **Visual Self-QA for UI Changes (MANDATORY):**
+>   For any meaningful UI change, machine tests (`npm run qa:feature`) are the baseline, but visual verification is an additional requirement before handing work back to the user:
+>   1. **Capture standard viewports:** Run `npm run visual:capture -- <Route>` (e.g. `npm run visual:capture -- Home` or `npm run visual:capture -- "Morning Report"`).
+>      Standard checkpoints: 390px (mobile, 390×844), 820px (tablet, 820×900), 1280px (desktop, 1280×800). Screenshots are saved to `screenshots/visual-qa/<Route>-<width>.png`.
+>      *Theme scope:* Standard captures do NOT need to test every theme/mode on ordinary UI changes (the default Emerald Light is sufficient). Additional dark-mode and theme captures (`--mode dark`, `--theme <theme>`) are required only when the change affects colours, tokens, themes, or shared/global styling.
+>   2. **Inspect screenshots directly:** The agent must call `view_file` on the generated PNG images to semantically inspect them multimodal—never merely generate them.
+>   3. **Semantic visual checklist:**
+>      - Horizontal overflow / unwanted sideways scrolling
+>      - Clipped, truncated, or hidden content/dialogs
+>      - Overlapping elements or awkward text wrapping
+>      - Excessively tall cards/rows or unbalanced dead whitespace
+>      - Poor visual hierarchy or low-contrast text
+>      - Controls cramped, awkward, or unusable on mobile touch screens
+>      - Inconsistent spacing, margins, and alignment
+>      - Obvious theme/dark mode styling issues
+>      - Obvious divergence from an approved screenshot or Stitch design reference (inspect reference via `view_file` or Stitch MCP `get_screen`)
+>   4. **Autonomous Self-Healing:** If an obvious/high-confidence visual problem is observed, fix it automatically without asking the user about ordinary CSS/layout decisions. Re-run `npm run qa:feature`, recapture screenshots, and re-inspect until clean.
+>   5. Only ask the user if there is a genuine product/design ambiguity with more than one materially different reasonable solution.
 
 ---
 
@@ -156,6 +189,7 @@ npm run test:mobile     # Verifies 18 routes across 320–1440px viewports
 - Adding automated unit or integration tests under `tests/*.test.cjs`.
 - Adjusting CSS for responsive layout fixes, contrast, or theme token alignment consistent with `DESIGN.md`.
 - Improving error handling, input validation, and logging in `api/` endpoints without breaking API contracts.
+- Routine Git branch lifecycle for normal low-risk work (creating short-lived task branches, committing, merging into `main`, and deleting completed task branches).
 
 ### Agents MUST Ask First:
 - Running commands that change files outside the agreed plan, install new npm packages, or alter `package.json`.
@@ -163,15 +197,61 @@ npm run test:mobile     # Verifies 18 routes across 320–1440px viewports
 - Re-running logbook compilers with new canonical identity aliases.
 - Any change that refactors or deletes existing working modules.
 - Deploying or changing hosting configurations.
+- Irreversible Git or history operations (force pushes, hard resets, rebasing history).
+- Destructive data changes or privacy/access-policy changes.
+- Merging a genuinely high-risk change into `main` without user review.
 
 ---
 
 ## 11. Definition of "Done" for Any Feature
 
 A feature or change is considered **Done** only when all of the following pass:
-1. **Plan & Review:** Proposed plan and diff were approved prior to application.
-2. **Tests Pass:** `npm test` runs clean (0 failures out of 358+ tests).
-3. **Static Build Passes:** `npm run build` succeeds and copies exactly the 11 allowlisted assets into `dist/`.
-4. **No Security Leaks:** Static server rejects sensitive files (`historical-contributions.json`, `.env`, credentials) with 404.
-5. **No Regressions:** Mobile viewports (320px–430px) and dark/light modes remain functional without horizontal scroll blowouts.
-6. **Clean Git Status:** Working directory is left clean or in a verified staging state with working tests.
+1. **Scope respected:** The implementation matches the agreed task/acceptance criteria and contains no unrelated changes. A plan is required only for risky/shared/ambiguous work as defined elsewhere in AGENTS.md.
+2. **Fast QA Gate:** `npm run qa:feature` (plus any relevant targeted tests for the changed feature) passes cleanly during iterative development.
+3. **Comprehensive QA Gate:** `npm run qa:full` passes cleanly with 0 failures before marking the task complete. Any failures introduced by changes must be diagnosed and resolved.
+4. **Static Build Passes:** `npm run build` succeeds and copies exactly the 11 allowlisted assets into `dist/`.
+5. **No Security Leaks:** Static server rejects sensitive files (`historical-contributions.json`, `.env`, credentials) with 404.
+6. **No Regressions:** Mobile viewports (320px–430px) and dark/light modes remain functional without horizontal scroll blowouts.
+7. **Visual Self-QA Passed (for UI changes):** Standard viewports (390px, 820px, 1280px) captured via `npm run visual:capture`, inspected by the agent via `view_file`, and confirmed free of clipping, overflow, awkward wrapping, unusable touch targets, or poor hierarchy.
+8. **Clean Git Status:** Completed work merged cleanly into `main`, short-lived task branches deleted, and working tree left clean with all tests passing.
+
+---
+
+## 12. Lightweight Git Safety Workflow (No Process Overhead)
+
+To protect `main` without creating administrative clutter, agents must follow this lightweight safety workflow for meaningful code changes:
+
+### The Normal Rule for Meaningful Code Changes
+1. **Create a task branch:** Before editing code, branch off the current `main` into a short-lived task branch (e.g. `git checkout -b task/<short-description>`). The sole purpose is keeping `main` as the known-good version while work is in flight.
+2. **Implement & test:** Make the code changes on that branch.
+3. **Run targeted tests:** Execute existing or new tests relevant to the changed modules.
+4. **Run fast gate:** Execute `npm run qa:feature`.
+5. **Visual self-QA (for UI changes):** Run `npm run visual:capture -- <Route>` and inspect screenshots via `view_file`. Fix any detected visual defects.
+6. **Comprehensive gate:** Run `npm run qa:full` when the change is substantial enough to justify it.
+7. **Merge to `main`:** Once everything passes and the change is low-risk, merge back into `main`.
+8. **Delete task branch:** Immediately delete the local task branch. Do not leave stale branches behind.
+
+### No Mandatory GitHub Issues
+Do **NOT** create GitHub Issues automatically. Only use or create an Issue if:
+- Explicitly requested by the user,
+- The task needs to sit in a backlog for later,
+- The work spans multiple sessions,
+- Or there is a distinct bug/feature being tracked.
+For a normal interactive chat session where work is executed immediately, no Issue is required.
+
+### Pull Requests Are Optional
+Do **NOT** create PRs for ordinary isolated work. Use a PR only when the change is high-risk or especially broad:
+- Authentication or permissions changes,
+- Google Sheets write/sync logic,
+- Major refactoring,
+- Broad changes across multiple shared modules,
+- Major UI/UX redesigns,
+- Dependency or framework additions/upgrades,
+- Or when reviewing the full diff before merge is clearly desirable.
+
+### Repository Hygiene at Completion
+At the end of a normal successful task, the repository must simply have:
+- A clean, passing `main`,
+- No stale branches,
+- No unnecessary PRs,
+- No unnecessary GitHub Issues.

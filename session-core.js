@@ -392,6 +392,84 @@
     };
   }
 
+  function getZoneDateTimeParts(stampUtc, zone) {
+    const d = new Date(stampUtc);
+    if (isNaN(d.getTime())) throw new Error('Invalid UTC timestamp');
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: true,
+      timeZoneName: 'short'
+    });
+    const parts = dtf.formatToParts(d);
+    const getVal = type => parts.find(p => p.type === type)?.value;
+    const year = getVal('year');
+    const month = getVal('month');
+    const day = getVal('day');
+    const h12 = parseInt(getVal('hour') || '12', 10);
+    const min = parseInt(getVal('minute') || '0', 10);
+    const ampm = (getVal('dayPeriod') || 'AM').toUpperCase();
+    const zoneLabel = getVal('timeZoneName') || '';
+    let h24 = h12 % 12;
+    if (ampm === 'PM') h24 += 12;
+    return {
+      dateIso: `${year}-${month}-${day}`,
+      hour24: h24,
+      hour12: h12,
+      minute: min,
+      ampm: ampm === 'PM' ? 'PM' : 'AM',
+      zoneLabel
+    };
+  }
+
+  function resolveInstantFromZone(dateIso, hour24, minute, zone) {
+    const dStr = validDate(dateIso);
+    if (!dStr) throw new Error('Invalid date for session time conversion');
+    const h = Number(hour24), m = Number(minute);
+    if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) {
+      throw new Error('Invalid hour or minute for session time conversion');
+    }
+
+    const candidateStamp = Date.parse(`${dStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`);
+    // Sample reasonable standard offsets between -12h and +14h
+    const offsets = [-720, -660, -600, -540, -480, -420, -360, -300, -240, -180, -120, -60, 0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, 780, 840];
+    const matches = offsets.map(off => candidateStamp - off * 60000).filter(stamp => {
+      const p = getZoneDateTimeParts(stamp, zone);
+      return p.dateIso === dStr && p.hour24 === h && p.minute === m;
+    });
+
+    if (matches.length === 0) throw new Error('Time falls in a daylight saving transition gap');
+    return matches[0];
+  }
+
+  function computeSheetsTimes(dateIso, hour24, minute, inputZone) {
+    const zone = inputZone || 'America/New_York';
+    const instantUtcMs = resolveInstantFromZone(dateIso, hour24, minute, zone);
+    const d = new Date(instantUtcMs);
+
+    const pt = getZoneDateTimeParts(d, 'America/Los_Angeles');
+    const et = getZoneDateTimeParts(d, 'America/New_York');
+
+    const ptFormatted = `${pt.hour12}:${String(pt.minute).padStart(2, '0')} ${pt.ampm}`;
+    const etFormatted = `${et.hour12}:${String(et.minute).padStart(2, '0')} ${et.ampm}`;
+
+    return {
+      instantUtc: d.toISOString(),
+      ptTime: ptFormatted,
+      ptZone: pt.zoneLabel,
+      ptValue: ptFormatted,
+      ptDate: pt.dateIso,
+      etTime: etFormatted,
+      etZone: et.zoneLabel,
+      etValue: etFormatted,
+      etDate: et.dateIso
+    };
+  }
+
   function escapeCalendar(value) {
     return text(value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').replace(/\\/g, '\\\\').replace(/\r\n|\r|\n/g, '\\n').replace(/;/g, '\\;').replace(/,/g, '\\,');
   }
@@ -643,6 +721,9 @@
     getWeekBounds,
     addWeeks,
     slugify,
-    generateDeterministicId
+    generateDeterministicId,
+    getZoneDateTimeParts,
+    resolveInstantFromZone,
+    computeSheetsTimes
   });
 });

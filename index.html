@@ -212,6 +212,61 @@
       </form>
     </dialog>
 
+    <dialog id="time-picker-dialog" class="dialog">
+      <form method="dialog" class="dialog-card time-picker-card" id="time-picker-form">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow" id="time-picker-eyebrow">Morning Report Schedule</p>
+            <h2 id="time-picker-title">Set Session Time</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <div class="time-picker-body">
+          <p id="time-picker-session-info" class="muted" style="margin:0 0 12px 0;font-size:13px;"></p>
+          
+          <div class="time-picker-display-banner">
+            <div class="time-picker-digits">
+              <button type="button" class="tp-digit-btn active" id="tp-hour-disp" aria-label="Select hour">09</button>
+              <span class="tp-colon">:</span>
+              <button type="button" class="tp-digit-btn" id="tp-min-disp" aria-label="Select minute">00</button>
+            </div>
+            <div class="time-picker-ampm">
+              <button type="button" class="tp-ampm-btn active" id="tp-am-btn">AM</button>
+              <button type="button" class="tp-ampm-btn" id="tp-pm-btn">PM</button>
+            </div>
+          </div>
+
+          <div class="time-picker-clock-container">
+            <div class="time-picker-clock-face" id="tp-clock-face" role="region" aria-label="Clock face">
+              <div class="tp-clock-hand" id="tp-clock-hand">
+                <div class="tp-clock-pin"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="time-picker-tz-selection" style="margin-top:10px;">
+            <label style="font-size:12px;display:flex;align-items:center;gap:6px;justify-content:center;">
+              <span class="muted">Editing time in:</span>
+              <select id="tp-zone-select" class="select small" style="width:auto;max-width:200px;font-size:12px;padding:3px 8px;">
+                <option value="America/Los_Angeles">Pacific Time (PT)</option>
+                <option value="America/New_York">Eastern Time (ET)</option>
+                <option value="local" selected>Your Local Time</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="time-picker-tz-preview" id="tp-tz-preview"></div>
+          <div id="tp-saving-indicator" class="saving-indicator" style="display:none;margin-top:8px;font-size:13px;text-align:center;color:var(--text-muted);">
+            Saving to Google Sheets…
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button class="button secondary" value="cancel" id="tp-cancel-btn">Cancel</button>
+          <button type="button" class="button primary" id="tp-save-btn">Save Time</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="staff-token-dialog" class="dialog staff-popover-dialog">
       <form method="dialog" class="dialog-card staff-popover-card" id="staff-token-form">
         <div class="dialog-head">
