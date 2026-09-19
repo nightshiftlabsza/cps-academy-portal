@@ -2,7 +2,7 @@ const fs=require('node:fs'),path=require('node:path');
 const root=path.resolve(__dirname,'..'),dist=path.join(root,'dist');
 if (fs.existsSync(dist)) fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist,{recursive:true});
-for(const file of ['index.html','styles.css','members.css','session-core.js','search-core.js','identity.js','offline.js','logbook.js','windowed-list.js','members.js','app.js','workbook.json','sw.js']) {
+for(const file of ['index.html','styles.css','members.css','morning-report.css','session-core.js','search-core.js','identity.js','offline.js','logbook.js','windowed-list.js','members.js','morning-report.js','app.js','workbook.json','sw.js']) {
   if (file === 'workbook.json') {
     // Redact sensitive private fields from public build output
     const raw = fs.readFileSync(path.join(root, file), 'utf8');
@@ -21,4 +21,4 @@ for(const file of ['index.html','styles.css','members.css','session-core.js','se
     fs.copyFileSync(path.join(root, file), path.join(dist, file));
   }
 }
-console.log('Built thirteen static assets in dist/. Private data (birthdays) redacted from build snapshot. Historical ledger remains excluded.');
+console.log('Built fifteen static assets in dist/. Private data (birthdays) redacted from build snapshot. Historical ledger remains excluded.');

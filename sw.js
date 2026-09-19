@@ -6,6 +6,7 @@ const SHELL_ASSETS = [
   '/index.html',
   '/styles.css',
   '/members.css',
+  '/morning-report.css',
   '/session-core.js',
   '/search-core.js',
   '/identity.js',
@@ -13,6 +14,7 @@ const SHELL_ASSETS = [
   '/logbook.js',
   '/windowed-list.js',
   '/members.js',
+  '/morning-report.js',
   '/app.js',
   '/workbook.json'
 ];

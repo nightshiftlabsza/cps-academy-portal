@@ -170,6 +170,7 @@ test('Sprint Integration Gate: 7. Static Asset Allowlist and security boundaries
     'index.html',
     'styles.css',
     'members.css',
+    'morning-report.css',
     'session-core.js',
     'search-core.js',
     'identity.js',
@@ -177,6 +178,7 @@ test('Sprint Integration Gate: 7. Static Asset Allowlist and security boundaries
     'logbook.js',
     'windowed-list.js',
     'members.js',
+    'morning-report.js',
     'app.js',
     'workbook.json',
     'sw.js'
