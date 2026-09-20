@@ -916,7 +916,12 @@
         <div class="mr-card-content mr-month-card-content">
           ${typeTagHtml ? `<div class="mr-card-tags">${typeTagHtml}</div>` : ''}
           <h3 class="mr-card-title"><button type="button" class="mr-card-title-btn" data-open="${esc(r.id)}" data-area="Morning Report" title="View details for ${esc(titleMeta.mainTitle)}">${esc(titleMeta.mainTitle)}</button></h3>
-          ${noteHtml}
+          <div class="mr-card-notes-wrap">
+            ${noteHtml}
+          </div>
+          <div class="mr-month-mobile-footer-actions">
+            <button type="button" class="icon-button mr-card-menu-btn" data-record-menu="${esc(r.id)}" data-area="Morning Report" title="Session actions" aria-label="Open session actions" aria-haspopup="dialog">⋯</button>
+          </div>
         </div>
 
         ${staffingZone}
@@ -957,6 +962,7 @@
         <div class="mr-section-head">
           <div class="mr-section-title-wrap">
             <h2>Next 7 VMR Sessions</h2>
+            <a href="#vmr-month-schedule" class="mr-jump-to-schedule-link" title="Jump to full monthly schedule">Browse Month ↓</a>
           </div>
         </div>
         <div class="mr-stream">${next7.map(r => editorialCard(r)).join('')}</div>
@@ -1061,7 +1067,7 @@
     }).join('');
 
     const monthlyScheduleSection = `
-      <section class="mr-monthly-schedule-section" style="margin-top:24px;">
+      <section class="mr-monthly-schedule-section" id="vmr-month-schedule" style="margin-top:24px;">
         <div class="mr-monthly-schedule-header desktop-only-header">
           <div class="mr-monthly-schedule-title-wrap">
             <h3 class="mr-monthly-schedule-title">VMR Schedule</h3>
@@ -1118,6 +1124,7 @@
           </div>
           <div class="mr-mobile-week-meta-bar">
             <span class="mr-mobile-week-range">${esc(weekRangeFormatted)}</span>
+            <span class="mr-mobile-meta-dot" aria-hidden="true">·</span>
             <span class="mr-mobile-week-count">${mobileWeekCount} session${mobileWeekCount === 1 ? '' : 's'}</span>
           </div>
         </div>
@@ -1560,6 +1567,16 @@
         mobileDropdown.style.display = 'none';
         const trigger = document.querySelector('#mr-mobile-month-trigger');
         if (trigger) trigger.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        const toggleBtn = e.target.closest('[data-toggle-month-session]');
+        if (toggleBtn && !e.target.closest('button, a, input, select')) {
+          e.preventDefault();
+          toggleBtn.click();
+        }
       }
     });
 
