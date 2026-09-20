@@ -174,6 +174,17 @@ function parseArgs(args) {
         }
       });
 
+      const saveFailureAndExit = async (errorType, errorMessage, details = null) => {
+        const failPath = path.join(VISUAL_QA_DIR, `FAILURE-${sanitizedRoute}${labelSuffix}-${vp.width}.png`);
+        try { await page.screenshot({ path: failPath, fullPage: false }); } catch {}
+        console.error(`\n❌ ${errorType} [${vp.name} ${vp.width}px]: ${errorMessage}`);
+        if (details) console.error(details);
+        console.error(`Diagnostic screenshot saved to: ${path.relative(ROOT_DIR, failPath)}`);
+        await context.close();
+        await cleanup();
+        process.exit(1);
+      };
+
       const targetUrl = `${baseUrl}/#${encodeURIComponent(route)}`;
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
@@ -182,16 +193,10 @@ function parseArgs(args) {
         await page.waitForSelector('#page', { timeout: 8000 });
         const routeStatus = await verifyRouteLoaded(page, route);
         if (!routeStatus.loaded) {
-          throw new Error(routeStatus.reason || `Route "${route}" failed to load`);
+          await saveFailureAndExit('ROUTE LOAD VERIFICATION FAILED', routeStatus.reason || `Route "${route}" failed to load`);
         }
       } catch (err) {
-        // Save failure screenshot before exiting
-        const failPath = path.join(VISUAL_QA_DIR, `FAILURE-${sanitizedRoute}${labelSuffix}-${vp.width}.png`);
-        try { await page.screenshot({ path: failPath, fullPage: false }); } catch {}
-        console.error(`\n❌ ROUTE LOAD VERIFICATION FAILED [${vp.name} ${vp.width}px]:`, err.message);
-        console.error(`Diagnostic screenshot saved to: ${path.relative(ROOT_DIR, failPath)}`);
-        await context.close();
-        process.exit(1);
+        await saveFailureAndExit('ROUTE LOAD VERIFICATION FAILED', err.message);
       }
 
       // 2. Perform simple ordered interaction states if requested
@@ -202,9 +207,7 @@ function parseArgs(args) {
           await loc.fill(fillInput.value);
           await page.waitForTimeout(200);
         } catch (err) {
-          console.error(`❌ Interaction error: Failed to fill "${fillInput.selector}": ${err.message}`);
-          await context.close();
-          process.exit(1);
+          await saveFailureAndExit('INTERACTION ERROR (fill)', `Failed to fill "${fillInput.selector}": ${err.message}`);
         }
       }
 
@@ -215,9 +218,7 @@ function parseArgs(args) {
           await loc.click();
           await page.waitForTimeout(300);
         } catch (err) {
-          console.error(`❌ Interaction error: Failed to click "${clickSelector}": ${err.message}`);
-          await context.close();
-          process.exit(1);
+          await saveFailureAndExit('INTERACTION ERROR (click)', `Failed to click "${clickSelector}": ${err.message}`);
         }
       }
 
@@ -225,9 +226,7 @@ function parseArgs(args) {
         try {
           await page.locator(waitForSelector).first().waitFor({ timeout: 6000 });
         } catch (err) {
-          console.error(`❌ Interaction error: Target "${waitForSelector}" did not appear: ${err.message}`);
-          await context.close();
-          process.exit(1);
+          await saveFailureAndExit('INTERACTION ERROR (wait-for)', `Target "${waitForSelector}" did not appear: ${err.message}`);
         }
       }
 
@@ -236,26 +235,17 @@ function parseArgs(args) {
 
       // 3. Fail on unexpected page errors or console errors
       if (pageErrors.length > 0 || consoleErrors.length > 0) {
-        const failPath = path.join(VISUAL_QA_DIR, `FAILURE-${sanitizedRoute}${labelSuffix}-${vp.width}.png`);
-        try { await page.screenshot({ path: failPath, fullPage: false }); } catch {}
-        console.error(`\n❌ CONSOLE/PAGE ERROR DEFECT DETECTED [${vp.name} ${vp.width}px]`);
-        if (pageErrors.length > 0) console.error('  Page errors:', pageErrors);
-        if (consoleErrors.length > 0) console.error('  Console errors:', consoleErrors);
-        console.error(`Diagnostic screenshot saved to: ${path.relative(ROOT_DIR, failPath)}`);
-        await context.close();
-        process.exit(1);
+        const errorDetails = [];
+        if (pageErrors.length > 0) errorDetails.push(`Page errors: ${JSON.stringify(pageErrors)}`);
+        if (consoleErrors.length > 0) errorDetails.push(`Console errors: ${JSON.stringify(consoleErrors)}`);
+        await saveFailureAndExit('CONSOLE/PAGE ERROR DEFECT DETECTED', 'Errors detected during interaction', errorDetails.join('\n'));
       }
 
       // 4. Fail on unintended geometric page overflow (preserving internal scrolling containers)
       try {
         await checkGeometricOverflow(page, `${vp.name} (${vp.width}px)`);
       } catch (err) {
-        const failPath = path.join(VISUAL_QA_DIR, `FAILURE-${sanitizedRoute}${labelSuffix}-${vp.width}.png`);
-        try { await page.screenshot({ path: failPath, fullPage: false }); } catch {}
-        console.error(`\n❌ GEOMETRIC OVERFLOW DEFECT DETECTED [${vp.name} ${vp.width}px]:`, err.message);
-        console.error(`Diagnostic screenshot saved to: ${path.relative(ROOT_DIR, failPath)}`);
-        await context.close();
-        process.exit(1);
+        await saveFailureAndExit('GEOMETRIC OVERFLOW DEFECT DETECTED', err.message);
       }
 
       // 5. Capture screenshots

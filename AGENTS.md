@@ -107,8 +107,10 @@ The portal uses a zero-runtime-dependency architecture: plain modern ES/browser 
 ```powershell
 # Repeatable development install (pins playwright-core 1.63.0 development dependency)
 npm ci   # or: npm install
-# Note: Node packages are development-only. The browser binary is resolved from local installed
-# Microsoft Edge, Google Chrome, or an explicit CHROMIUM_PATH environment variable.
+# Note: Node packages are development-only. `npm ci` reproducibly pins playwright-core at 1.63.0.
+# Host browser installation and versioning are separate from npm packages: the browser binary is
+# resolved from local installed Microsoft Edge, Google Chrome, or an explicit CHROMIUM_PATH.
+# Running npm install/ci alone does not install or guarantee host browser versions.
 
 # Run native Node unit and integration tests
 npm test

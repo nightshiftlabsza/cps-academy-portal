@@ -48,8 +48,8 @@ const FEATURE_AREAS = {
   },
   offline: {
     description: 'Service worker caching boundaries, offline fallback, and dirty-form protection',
-    unitTests: ['tests/browser-offline.cjs'],
-    browserTests: []
+    unitTests: [],
+    browserTests: ['tests/browser-offline.cjs']
   },
   auth: {
     description: 'Authentication tokens, session cookies, and role-based data filtering',

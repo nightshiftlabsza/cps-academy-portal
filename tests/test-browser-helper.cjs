@@ -29,18 +29,19 @@ const CANDIDATE_PATHS = {
  * Resolves the browser executable path following strict, predictable rules:
  * 1. If CHROMIUM_PATH is explicitly set: verify existence. If missing, fail immediately (do not silently fall back).
  * 2. Look for verified installed browser candidates for the current OS platform.
- * 3. If no candidate exists, returns null (caller may attempt channel: 'msedge' on Windows or throw).
+ * 3. If no candidate exists, returns null without guessing or silent fallbacks.
  */
 function resolveBrowserExecutable() {
   const envPath = process.env.CHROMIUM_PATH;
-  if (envPath) {
-    if (!fs.existsSync(envPath)) {
+  if (envPath !== undefined && envPath !== null && String(envPath).trim() !== '') {
+    const trimmedPath = String(envPath).trim();
+    if (!fs.existsSync(trimmedPath)) {
       throw new Error(
-        `CHROMIUM_PATH is explicitly set to "${envPath}", but this file does not exist.\n` +
+        `CHROMIUM_PATH is explicitly set to "${trimmedPath}", but this file does not exist.\n` +
         'Please provide a valid browser executable path or unset CHROMIUM_PATH.'
       );
     }
-    return { executablePath: envPath, source: 'CHROMIUM_PATH environment variable' };
+    return { executablePath: trimmedPath, source: 'CHROMIUM_PATH environment variable' };
   }
 
   const platform = process.platform;
@@ -72,36 +73,39 @@ function getPlaywright() {
 /**
  * Launches a browser instance using playwright-core and verified local browser tooling.
  * Fails clearly with actionable diagnostics if tooling or browser is missing.
+ * Never silently chooses an alternative browser when CHROMIUM_PATH is invalid.
  */
 async function launchBrowser(options = {}) {
   const { chromium } = getPlaywright();
   const { executablePath, source } = resolveBrowserExecutable();
 
+  if (!executablePath) {
+    throw new Error(
+      'No verified browser executable found.\n' +
+      'Ensure Microsoft Edge or Google Chrome is installed, or set CHROMIUM_PATH to a valid browser executable.'
+    );
+  }
+
   const launchOptions = {
     headless: true,
+    executablePath,
     ...options
   };
-
-  if (executablePath) {
-    launchOptions.executablePath = executablePath;
-  } else if (process.platform === 'win32') {
-    launchOptions.channel = 'msedge';
-  }
 
   try {
     const browser = await chromium.launch(launchOptions);
     return browser;
   } catch (err) {
-    const attemptedTarget = executablePath ? `executable "${executablePath}" (${source})` : 'default channel (msedge)';
     throw new Error(
-      `Failed to start browser using ${attemptedTarget}: ${err.message}.\n` +
-      'Ensure Microsoft Edge or Google Chrome is installed, or set CHROMIUM_PATH to a valid browser executable.'
+      `Failed to start browser using executable "${executablePath}" (${source}): ${err.message}.\n` +
+      'Ensure the browser binary is functional, or set CHROMIUM_PATH to a valid browser executable.'
     );
   }
 }
 
 /**
  * Checks whether browser tooling and executable are available without launching.
+ * Returns isReady: false if CHROMIUM_PATH is invalid or no executable is found.
  */
 function checkBrowserTooling() {
   let playwrightInstalled = false;
@@ -127,7 +131,7 @@ function checkBrowserTooling() {
     executableFound,
     executableError,
     resolvedSource,
-    isReady: playwrightInstalled && (executableFound || process.platform === 'win32')
+    isReady: playwrightInstalled && Boolean(executableFound) && !executableError
   };
 }
 
@@ -135,6 +139,7 @@ function checkBrowserTooling() {
  * Geometric check for horizontal overflow.
  * Internal scrolling containers (e.g. table container with overflow-x) are allowed as long as
  * their bounding box fits within the viewport.
+ * Named table containers do NOT receive blanket exemptions that hide page-level overflow.
  * Open dialogs are verified to fit within viewport with accessible controls.
  */
 async function checkGeometricOverflow(page, label = '') {
@@ -147,7 +152,35 @@ async function checkGeometricOverflow(page, label = '') {
     const bodyScrollW = body ? body.scrollWidth : 0;
     const pageOverflow = docScrollW > winW + 1 || bodyScrollW > winW + 1;
 
-    // Check open dialogs
+    // Check unconstrained overflowing elements outside intentional scroll containers
+    const overflowingElements = [];
+    const allElements = Array.from(document.querySelectorAll('#page *'));
+    for (const el of allElements) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > winW + 2) {
+        const style = window.getComputedStyle(el);
+        const isSelfScrollable = style.overflowX === 'auto' || style.overflowX === 'scroll';
+        if (!isSelfScrollable) {
+          let ancestor = el.parentElement;
+          let insideScrollContainer = false;
+          while (ancestor && ancestor !== document.body) {
+            const aStyle = window.getComputedStyle(ancestor);
+            if (aStyle.overflowX === 'auto' || aStyle.overflowX === 'scroll') {
+              insideScrollContainer = true;
+              break;
+            }
+            ancestor = ancestor.parentElement;
+          }
+          if (!insideScrollContainer) {
+            const idOrClass = el.id ? `#${el.id}` : el.className ? `.${String(el.className).split(' ')[0]}` : el.tagName.toLowerCase();
+            overflowingElements.push(`${idOrClass} (width: ${Math.round(rect.width)}px > viewport: ${winW}px)`);
+          }
+        }
+      }
+    }
+
+    // Check open dialogs: A deliberately scrollable dialog is valid when it fits viewport width
+    // and its controls remain accessible.
     const openDialogs = Array.from(document.querySelectorAll('dialog[open]'));
     const dialogErrors = [];
     for (const d of openDialogs) {
@@ -175,6 +208,7 @@ async function checkGeometricOverflow(page, label = '') {
       bodyScrollW,
       winW,
       dialogErrors,
+      overflowingElements: overflowingElements.slice(0, 5),
       contextLabel
     };
   }, label);
@@ -183,6 +217,13 @@ async function checkGeometricOverflow(page, label = '') {
     throw new Error(
       `Document-level horizontal overflow detected at ${label || 'page'}: ` +
       `scrollWidth=${Math.max(result.docScrollW, result.bodyScrollW)}px exceeds viewport innerWidth=${result.winW}px`
+    );
+  }
+
+  if (result.overflowingElements && result.overflowingElements.length > 0) {
+    throw new Error(
+      `Unconstrained element overflow detected at ${label || 'page'}: ` +
+      result.overflowingElements.join('; ')
     );
   }
 
@@ -213,7 +254,10 @@ async function verifyRouteLoaded(page, requestedRoute, timeoutMs = 8000) {
     const isScheduleSubRoute = normalized.startsWith('Morning Report/');
     const baseRoute = isScheduleSubRoute ? 'Morning Report' : normalized;
 
-    // Check if known route
+    // Active tab in global state
+    const currentTab = typeof tab !== 'undefined' ? tab : null;
+
+    // Check if recognized valid route
     const isKnown = (typeof db !== 'undefined' && db && Boolean(db[baseRoute])) ||
       ['Home', 'Workspace', 'profile/logbook', 'admin/issues'].includes(baseRoute);
 
@@ -221,6 +265,21 @@ async function verifyRouteLoaded(page, requestedRoute, timeoutMs = 8000) {
       return {
         loaded: false,
         reason: `Route "${req}" is not recognized as a valid portal view`
+      };
+    }
+
+    // Did an invalid route silently fall back to Home?
+    if (baseRoute !== 'Home' && currentTab === 'Home') {
+      return {
+        loaded: false,
+        reason: `Route "${req}" failed to load and silently fell back to Home (active tab="${currentTab}")`
+      };
+    }
+
+    if (currentTab && currentTab !== baseRoute) {
+      return {
+        loaded: false,
+        reason: `Requested route "${req}" expected tab "${baseRoute}", but active tab is "${currentTab}"`
       };
     }
 
@@ -234,8 +293,7 @@ async function verifyRouteLoaded(page, requestedRoute, timeoutMs = 8000) {
       };
     }
 
-    // Did an invalid route silently fall back to Home Dashboard?
-    if (normalized !== 'Home' && h1 === 'Home Dashboard') {
+    if (baseRoute !== 'Home' && h1 === 'Home Dashboard') {
       return {
         loaded: false,
         reason: `Route "${req}" failed to load and silently fell back to Home Dashboard`
@@ -245,7 +303,8 @@ async function verifyRouteLoaded(page, requestedRoute, timeoutMs = 8000) {
     return {
       loaded: true,
       heading: h1,
-      route: normalized
+      route: normalized,
+      currentTab
     };
   }, requestedRoute);
 }
