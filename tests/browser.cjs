@@ -2,11 +2,11 @@
 const assert=require('node:assert/strict');
 const {createServer}=require('../scripts/serve.cjs');
 const {injectAuth}=require('./test-auth-helper.cjs');
+const {launchBrowser}=require('./test-browser-helper.cjs');
 (async()=>{
- let chromium;try{({chromium}=require('playwright-core'))}catch{throw Error('Install the optional browser tools from README.md first.')}
  const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;
  try{
-  browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
+  browser=await launchBrowser({headless:true});
   for(const width of [1440,390]){
    const context=await browser.newContext({viewport:{width,height:900}});
    await injectAuth(context, 'admin');

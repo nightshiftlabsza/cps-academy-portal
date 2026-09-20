@@ -1,19 +1,20 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { createServer } = require('../scripts/serve.cjs');
-const { chromium } = require('playwright-core');
+const { injectAuth } = require('./test-auth-helper.cjs');
+const { launchBrowser } = require('./test-browser-helper.cjs');
 
 (async () => {
   const server = createServer();
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const executablePath = process.env.CHROMIUM_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-  const browser = await chromium.launch({ headless: true, executablePath });
+  const browser = await launchBrowser({ headless: true });
   const base = `http://127.0.0.1:${server.address().port}`;
 
   try {
     // 1. Desktop verification (1440px)
     {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      await injectAuth(context, 'admin');
       const p = await context.newPage();
       const errors = [];
       p.on('pageerror', e => errors.push(e.message));
@@ -96,6 +97,7 @@ const { chromium } = require('playwright-core');
     // 2. Mobile verification (390px)
     {
       const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+      await injectAuth(context, 'admin');
       const p = await context.newPage();
       const errors = [];
       p.on('pageerror', e => errors.push(e.message));

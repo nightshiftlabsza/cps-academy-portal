@@ -3,12 +3,12 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {createServer}=require('../scripts/serve.cjs');
-const {chromium}=require('playwright-core');
 const {injectAuth}=require('./test-auth-helper.cjs');
+const {launchBrowser}=require('./test-browser-helper.cjs');
 const routes=['Home','Morning Report','CPS Academy VMRs','Special VMRs','Student Forum','Residency Programs','Leader of the Week','Members','OrgStructure','CRC','CRC - retired','Podcast Episodes','Schema review','Research @CPSolvers','Conferences','Important links','Workspace','profile/logbook'];
 (async()=>{
  const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
+ const browser=await launchBrowser({headless:true});
  const base=`http://127.0.0.1:${server.address().port}`;
  let checks=0;
  try{

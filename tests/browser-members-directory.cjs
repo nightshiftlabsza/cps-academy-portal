@@ -3,13 +3,12 @@ const assert = require('node:assert/strict');
 const { createServer } = require('../scripts/serve.cjs');
 const workbook = require('../workbook.json');
 const { injectAuth } = require('./test-auth-helper.cjs');
-const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./test-browser-helper.cjs');
 
 (async () => {
   const server = createServer();
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const executablePath = process.env.CHROMIUM_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-  const browser = await chromium.launch({ headless: true, executablePath });
+  const browser = await launchBrowser({ headless: true });
   const base = `http://127.0.0.1:${server.address().port}`;
 
   try {

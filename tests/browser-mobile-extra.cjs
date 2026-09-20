@@ -1,11 +1,11 @@
 'use strict';
 const assert=require('node:assert/strict');
-const {chromium}=require('playwright-core');
 const {createServer}=require('../scripts/serve.cjs');
 const {injectAuth}=require('./test-auth-helper.cjs');
+const {launchBrowser}=require('./test-browser-helper.cjs');
 (async()=>{
  const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
+ const browser=await launchBrowser({headless:true});
  try{for(const width of [320,360,390,430]){
   const c=await browser.newContext({viewport:{width,height:740},serviceWorkers:'block'});
   await injectAuth(c, 'admin');

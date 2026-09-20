@@ -243,11 +243,8 @@ async function runWithCDP(baseUrl) {
 }
 
 async function runWithPlaywright(baseUrl) {
-  const { chromium } = require('playwright-core');
-  const browser = await chromium.launch({
-    headless: true,
-    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
-  });
+  const { launchBrowser } = require('./test-browser-helper.cjs');
+  const browser = await launchBrowser({ headless: true });
   try {
     for (const width of [768, 820, 1024]) {
       const context = await browser.newContext({ viewport: { width, height: 900 } });

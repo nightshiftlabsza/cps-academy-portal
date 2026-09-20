@@ -3,17 +3,9 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { chromium } = require('playwright-core');
 const { createServer } = require('../scripts/serve.cjs');
 const { injectAuth } = require('./test-auth-helper.cjs');
-
-const EDGE_PATH = process.env.CHROMIUM_PATH || (
-  fs.existsSync('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe')
-    ? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
-    : fs.existsSync('C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe')
-      ? 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
-      : undefined
-);
+const { launchBrowser } = require('./test-browser-helper.cjs');
 
 const SCREENSHOT_DIR = path.resolve(__dirname, '..', 'screenshots', 'month-verification');
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
@@ -25,10 +17,7 @@ fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
   let browser;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      ...(EDGE_PATH ? { executablePath: EDGE_PATH } : {})
-    });
+    browser = await launchBrowser({ headless: true });
 
     console.log('\n--- Starting Month VMR Schedule UX Verification Suite ---');
 

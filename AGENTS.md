@@ -105,16 +105,30 @@ The portal uses a zero-runtime-dependency architecture: plain modern ES/browser 
 ## 7. How to Run, Build & Test
 
 ```powershell
-# Install package lock and dependencies
-npm install
+# Repeatable development install (pins playwright-core 1.63.0 development dependency)
+npm ci   # or: npm install
+# Note: Node packages are development-only. The browser binary is resolved from local installed
+# Microsoft Edge, Google Chrome, or an explicit CHROMIUM_PATH environment variable.
 
 # Run native Node unit and integration tests
 npm test
 
-# Fast development gate (build sanity, unit tests, Home 6-theme matrix, operations & console.error check)
+# Targeted feature area check (runs mapped unit + maintained browser suites for fast, focused feedback)
+npm run test:area -- <area>
+# Examples:
+#   npm run test:area -- members      # Directory, cohort grouping, mobile cards, profile onboarding & edit
+#   npm run test:area -- schedule     # Session splitting, timezones, tokens, month UX, tablet matrix, windowing
+#   npm run test:area -- home         # 5-section hierarchy, commitments, birthdays, themes, responsive
+#   npm run test:area -- operations   # Mutations, journal, search, ICS calendar, backup import/export
+#   npm run test:area -- mobile       # 18 routes, dialogs, touch targets, logbook import, admin issues
+#   npm run test:area -- offline      # Service worker boundaries, cache recovery, fallback
+#   npm run test:area -- auth         # HMAC tokens, session cookies, role data scrubbing
+
+# Fast development gate (build sanity, unit tests, Home 6-theme matrix, core operations)
 npm run qa:feature
 
-# Comprehensive QA gate (for significant, shared, security, data, release or PR work)
+# Comprehensive QA gate (runs build, unit tests, and the full maintained browser suite matrix:
+# offline, home, members directory, schedule month UX, operations, tablet matrix, perf windowing, mobile)
 npm run qa:full
 
 # Build static bundle into dist/ (copies the 15 allowlisted assets)
@@ -126,23 +140,23 @@ npm start   # or: npm run dev
 # Compile historical logbook ledger locally (offline utility)
 npm run compile:logbooks
 
-# Granular browser check suites (requires Chromium / Edge CDP)
-npm run test:tablet     # Verifies matrix sticky headers at 768/820/1024px
-npm run test:perf       # Verifies virtual list DOM windowing benchmarks
-npm run test:offline    # Verifies service worker cache rules & recovery
-npm run test:mobile     # Verifies 18 routes across 320–1440px viewports
+# Visual self-QA capture across standard viewports (390×844, 820×900, 1280×800)
+npm run visual:capture -- <Route> [options]
+# Interaction state examples:
+#   npm run visual:capture -- Members --fill "#global-search=rabih" --label "search-filtered"
+#   npm run visual:capture -- "Morning Report" --click ".mr-month-mobile-toggle" --label "accordion-expanded"
 ```
 
 > **QA Workflow Guidelines for Agents:**
 > - **One Consistent QA Policy:**
->   1. **Targeted checks during iteration:** Run tests directly relevant to the feature being changed for fast feedback.
->      Examples:
->      - Members change → relevant Members tests (`tests/members-directory.test.cjs`)
->      - Morning Report change → relevant Morning Report tests (`tests/session-core.test.cjs`, `tests/staffing-tokens.test.cjs`, `tests/ui-operations.test.cjs`)
->      - auth/permissions change → relevant auth/permission tests (`tests/auth.test.cjs`, `tests/auth-permissions.test.cjs`, `tests/sync-auth-filtering.test.cjs`)
->      - sync/mutation change → relevant sync/mutation tests (`tests/mutate.test.cjs`, `tests/sync-contract.test.cjs`, `tests/tier-expansion.test.cjs`)
+>   1. **Targeted checks during iteration:** Run `npm run test:area -- <area>` for tests directly relevant to the feature being changed.
+>      - Members change → `npm run test:area -- members`
+>      - Morning Report change → `npm run test:area -- schedule`
+>      - Operations / Workspace change → `npm run test:area -- operations`
+>      - Auth / Permissions change → `npm run test:area -- auth`
+>      - Offline / Cache change → `npm run test:area -- offline`
 >   2. **Feature QA before completion:** Run `npm run qa:feature` before completing routine or scoped feature work.
->   3. **Comprehensive QA gate:** Run `npm run qa:full` when changes involve significant multi-module refactoring, shared infrastructure, auth/security, data/sync contracts, releases, or PRs. Do not repeat the full suite after every minor edit.
+>   3. **Comprehensive QA gate:** Run `npm run qa:full` when changes involve significant multi-module refactoring, shared infrastructure, auth/security, data/sync contracts, releases, or PRs. Includes maintained coverage for Members and Schedule interactions. Do not repeat the full suite after every minor edit.
 >   4. **Documentation-only tasks:** Do not run browser test suites or visual captures for documentation-only tasks.
 > - **Test Failure Guidance & Test Integrity:**
 >   When tests fail, agents must diagnose the failure, repair any regressions caused by their own changes, rerun relevant checks, and report unrelated failures or genuine blockers. Never weaken, bypass, or delete tests just to obtain a pass.
@@ -151,19 +165,21 @@ npm run test:mobile     # Verifies 18 routes across 320–1440px viewports
 >   1. **Capture standard viewports:** Run `npm run visual:capture -- <Route>` (e.g. `npm run visual:capture -- Home` or `npm run visual:capture -- "Morning Report"`).
 >      Standard checkpoints: 390px (mobile, 390×844), 820px (tablet, 820×900), 1280px (desktop, 1280×800). Screenshots are saved to `screenshots/visual-qa/<Route>-<width>.png`.
 >      *Theme scope:* Standard captures do NOT need to test every theme/mode on ordinary UI changes (the default Emerald Light is sufficient). Additional dark-mode and theme captures (`--mode dark`, `--theme <theme>`) are required only when the change affects colours, tokens, themes, or shared/global styling.
->   2. **Inspect screenshots directly:** The agent must inspect the generated PNG images using available image viewing tools/capabilities to semantically inspect them multimodal—never merely generate them.
->   3. **Semantic visual checklist:**
->      - Horizontal overflow / unwanted sideways scrolling
->      - Clipped, truncated, or hidden content/dialogs
+>   2. **Capture interaction states:** When feature work alters an interactive state (such as an open editor/dialog, filtered search results, expanded card accordion, or error state), the agent must capture that state using the ordered flags (`--click <selector>`, `--fill <selector=val>`, `--wait-for <selector>`, `--label <name>`).
+>   3. **Inspect screenshots directly:** The agent must inspect the generated PNG images using available image viewing tools/capabilities (`view_file`) to semantically inspect them multimodal—never merely generate them. **A successful screenshot write is NOT a visual-quality pass.**
+>   4. **Avoid brittle pixel baselines for changing data:** Do not maintain fragile full-pixel baseline diffs for dynamic schedules; rely on geometric overflow validation, route verification, console error monitoring, and multimodal agent inspection.
+>   5. **Semantic visual checklist:**
+>      - Horizontal overflow / unwanted sideways scrolling (internal table scrolling is valid; page-level scroll is a defect)
+>      - Clipped, truncated, or hidden content/dialogs (dialogs must fit viewport with accessible controls)
 >      - Overlapping elements or awkward text wrapping
 >      - Excessively tall cards/rows or unbalanced dead whitespace
 >      - Poor visual hierarchy or low-contrast text
 >      - Controls cramped, awkward, or unusable on mobile touch screens
 >      - Inconsistent spacing, margins, and alignment
 >      - Obvious theme/dark mode styling issues
->      - Obvious divergence from an approved screenshot or Stitch design reference (inspect reference via the available image-viewing tool or Stitch MCP `get_screen`)
->   4. **Autonomous Self-Healing:** If an obvious/high-confidence visual problem is observed, fix it automatically without asking the user about ordinary CSS/layout decisions. Re-run `npm run qa:feature`, recapture screenshots, and re-inspect until clean.
->   5. Only ask the user if there is a genuine product/design ambiguity with more than one materially different reasonable solution.
+>      - Obvious divergence from an approved screenshot or Stitch design reference
+>   6. **Autonomous Self-Healing:** If an obvious/high-confidence visual problem is observed, fix it automatically without asking the user about ordinary CSS/layout decisions. Re-run `npm run qa:feature`, recapture screenshots, and re-inspect until clean.
+>   7. Only ask the user if there is a genuine product/design ambiguity with more than one materially different reasonable solution.
 
 ---
 

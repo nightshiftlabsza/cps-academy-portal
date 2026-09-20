@@ -5,18 +5,12 @@ const {createServer}=require('../scripts/serve.cjs');
 const core=require('../session-core.js');
 const workbook=require('../workbook.json');
 const {injectAuth}=require('./test-auth-helper.cjs');
+const {launchBrowser}=require('./test-browser-helper.cjs');
 const KEY='cps-hub-workspace-v2';
 (async()=>{
-  let chromium;
-  try {
-    chromium = require('playwright-core').chromium;
-  } catch {
-    console.log('[SKIP] Optional playwright-core not installed. Edge CDP test suites (test:tablet, test:perf, test:offline) provide browser verification.');
-    process.exit(0);
-  }
   const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;
  try{
-  browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{})});
+  browser=await launchBrowser({headless:true});
   const base=`http://127.0.0.1:${server.address().port}`;
   for(const width of [1440,390]){
    const context=await browser.newContext({viewport:{width,height:900},timezoneId:'Africa/Johannesburg',acceptDownloads:true});
