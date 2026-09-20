@@ -20,11 +20,16 @@ The portal uses a zero-runtime-dependency architecture: plain modern ES/browser 
 
 ### Frontend Shell & Modules
 - `index.html`: Main SPA application shell, modals, and templates.
-- `app.js`: Client routes (`#/...`), view controllers, state management, filters, and UI mutations.
+- `app.js`: Main SPA orchestrator, client routes (`#/...`), top/bottom navigation, global workspace state (`workspace`), mutation orchestration (`mutate`), toast alerts, detail dialogs, search orchestration, and integration with `MembersModule` and `MorningReportModule`.
+- `members.js`: Extracted Members directory module (`MembersModule`). Handles directory views (`membersView`, desktop table, mobile cards), sorting/filtering, cohort grouping (Participants, Core team, Leaders, Inactive), birthday calculations and widget (`renderBirthdaysTodayWidget`), and the self-service profile edit dialog. Shares and depends on global state and coordinator functions in `app.js` (including `workspace`, `render`, `navigate`, and date helpers), alongside `Identity` (`identity.js`) and the DOM.
+- `members.css`: Dedicated styles for member tables, cards, cohort groups, birthday banners, and profile edit dialog.
+- `morning-report.js`: Extracted Morning Report schedule module (`MorningReportModule`). Handles Agenda view (`agendaView`), Month view, staffing Matrix view (`matrixView`), compact and editorial session cards, vacancy indicator rails, staffing grid tools/actions, compound schedule filtering, and interactive time picker modal. Tightly integrates with and depends on shared runtime state and functions in `app.js` (including `workspace`, `records`, `mutate`, `render`, `toast`, active filters, and navigation), alongside `SessionCore` (`session-core.js`) and `WindowedList` (`windowed-list.js`).
+- `morning-report.css`: Dedicated styles for Morning Report schedule views, matrix columns, vacancy indicator rails, and the interactive time picker modal.
 - `session-core.js`: Pure, zero-dependency engine for Morning Report splitting, deterministic IDs (`_cps_id`), timezone resolution, date math, and calendar generation (`createCalendar`).
-- `search-core.js`: Search indexing, memoization, and safe highlight snippet extraction (`extractSnippets`).
+- `search-core.js`: Pure search indexing, memoization, and safe highlight snippet extraction (`extractSnippets`).
 - `windowed-list.js`: Virtual list controller windowing large DOM lists (>50 items) into bounded visible rows with top/bottom spacer rows.
 - `identity.js`: Authentication state, member identity matching, and role detection.
+- `logbook.js`: Personal activity logbook views, category filtering, and procedural entry management.
 - `offline.js` & `sw.js`: Service worker caching (`cps-portal-shell-v0.4.0`), offline fallback, and dirty-form protection.
 - `styles.css`: CSS design system supporting dual-axis theming and responsive layouts.
 - `workbook.json`: Canonical versioned snapshot of the Academy workbook data.
@@ -56,17 +61,17 @@ The portal uses a zero-runtime-dependency architecture: plain modern ES/browser 
 
 ## 4. Permissions & Privacy Boundaries
 
-1. **Private Institutional Data:** Real names, internal links, Zoom URLs, and member contact info exist in `workbook.json`. Never make this repo public, publish to GitHub Pages, or transmit data to external services.
+1. **Private Institutional Data:** Real names, internal links, Zoom URLs, and member contact info exist in `workbook.json`. Never make this repo public, publish to GitHub Pages, or transmit data to external services. (Note: While static serving and building redact birthdays from the snapshot, `workbook.json` is currently served as an allowlisted static asset; a separate privacy audit addresses unauthenticated snapshot access and tightening data boundaries.)
 2. **Resource-Level Mutation Rules (`api/mutate.js`):**
    - `Important links` & `OrgStructure`: Modifiable **only** by `admin`.
    - `Members`: Non-admins may **only** update their own record (matching session email or stable ID). Non-admins cannot edit protected administrative fields (`Sponsor`, `Email`, `_cps_id`, `Subspecialty`).
    - `Morning Report` & `CPS Academy VMRs`: Mutable by authenticated `member` and `admin`.
 3. **Static Asset Allowlist Protection:**
-   Only 11 public assets are ever bundled or served:
-   `index.html`, `styles.css`, `session-core.js`, `search-core.js`, `identity.js`, `offline.js`, `logbook.js`, `windowed-list.js`, `app.js`, `workbook.json`, `sw.js`.
-   All other paths (including `historical-contributions.json`, `data/*`, `.env*`, `.git/*`, docs, and credentials) **must 404** on the HTTP server.
+   Only 15 public static assets are bundled into `dist/` or served by the static file handler:
+   `index.html`, `styles.css`, `members.css`, `morning-report.css`, `session-core.js`, `search-core.js`, `identity.js`, `offline.js`, `logbook.js`, `windowed-list.js`, `members.js`, `morning-report.js`, `app.js`, `workbook.json`, `sw.js`.
+   All non-allowlisted static file paths (including `historical-contributions.json`, `data/*`, `.env*`, `.git/*`, docs, and credentials) **must 404** on the HTTP server. (Legitimate `/api/*` endpoints are handled separately by API route dispatchers.)
 4. **Historical Ledger Privacy:**
-   `historical-contributions.json` and compiled ledgers are private institutional accounting records. They are **never** exposed to browser endpoints.
+   `historical-contributions.json` and compiled ledgers are private institutional accounting records. They are **never** exposed to browser endpoints and are blocked by the static allowlist.
 
 ---
 
@@ -103,16 +108,16 @@ The portal uses a zero-runtime-dependency architecture: plain modern ES/browser 
 # Install package lock and dependencies
 npm install
 
-# Run 358 native Node unit and integration tests
+# Run native Node unit and integration tests
 npm test
 
-# Fast development gate (build sanity, 358 unit tests, Home 6-theme matrix, operations & console.error check)
+# Fast development gate (build sanity, unit tests, Home 6-theme matrix, operations & console.error check)
 npm run qa:feature
 
-# Mandatory comprehensive gate before completing any feature or PR
+# Comprehensive QA gate (for significant, shared, security, data, release or PR work)
 npm run qa:full
 
-# Build static bundle into dist/ (copies the 11 allowlisted assets)
+# Build static bundle into dist/ (copies the 15 allowlisted assets)
 npm run build
 
 # Start local dev server at http://127.0.0.1:4173
@@ -129,19 +134,24 @@ npm run test:mobile     # Verifies 18 routes across 320–1440px viewports
 ```
 
 > **QA Workflow Guidelines for Agents:**
-> - Run `npm run qa:feature` during normal development **plus any existing targeted test(s) relevant to the feature being changed**.
->   Examples:
->   - Members change → relevant Members tests (`tests/members-directory.test.cjs`)
->   - Morning Report change → relevant Morning Report tests (`tests/session-core.test.cjs`, `tests/staffing-tokens.test.cjs`, `tests/ui-operations.test.cjs`)
->   - auth/permissions change → relevant auth/permission tests (`tests/auth.test.cjs`, `tests/auth-permissions.test.cjs`, `tests/sync-auth-filtering.test.cjs`)
->   - sync/mutation change → relevant sync/mutation tests (`tests/mutate.test.cjs`, `tests/sync-contract.test.cjs`, `tests/tier-expansion.test.cjs`)
-> - Run `npm run qa:full` as the final comprehensive PASS/FAIL gate before marking any significant feature or PR complete. Failures caused by changes must be fixed before reporting completion.
+> - **One Consistent QA Policy:**
+>   1. **Targeted checks during iteration:** Run tests directly relevant to the feature being changed for fast feedback.
+>      Examples:
+>      - Members change → relevant Members tests (`tests/members-directory.test.cjs`)
+>      - Morning Report change → relevant Morning Report tests (`tests/session-core.test.cjs`, `tests/staffing-tokens.test.cjs`, `tests/ui-operations.test.cjs`)
+>      - auth/permissions change → relevant auth/permission tests (`tests/auth.test.cjs`, `tests/auth-permissions.test.cjs`, `tests/sync-auth-filtering.test.cjs`)
+>      - sync/mutation change → relevant sync/mutation tests (`tests/mutate.test.cjs`, `tests/sync-contract.test.cjs`, `tests/tier-expansion.test.cjs`)
+>   2. **Feature QA before completion:** Run `npm run qa:feature` before completing routine or scoped feature work.
+>   3. **Comprehensive QA gate:** Run `npm run qa:full` when changes involve significant multi-module refactoring, shared infrastructure, auth/security, data/sync contracts, releases, or PRs. Do not repeat the full suite after every minor edit.
+>   4. **Documentation-only tasks:** Do not run browser test suites or visual captures for documentation-only tasks.
+> - **Test Failure Guidance & Test Integrity:**
+>   When tests fail, agents must diagnose the failure, repair any regressions caused by their own changes, rerun relevant checks, and report unrelated failures or genuine blockers. Never weaken, bypass, or delete tests just to obtain a pass.
 > - **Visual Self-QA for UI Changes (MANDATORY):**
 >   For any meaningful UI change, machine tests (`npm run qa:feature`) are the baseline, but visual verification is an additional requirement before handing work back to the user:
 >   1. **Capture standard viewports:** Run `npm run visual:capture -- <Route>` (e.g. `npm run visual:capture -- Home` or `npm run visual:capture -- "Morning Report"`).
 >      Standard checkpoints: 390px (mobile, 390×844), 820px (tablet, 820×900), 1280px (desktop, 1280×800). Screenshots are saved to `screenshots/visual-qa/<Route>-<width>.png`.
 >      *Theme scope:* Standard captures do NOT need to test every theme/mode on ordinary UI changes (the default Emerald Light is sufficient). Additional dark-mode and theme captures (`--mode dark`, `--theme <theme>`) are required only when the change affects colours, tokens, themes, or shared/global styling.
->   2. **Inspect screenshots directly:** The agent must call `view_file` on the generated PNG images to semantically inspect them multimodal—never merely generate them.
+>   2. **Inspect screenshots directly:** The agent must inspect the generated PNG images using available image viewing tools/capabilities to semantically inspect them multimodal—never merely generate them.
 >   3. **Semantic visual checklist:**
 >      - Horizontal overflow / unwanted sideways scrolling
 >      - Clipped, truncated, or hidden content/dialogs
@@ -151,7 +161,7 @@ npm run test:mobile     # Verifies 18 routes across 320–1440px viewports
 >      - Controls cramped, awkward, or unusable on mobile touch screens
 >      - Inconsistent spacing, margins, and alignment
 >      - Obvious theme/dark mode styling issues
->      - Obvious divergence from an approved screenshot or Stitch design reference (inspect reference via `view_file` or Stitch MCP `get_screen`)
+>      - Obvious divergence from an approved screenshot or Stitch design reference (inspect reference via the available image-viewing tool or Stitch MCP `get_screen`)
 >   4. **Autonomous Self-Healing:** If an obvious/high-confidence visual problem is observed, fix it automatically without asking the user about ordinary CSS/layout decisions. Re-run `npm run qa:feature`, recapture screenshots, and re-inspect until clean.
 >   5. Only ask the user if there is a genuine product/design ambiguity with more than one materially different reasonable solution.
 
@@ -207,13 +217,13 @@ npm run test:mobile     # Verifies 18 routes across 320–1440px viewports
 
 A feature or change is considered **Done** only when all of the following pass:
 1. **Scope respected:** The implementation matches the agreed task/acceptance criteria and contains no unrelated changes. A plan is required only for risky/shared/ambiguous work as defined elsewhere in AGENTS.md.
-2. **Fast QA Gate:** `npm run qa:feature` (plus any relevant targeted tests for the changed feature) passes cleanly during iterative development.
-3. **Comprehensive QA Gate:** `npm run qa:full` passes cleanly with 0 failures before marking the task complete. Any failures introduced by changes must be diagnosed and resolved.
-4. **Static Build Passes:** `npm run build` succeeds and copies exactly the 11 allowlisted assets into `dist/`.
-5. **No Security Leaks:** Static server rejects sensitive files (`historical-contributions.json`, `.env`, credentials) with 404.
+2. **Targeted & Feature QA Passes:** Targeted tests relevant to the changed modules pass, and `npm run qa:feature` passes cleanly before completing routine or scoped feature work.
+3. **Comprehensive QA Gate (when applicable):** `npm run qa:full` passes cleanly with 0 failures before completing significant, shared, security, data, release, or PR work. (Not required for routine scoped fixes or documentation-only updates.)
+4. **Static Build Passes:** `npm run build` succeeds and copies exactly the 15 allowlisted assets into `dist/`.
+5. **Static File Protection:** Non-allowlisted static file paths (`historical-contributions.json`, `.env`, credentials) return 404.
 6. **No Regressions:** Mobile viewports (320px–430px) and dark/light modes remain functional without horizontal scroll blowouts.
-7. **Visual Self-QA Passed (for UI changes):** Standard viewports (390px, 820px, 1280px) captured via `npm run visual:capture`, inspected by the agent via `view_file`, and confirmed free of clipping, overflow, awkward wrapping, unusable touch targets, or poor hierarchy.
-8. **Clean Git Status:** Completed work merged cleanly into `main`, short-lived task branches deleted, and working tree left clean with all tests passing.
+7. **Visual Self-QA Passed (for UI changes):** Standard viewports (390px, 820px, 1280px) captured via `npm run visual:capture`, inspected by the agent using an available image viewing tool, and confirmed free of clipping, overflow, awkward wrapping, unusable touch targets, or poor hierarchy.
+8. **Clean Git Status:** Completed work merged cleanly into `main`, short-lived task branches deleted, and working tree left clean with relevant tests passing.
 
 ---
 
@@ -225,9 +235,9 @@ To protect `main` without creating administrative clutter, agents must follow th
 1. **Create a task branch:** Before editing code, branch off the current `main` into a short-lived task branch (e.g. `git checkout -b task/<short-description>`). The sole purpose is keeping `main` as the known-good version while work is in flight.
 2. **Implement & test:** Make the code changes on that branch.
 3. **Run targeted tests:** Execute existing or new tests relevant to the changed modules.
-4. **Run fast gate:** Execute `npm run qa:feature`.
-5. **Visual self-QA (for UI changes):** Run `npm run visual:capture -- <Route>` and inspect screenshots via `view_file`. Fix any detected visual defects.
-6. **Comprehensive gate:** Run `npm run qa:full` when the change is substantial enough to justify it.
+4. **Run feature gate:** Execute `npm run qa:feature`.
+5. **Visual self-QA (for UI changes):** Run `npm run visual:capture -- <Route>` and inspect screenshots using the available image viewing tool. Fix any detected visual defects.
+6. **Comprehensive gate:** Run `npm run qa:full` when the change is substantial enough to justify it (e.g. significant, shared, security, data, release or PR work). Documentation-only tasks do not require browser test runs or visual captures.
 7. **Merge to `main`:** Once everything passes and the change is low-risk, merge back into `main`.
 8. **Delete task branch:** Immediately delete the local task branch. Do not leave stale branches behind.
 

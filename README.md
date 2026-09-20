@@ -19,7 +19,7 @@ Open http://127.0.0.1:4173 in your browser. Stop with Ctrl+C. No application dep
 npm run build
 ```
 
-Copies the five site assets into `dist/`. It does not deploy anything. The development server binds only to this computer and intentionally does not expose Git files, secrets, original uploads or the historical contributions ledger.
+Copies the 15 site assets into `dist/`. It does not deploy anything. The development server binds only to this computer and intentionally does not expose non-allowlisted static file paths like Git files, secrets, original uploads or the historical contributions ledger.
 
 ## Optional real browser checks
 
@@ -36,12 +36,21 @@ The mobile suite covers all 18 sections at 320, 360, 390, 430, 820 and 1440 pixe
 
 ## Stack and structure
 - `index.html`: page shell and dialogs.
-- `app.js`: views, navigation, filtering, editing, backups and date handling.
+- `styles.css`: shared desktop/mobile design system and theme tokens.
+- `members.css`: styling for member directory, cards, cohort groups, and profile dialog.
+- `morning-report.css`: styling for morning report views, agenda cards, matrix, and time picker.
 - `session-core.js`: shared, zero-dependency session splitting, timezone resolution, calendar generation and compound filtering.
-- `styles.css`: shared desktop/mobile design.
+- `search-core.js`: search indexing, memoization, and safe highlight snippet extraction.
+- `identity.js`: authentication state, member identity matching, and role detection.
+- `offline.js` & `sw.js`: service worker caching (`cps-portal-shell-v0.4.0`), offline fallback, and dirty-form protection.
+- `logbook.js`: personal activity logbook rendering, category filtering, and procedural entry tracking.
+- `windowed-list.js`: virtual list controller windowing large DOM lists (>50 items) into bounded visible rows with spacer rows.
+- `members.js`: members directory views, search/sorting, cohort classification, birthday widgets, and profile edit dialog (`MembersModule`). Shares and depends on global state and functions in `app.js` (`workspace`, `render`, date helpers).
+- `morning-report.js`: morning report views (agenda, month, matrix), staffing grid/tools, compound session filters, and time picker (`MorningReportModule`). Shares and depends on global state and functions in `app.js` (`workspace`, `records`, `mutate`, `render`, active filters).
+- `app.js`: main application shell, client routing (`#/...`), top/bottom navigation, global state, search orchestration, and integration of feature modules.
 - `workbook.json`: real private workbook snapshot, including private links; intentionally versioned in this private repository.
 - `scripts/`: local server, static build and targeted import refinement.
-- `tests/`: basic validation and browser workflow checks.
+- `tests/`: native unit tests and optional browser workflow checks.
 - `.openai/hosting.json`: existing Sites project identity/configuration. Preserve it.
 - `AGENTS.md` / `CLAUDE.md`: shared instructions for coding agents.
 
